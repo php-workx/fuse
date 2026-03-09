@@ -1,0 +1,8 @@
+# AgentOps session artifacts
+.agents/
+
+# Build artifacts
+fuse
+
+# Firebase
+firebase-debug.log
