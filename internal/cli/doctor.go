@@ -309,7 +309,7 @@ func checkSQLiteDB() checkResult {
 			detail: fmt.Sprintf("error opening database: %v", err),
 		}
 	}
-	database.Close()
+	_ = database.Close()
 
 	return checkResult{
 		name:   "SQLite database",
@@ -360,8 +360,11 @@ func checkLiveClassification() checkResult {
 	var evaluator core.PolicyEvaluator
 	policyPath := config.PolicyPath()
 	if _, err := os.Stat(policyPath); err == nil {
-		pol, err := policy.LoadPolicy(policyPath)
-		if err == nil {
+		pol, loadErr := policy.LoadPolicy(policyPath)
+		if loadErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: policy.yaml exists but failed to parse: %v\n", loadErr)
+		}
+		if pol != nil {
 			evaluator = policy.NewEvaluator(pol)
 		}
 	}

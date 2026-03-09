@@ -27,10 +27,13 @@ func OpenDB(path string) (*DB, error) {
 		}
 	}
 
-	// If the file already exists, ensure its permissions are correct.
-	if fileExists(path) {
-		_ = os.Chmod(path, 0600)
+	// Create the file with correct permissions atomically (avoids TOCTOU race).
+	// If the file already exists, this is a no-op; if new, it's created with 0600.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return nil, fmt.Errorf("create database file: %w", err)
 	}
+	_ = f.Close()
 
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -39,32 +42,26 @@ func OpenDB(path string) (*DB, error) {
 
 	// Enable WAL mode for better concurrency.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("enable WAL mode: %w", err)
 	}
 
 	// Set busy timeout so concurrent writers wait instead of failing.
 	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("set busy timeout: %w", err)
 	}
 
 	// Enable foreign key enforcement.
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	// Run schema migrations.
 	if err := migrate(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("run migrations: %w", err)
-	}
-
-	// If this is a newly created file, set permissions.
-	if err := os.Chmod(path, 0600); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("set database permissions: %w", err)
 	}
 
 	return &DB{db: db}, nil
@@ -76,12 +73,6 @@ func (d *DB) Close() error {
 		return nil
 	}
 	return d.db.Close()
-}
-
-// fileExists reports whether a file exists at path.
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 // parentDir returns the parent directory of path.

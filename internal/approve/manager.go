@@ -16,11 +16,15 @@ type Manager struct {
 }
 
 // NewManager creates a new approval Manager.
-func NewManager(database *db.DB, secret []byte) *Manager {
+// Secret must be exactly 32 bytes (the HMAC-SHA256 key size).
+func NewManager(database *db.DB, secret []byte) (*Manager, error) {
+	if len(secret) != 32 {
+		return nil, fmt.Errorf("secret must be exactly 32 bytes, got %d", len(secret))
+	}
 	return &Manager{
 		db:     database,
 		secret: secret,
-	}
+	}, nil
 }
 
 // scopeExpiry returns the expiration time for a given scope, or nil for

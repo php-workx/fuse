@@ -122,7 +122,7 @@ func TestIntegration_FileInspection(t *testing.T) {
 	t.Run("dangerous boto3 script detected at pipeline level", func(t *testing.T) {
 		req := core.ShellRequest{
 			RawCommand: "python dangerous_boto3.py",
-			Cwd:        filepath.Join(testdataScriptsDir()),
+			Cwd:        testdataScriptsDir(),
 			Source:     "test",
 			SessionID:  "integ-test",
 		}
@@ -209,7 +209,10 @@ func TestIntegration_ApprovalLifecycle(t *testing.T) {
 	defer database.Close()
 
 	secret := []byte("integration-test-secret-32bytes!")
-	mgr := approve.NewManager(database, secret)
+	mgr, mgrErr := approve.NewManager(database, secret)
+	if mgrErr != nil {
+		t.Fatalf("NewManager failed: %v", mgrErr)
+	}
 
 	decisionKey := "integ-test-decision-key"
 	sessionID := "integ-session-001"
@@ -566,7 +569,10 @@ func TestIntegration_InvalidHMACRejected(t *testing.T) {
 	defer database.Close()
 
 	secret := []byte("integration-test-secret-32bytes!")
-	mgr := approve.NewManager(database, secret)
+	mgr, mgrErr := approve.NewManager(database, secret)
+	if mgrErr != nil {
+		t.Fatalf("NewManager failed: %v", mgrErr)
+	}
 
 	decisionKey := "hmac-integ-key"
 	sessionID := "session-hmac"
@@ -579,7 +585,10 @@ func TestIntegration_InvalidHMACRejected(t *testing.T) {
 
 	// Try to consume with a different secret (simulates tampering).
 	wrongSecret := []byte("wrong-secret-key-32-bytes-long!!")
-	tampered := approve.NewManager(database, wrongSecret)
+	tampered, tamperErr := approve.NewManager(database, wrongSecret)
+	if tamperErr != nil {
+		t.Fatalf("NewManager with wrong secret failed: %v", tamperErr)
+	}
 
 	_, err = tampered.ConsumeApproval(decisionKey, sessionID)
 	if err == nil {

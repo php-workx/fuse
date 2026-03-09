@@ -18,7 +18,11 @@ func setupTestManager(t *testing.T) *Manager {
 	t.Cleanup(func() { database.Close() })
 
 	secret := []byte("test-secret-key-32-bytes-long!!!")
-	return NewManager(database, secret)
+	mgr, err := NewManager(database, secret)
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	return mgr
 }
 
 func TestCreateAndConsume(t *testing.T) {
@@ -105,7 +109,10 @@ func TestConsume_InvalidHMAC(t *testing.T) {
 
 	// Now create a new manager with a different secret to simulate tampering.
 	differentSecret := []byte("different-secret-key-32-bytes!!!")
-	tampered := NewManager(m.db, differentSecret)
+	tampered, tampErr := NewManager(m.db, differentSecret)
+	if tampErr != nil {
+		t.Fatalf("NewManager with different secret failed: %v", tampErr)
+	}
 
 	// Consuming with the wrong secret should fail HMAC verification.
 	_, err = tampered.ConsumeApproval(decisionKey, sessionID)
@@ -122,12 +129,22 @@ func TestNewManager(t *testing.T) {
 	}
 	defer database.Close()
 
-	secret := []byte("my-secret")
-	mgr := NewManager(database, secret)
+	// Valid 32-byte secret should succeed.
+	secret := []byte("valid-secret-key-32-bytes-long!!")
+	mgr, err := NewManager(database, secret)
+	if err != nil {
+		t.Fatalf("NewManager failed with valid secret: %v", err)
+	}
 	if mgr == nil {
 		t.Fatal("NewManager returned nil")
 	}
 	if mgr.db != database {
 		t.Fatal("NewManager did not store database reference")
+	}
+
+	// Invalid length secret should fail.
+	_, err = NewManager(database, []byte("too-short"))
+	if err == nil {
+		t.Fatal("expected error for short secret, got nil")
 	}
 }

@@ -11,9 +11,9 @@ import (
 
 // Compiled regexes for DisplayNormalize.
 var (
-	reNullBytes       = regexp.MustCompile(`\x00`)
-	reANSIEscape      = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-	reInternalWS      = regexp.MustCompile(`[ \t]+`)
+	reNullBytes  = regexp.MustCompile(`\x00`)
+	reANSIEscape = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+	reInternalWS = regexp.MustCompile(`[ \t]+`)
 )
 
 // wrapperBinaries is the set of known wrapper/prefix commands that should be
@@ -631,6 +631,9 @@ func extractSSHRemoteCommand(tokens []string, i int) (string, bool) {
 		t := tokens[j]
 
 		if sshFlagsWithArg[t] {
+			if j+1 >= len(tokens) {
+				break
+			}
 			j += 2
 			continue
 		}

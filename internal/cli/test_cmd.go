@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/runger/fuse/internal/config"
@@ -94,7 +95,7 @@ func runTestInspect(path string) error {
 
 	// Resolve relative path.
 	if !isAbsPath(path) && cwd != "" {
-		path = cwd + "/" + path
+		path = filepath.Join(cwd, path)
 	}
 
 	inspection, err := core.InspectFile(path, core.DefaultMaxBytes)
