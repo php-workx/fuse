@@ -106,12 +106,13 @@ var sensitiveEnvPrefixes = []string{
 func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, error) {
 	result := &ClassifyResult{}
 
-	// Step 1: Input validation — reject if > 64 KB or contains null bytes.
+	// Step 1: Input validation — oversized commands are fail-closed APPROVAL.
 	if len(req.RawCommand) > maxInputSize {
-		return nil, fmt.Errorf("command exceeds maximum size of %d bytes", maxInputSize)
-	}
-	if strings.ContainsRune(req.RawCommand, '\x00') {
-		return nil, fmt.Errorf("command contains null bytes")
+		displayNorm := DisplayNormalize(req.RawCommand)
+		result.Decision = DecisionApproval
+		result.Reason = fmt.Sprintf("command exceeds maximum size of %d bytes", maxInputSize)
+		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
+		return result, nil
 	}
 
 	// Step 2: Display normalize.
@@ -268,10 +269,13 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 		}
 
 		// Layer 3: Built-in preset rules.
-		if d, reason, ruleID := evaluator.EvaluateBuiltins(sanitized); d != "" {
-			return d, reason, ruleID
+			if d, reason, ruleID := evaluator.EvaluateBuiltins(sanitized); d != "" {
+				if isInspectTriggerRule(ruleID) && fileInspection != nil {
+					return fileInspection.Decision, fileInspection.Reason, ""
+				}
+				return d, reason, ruleID
+			}
 		}
-	}
 
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
@@ -407,4 +411,13 @@ func isLetter(r rune) bool {
 
 func isDigit(r rune) bool {
 	return r >= '0' && r <= '9'
+}
+
+func isInspectTriggerRule(ruleID string) bool {
+	switch ruleID {
+	case "builtin:interp:python-file", "builtin:interp:node-file", "builtin:interp:bash-file":
+		return true
+	default:
+		return false
+	}
 }

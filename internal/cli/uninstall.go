@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"regexp"
+	"strings"
 
 	"github.com/runger/fuse/internal/config"
 	"github.com/spf13/cobra"
@@ -17,6 +19,9 @@ var uninstallCmd = &cobra.Command{
 		// Step 1: Remove fuse hook entries from Claude Code settings.json.
 		if err := uninstallClaude(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not clean Claude Code settings: %v\n", err)
+		}
+		if err := uninstallCodex(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not clean Codex config: %v\n", err)
 		}
 
 		// Step 2: With --purge, remove ~/.fuse/ entirely.
@@ -135,4 +140,37 @@ func removeFuseHook(settings map[string]interface{}) bool {
 	}
 
 	return modified
+}
+
+func uninstallCodex() error {
+	configPath := codexConfigPath()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	cleaned := removeCodexIntegration(string(data))
+	if cleaned == string(data) {
+		return nil
+	}
+	return os.WriteFile(configPath, []byte(cleaned), 0644)
+}
+
+func removeCodexIntegration(existing string) string {
+	header := "[mcp_servers.fuse-shell]\n"
+	start := strings.Index(existing, header)
+	if start >= 0 {
+		end := nextTOMLSectionBoundary(existing, start+len(header))
+		existing = existing[:start] + existing[end:]
+	}
+
+	featuresRe := regexp.MustCompile(`(?m)^shell_tool\s*=\s*false\s*$`)
+	existing = featuresRe.ReplaceAllString(existing, "")
+
+	blankLines := regexp.MustCompile(`\n{3,}`)
+	existing = blankLines.ReplaceAllString(existing, "\n\n")
+	return strings.TrimSpace(existing) + "\n"
 }

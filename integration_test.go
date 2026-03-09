@@ -89,12 +89,11 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 		stderr := &bytes.Buffer{}
 
 		exitCode := adapters.RunHook(stdin, stderr)
-		// In v1, destructive MCP tools are auto-allowed with CAUTION message.
-		if exitCode != 0 {
-			t.Errorf("expected exit code 0 for MCP delete (auto-allow in v1), got %d; stderr: %s", exitCode, stderr.String())
+		if exitCode != 2 {
+			t.Errorf("expected exit code 2 for MCP delete without interactive approval, got %d; stderr: %s", exitCode, stderr.String())
 		}
-		if !strings.Contains(stderr.String(), "CAUTION") {
-			t.Errorf("expected stderr to contain CAUTION for destructive MCP tool, got: %s", stderr.String())
+		if !strings.Contains(stderr.String(), "NON_INTERACTIVE_MODE") && !strings.Contains(stderr.String(), "USER_DENIED") && !strings.Contains(stderr.String(), "TIMEOUT_WAITING_FOR_USER") {
+			t.Errorf("expected stderr to contain approval denial directive, got: %s", stderr.String())
 		}
 	})
 
@@ -130,10 +129,8 @@ func TestIntegration_FileInspection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("classify error: %v", err)
 		}
-		// Built-in rule for "python X.py" triggers CAUTION at minimum.
-		// The pipeline may escalate further depending on file inspection ordering.
-		if result.Decision == core.DecisionSafe {
-			t.Errorf("expected at least CAUTION for python script execution, got %s (reason: %s)", result.Decision, result.Reason)
+		if result.Decision != core.DecisionApproval {
+			t.Errorf("expected APPROVAL for dangerous python script execution, got %s (reason: %s)", result.Decision, result.Reason)
 		}
 	})
 
@@ -180,10 +177,8 @@ func TestIntegration_FileInspection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("classify error: %v", err)
 		}
-		// Built-in rule for "python X.py" matches before file inspection,
-		// so we get at least CAUTION.
-		if result.Decision == core.DecisionSafe {
-			t.Errorf("expected at least CAUTION for python with missing file, got %s (reason: %s)", result.Decision, result.Reason)
+		if result.Decision != core.DecisionApproval {
+			t.Errorf("expected APPROVAL for python with missing file, got %s (reason: %s)", result.Decision, result.Reason)
 		}
 	})
 }

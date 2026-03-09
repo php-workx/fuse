@@ -81,23 +81,26 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 	defer func() { _ = f.Close() }()
 
 	var content []byte
+	hasher := sha256.New()
 	if truncated {
 		content = make([]byte, maxBytes)
-		n, readErr := io.ReadFull(f, content)
+		n, readErr := io.ReadFull(io.TeeReader(f, hasher), content)
 		if readErr != nil && readErr != io.ErrUnexpectedEOF {
 			return nil, readErr
 		}
 		content = content[:n]
+		if _, err := io.Copy(hasher, f); err != nil {
+			return nil, err
+		}
 	} else {
-		content, err = io.ReadAll(f)
+		content, err = io.ReadAll(io.TeeReader(f, hasher))
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	// 5. Compute SHA-256 hash of content read.
-	hash := sha256.Sum256(content)
-	result.Hash = hex.EncodeToString(hash[:])
+	// 5. Compute SHA-256 hash of full file content.
+	result.Hash = hex.EncodeToString(hasher.Sum(nil))
 
 	// 6. Determine file type from extension and dispatch to scanner.
 	ext := strings.ToLower(filepath.Ext(resolved))
@@ -201,7 +204,7 @@ func DetectReferencedFile(subCommand string) string {
 	case "perl":
 		return extractFile(args, []string{".pl"}, []string{"-e"})
 	default:
-		return ""
+		return detectExecutablePath(parts[0])
 	}
 }
 
@@ -239,4 +242,21 @@ func extractFile(args []string, exts []string, scriptlessFlags []string) string 
 	}
 
 	return ""
+}
+
+func detectExecutablePath(path string) string {
+	if path == "" {
+		return ""
+	}
+	if !strings.Contains(path, "/") {
+		return ""
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return ""
+	}
+	if info.Mode()&0o111 == 0 {
+		return ""
+	}
+	return path
 }

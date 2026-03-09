@@ -2,8 +2,13 @@ package adapters
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/runger/fuse/internal/core"
+	"github.com/runger/fuse/internal/policy"
 )
 
 func TestBuildChildEnv(t *testing.T) {
@@ -157,11 +162,39 @@ func TestExecuteCommand_SafeCommand(t *testing.T) {
 	os.Setenv("HOME", tmpDir)
 	defer os.Setenv("HOME", origHome)
 
-	exitCode, err := ExecuteCommand("echo hello", tmpDir)
+	exitCode, err := ExecuteCommand("echo hello", tmpDir, time.Minute)
 	if err != nil {
 		t.Fatalf("ExecuteCommand returned error: %v", err)
 	}
 	if exitCode != 0 {
 		t.Errorf("exit code = %d, want 0", exitCode)
+	}
+}
+
+func TestReverifyDecisionKeyDetectsChangedScript(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "task.py")
+	if err := os.WriteFile(scriptPath, []byte("print('safe')\n"), 0644); err != nil {
+		t.Fatalf("failed to write script: %v", err)
+	}
+
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "python task.py",
+		Cwd:        tmpDir,
+		Source:     "run",
+	}
+
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("initial classify failed: %v", err)
+	}
+
+	if err := os.WriteFile(scriptPath, []byte("import boto3\nboto3.client('cloudformation').delete_stack(StackName='prod')\n"), 0644); err != nil {
+		t.Fatalf("failed to modify script: %v", err)
+	}
+
+	if err := reverifyDecisionKey(req, evaluator, result.DecisionKey); err == nil {
+		t.Fatal("expected reverifyDecisionKey to detect modified script")
 	}
 }

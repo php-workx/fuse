@@ -1,12 +1,14 @@
 package adapters
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -106,7 +108,7 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 
 // ExecuteCommand classifies and optionally runs a shell command.
 // In run mode, it: classify -> prompt if needed -> execute with safety controls.
-func ExecuteCommand(command string, cwd string) (exitCode int, err error) {
+func ExecuteCommand(command string, cwd string, timeout time.Duration) (exitCode int, err error) {
 	// Load configuration.
 	cfg, err := config.LoadConfig(config.ConfigPath())
 	if err != nil {
@@ -117,7 +119,7 @@ func ExecuteCommand(command string, cwd string) (exitCode int, err error) {
 
 	// Check if fuse is disabled (allow-all mode).
 	if config.IsDisabled() {
-		return executeShellCommand(command, cwd)
+		return executeShellCommand(command, cwd, timeout)
 	}
 
 	// Load policy.
@@ -188,8 +190,12 @@ func ExecuteCommand(command string, cwd string) (exitCode int, err error) {
 		}
 	}
 
+	if err := reverifyDecisionKey(req, evaluator, result.DecisionKey); err != nil {
+		return 1, err
+	}
+
 	// Execute the command.
-	exitCode, err = executeShellCommand(command, cwd)
+	exitCode, err = executeShellCommand(command, cwd, timeout)
 
 	// Log event.
 	outcome := "executed"
@@ -206,9 +212,27 @@ func ExecuteCommand(command string, cwd string) (exitCode int, err error) {
 	return exitCode, err
 }
 
+func reverifyDecisionKey(req core.ShellRequest, evaluator core.PolicyEvaluator, expected string) error {
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		return fmt.Errorf("reverify classification: %w", err)
+	}
+	if result.DecisionKey != expected {
+		return fmt.Errorf("command changed after approval or inspection; reclassification required")
+	}
+	return nil
+}
+
 // executeShellCommand runs a shell command with safety controls (§10.1).
-func executeShellCommand(command string, cwd string) (int, error) {
-	cmd := exec.Command("/bin/sh", "-c", command)
+func executeShellCommand(command string, cwd string, timeout time.Duration) (int, error) {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = cwd
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout

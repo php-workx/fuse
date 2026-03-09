@@ -85,7 +85,7 @@ func (m *Manager) RequestApproval(decisionKey, command, reason string, sessionID
 // CreateApproval stores a new signed approval record.
 func (m *Manager) CreateApproval(decisionKey, decision, scope, sessionID string) error {
 	id := uuid.New().String()
-	mac := SignApproval(m.secret, decisionKey, decision, scope)
+	mac := SignApproval(m.secret, id, decisionKey)
 	expiresAt := scopeExpiry(scope)
 
 	return m.db.CreateApproval(id, decisionKey, decision, scope, sessionID, mac, expiresAt)
@@ -103,7 +103,7 @@ func (m *Manager) ConsumeApproval(decisionKey, sessionID string) (core.Decision,
 	}
 
 	// Verify HMAC integrity before trusting the record.
-	if !VerifyApproval(m.secret, approval.DecisionKey, approval.Decision, approval.Scope, approval.HMAC) {
+	if !VerifyApproval(m.secret, approval.ID, approval.DecisionKey, approval.HMAC) {
 		return "", fmt.Errorf("approval HMAC verification failed (possible tampering)")
 	}
 

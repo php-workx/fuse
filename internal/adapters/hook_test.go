@@ -95,14 +95,13 @@ func TestRunHook_MCP_DestructiveAction(t *testing.T) {
 
 	exitCode := RunHook(stdin, stderr)
 
-	// delete_ prefix triggers APPROVAL, which in v1 auto-allows with CAUTION message.
-	if exitCode != 0 {
-		t.Errorf("expected exit code 0 for MCP approval tool (auto-allow in v1), got %d", exitCode)
+	if exitCode != 2 {
+		t.Errorf("expected exit code 2 for MCP approval tool without interactive tty, got %d", exitCode)
 	}
 
 	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "CAUTION") {
-		t.Errorf("expected stderr to contain CAUTION for destructive MCP tool, got: %s", stderrStr)
+	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") && !strings.Contains(stderrStr, "USER_DENIED") && !strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
+		t.Errorf("expected stderr to contain an approval-denial directive, got: %s", stderrStr)
 	}
 }
 

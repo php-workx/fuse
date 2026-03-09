@@ -252,6 +252,29 @@ func TestInspectFile_Truncated(t *testing.T) {
 	}
 }
 
+func TestInspectFile_TruncatedHashUsesFullContent(t *testing.T) {
+	tmpDir := t.TempDir()
+	pyFile := filepath.Join(tmpDir, "big_hash.py")
+	content := []byte(strings.Repeat("print('hello world')\n", 128))
+	if err := os.WriteFile(pyFile, content, 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	expected := sha256.Sum256(content)
+	expectedHex := hex.EncodeToString(expected[:])
+
+	result, err := InspectFile(pyFile, 64)
+	if err != nil {
+		t.Fatalf("InspectFile returned error: %v", err)
+	}
+	if !result.Truncated {
+		t.Fatal("expected truncated result")
+	}
+	if result.Hash != expectedHex {
+		t.Fatalf("expected full-content hash %s, got %s", expectedHex, result.Hash)
+	}
+}
+
 // --- DetectReferencedFile tests ---
 
 func TestDetectReferencedFile(t *testing.T) {
@@ -334,6 +357,19 @@ func TestDetectReferencedFile(t *testing.T) {
 				t.Errorf("DetectReferencedFile(%q) = %q, want %q", tt.command, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestDetectReferencedFile_DirectExecutablePath(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "run.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho hi\n"), 0755); err != nil {
+		t.Fatalf("failed to create script: %v", err)
+	}
+
+	got := DetectReferencedFile(scriptPath)
+	if got != scriptPath {
+		t.Fatalf("DetectReferencedFile(%q) = %q, want %q", scriptPath, got, scriptPath)
 	}
 }
 

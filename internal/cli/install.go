@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -19,9 +21,7 @@ var installCmd = &cobra.Command{
 		case "claude":
 			return installClaude()
 		case "codex":
-			fmt.Println("Codex integration is not yet implemented.")
-			fmt.Println("This will be available in a future release.")
-			return nil
+			return installCodex()
 		default:
 			return fmt.Errorf("unknown install target %q (supported: claude, codex)", target)
 		}
@@ -228,4 +228,90 @@ func writeJSONFile(path string, data map[string]interface{}) error {
 	}
 	out = append(out, '\n')
 	return os.WriteFile(path, out, 0644)
+}
+
+func codexConfigPath() string {
+	if home := os.Getenv("CODEX_HOME"); home != "" {
+		return filepath.Join(home, "config.toml")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(os.TempDir(), ".codex", "config.toml")
+	}
+	return filepath.Join(home, ".codex", "config.toml")
+}
+
+func installCodex() error {
+	configPath := codexConfigPath()
+	existing, err := os.ReadFile(configPath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("reading %s: %w", configPath, err)
+	}
+
+	updated := mergeCodexConfig(string(existing))
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		return fmt.Errorf("creating directory %s: %w", filepath.Dir(configPath), err)
+	}
+	if err := os.WriteFile(configPath, []byte(updated), 0644); err != nil {
+		return fmt.Errorf("writing %s: %w", configPath, err)
+	}
+
+	fmt.Printf("fuse Codex MCP server installed in %s\n", configPath)
+	return nil
+}
+
+func mergeCodexConfig(existing string) string {
+	result := strings.TrimSpace(existing)
+	result = upsertTOMLAssignment(result, `(?ms)^\[features\]\n(?:[^\[]*\n)?`, "[features]\n", "shell_tool = false")
+	result = upsertTOMLSection(result, "[mcp_servers.fuse-shell]", `command = "fuse"`+"\n"+`args = ["proxy", "codex-shell"]`)
+	if !strings.HasSuffix(result, "\n") {
+		result += "\n"
+	}
+	return result
+}
+
+func upsertTOMLAssignment(existing, sectionPattern, sectionHeader, assignment string) string {
+	sectionRe := regexp.MustCompile(sectionPattern)
+	loc := sectionRe.FindStringIndex(existing)
+	if loc == nil {
+		if existing != "" {
+			existing += "\n\n"
+		}
+		return existing + sectionHeader + assignment + "\n"
+	}
+
+	start := loc[0]
+	sectionEnd := nextTOMLSectionBoundary(existing, loc[1])
+	section := existing[start:sectionEnd]
+	assignRe := regexp.MustCompile(`(?m)^shell_tool\s*=.*$`)
+	if assignRe.MatchString(section) {
+		section = assignRe.ReplaceAllString(section, assignment)
+	} else {
+		section = strings.TrimRight(section, "\n") + "\n" + assignment + "\n"
+	}
+	return existing[:start] + section + existing[sectionEnd:]
+}
+
+func upsertTOMLSection(existing, header, body string) string {
+	replacement := header + "\n" + body + "\n"
+	start := strings.Index(existing, header+"\n")
+	if start >= 0 {
+		end := nextTOMLSectionBoundary(existing, start+len(header)+1)
+		return existing[:start] + replacement + existing[end:]
+	}
+	if existing != "" {
+		existing += "\n\n"
+	}
+	return existing + replacement
+}
+
+func nextTOMLSectionBoundary(s string, from int) int {
+	if from >= len(s) {
+		return len(s)
+	}
+	re := regexp.MustCompile(`(?m)^\[`)
+	if loc := re.FindStringIndex(s[from:]); loc != nil {
+		return from + loc[0]
+	}
+	return len(s)
 }

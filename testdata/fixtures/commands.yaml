@@ -499,8 +499,8 @@ fixtures:
   # Missing referenced file test
   # =======================================================================
   - command: "bash missing.sh"
-    expected: "CAUTION"
-    description: "missing referenced script (builtin:interp:bash-file CAUTION fires first)"
+    expected: "APPROVAL"
+    description: "missing referenced script requires approval"
 
   # =======================================================================
   # Additional edge case: empty command

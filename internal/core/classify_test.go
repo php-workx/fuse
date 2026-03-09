@@ -106,12 +106,12 @@ func TestClassify_InputValidation_TooLong(t *testing.T) {
 		Source:     "test",
 		SessionID:  "test-session",
 	}
-	_, err := core.Classify(req, evaluator)
-	if err == nil {
-		t.Fatal("expected error for command exceeding 64 KB, got nil")
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("expected oversized command to classify without error, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "maximum size") {
-		t.Errorf("expected 'maximum size' in error, got: %v", err)
+	if result.Decision != core.DecisionApproval {
+		t.Fatalf("expected oversized command to require APPROVAL, got %s", result.Decision)
 	}
 }
 
@@ -124,12 +124,12 @@ func TestClassify_InputValidation_NullBytes(t *testing.T) {
 		Source:     "test",
 		SessionID:  "test-session",
 	}
-	_, err := core.Classify(req, evaluator)
-	if err == nil {
-		t.Fatal("expected error for null bytes, got nil")
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("expected null bytes to be normalized away, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "null bytes") {
-		t.Errorf("expected 'null bytes' in error, got: %v", err)
+	if result.Decision != core.DecisionSafe {
+		t.Fatalf("expected null-byte command to remain SAFE after normalization, got %s", result.Decision)
 	}
 }
 
@@ -249,5 +249,41 @@ func TestClassify_SensitiveEnvVars(t *testing.T) {
 					tt.command, result.Decision, tt.expected, result.Reason)
 			}
 		})
+	}
+}
+
+func TestClassify_InterpreterBackedDangerousScriptUsesInspectionResult(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	req := core.ShellRequest{
+		RawCommand: "python dangerous_boto3.py",
+		Cwd:        "../../testdata/scripts",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionApproval {
+		t.Fatalf("expected dangerous script execution to require APPROVAL, got %s (reason: %s)", result.Decision, result.Reason)
+	}
+}
+
+func TestClassify_InterpreterBackedMissingScriptRequiresApproval(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	req := core.ShellRequest{
+		RawCommand: "python missing.py",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionApproval {
+		t.Fatalf("expected missing script execution to require APPROVAL, got %s (reason: %s)", result.Decision, result.Reason)
 	}
 }

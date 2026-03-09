@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -127,10 +126,19 @@ func handleMCPTool(req HookRequest, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s classified as CAUTION\n", req.ToolName)
 		return 0
 	case core.DecisionApproval:
-		// For now, approval for MCP tools in hook mode blocks without TTY prompt.
-		// Future: add TTY approval flow.
-		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s requires approval (auto-allowing in v1)\n", req.ToolName)
-		return 0
+		result := &core.ClassifyResult{
+			Decision:    core.DecisionApproval,
+			Reason:      fmt.Sprintf("MCP tool %s requires approval", req.ToolName),
+			DecisionKey: computeMCPDecisionKey(req.ToolName, args),
+			SubResults: []core.SubCommandResult{
+				{
+					Command:  formatMCPCommand(req.ToolName, args),
+					Decision: core.DecisionApproval,
+					Reason:   fmt.Sprintf("MCP tool %s requires approval", req.ToolName),
+				},
+			},
+		}
+		return handleApproval(req, result, stderr)
 	default:
 		// SAFE
 		return 0
@@ -240,6 +248,10 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true)
 	if err != nil {
 		slog.Error("approval error", "error", err)
+		if msg := extractFuseDirective(err); msg != "" {
+			fmt.Fprintln(stderr, msg)
+			return 2
+		}
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Approval process failed. Do not retry this exact command. Ask the user for guidance.")
 		return 2
 	}
@@ -300,11 +312,35 @@ func openDBAndSecret() (*db.DB, []byte, error) {
 		return nil, nil, fmt.Errorf("open database: %w", err)
 	}
 
-	secret, err := os.ReadFile(config.SecretPath())
+	secret, err := db.EnsureSecret(config.SecretPath())
 	if err != nil {
 		_ = database.Close()
 		return nil, nil, fmt.Errorf("read secret: %w", err)
 	}
 
 	return database, secret, nil
+}
+
+func computeMCPDecisionKey(toolName string, args map[string]interface{}) string {
+	return core.ComputeDecisionKey("mcp", formatMCPCommand(toolName, args), "")
+}
+
+func formatMCPCommand(toolName string, args map[string]interface{}) string {
+	if len(args) == 0 {
+		return toolName
+	}
+	data, err := json.Marshal(args)
+	if err != nil {
+		return toolName
+	}
+	return toolName + ":" + string(data)
+}
+
+func extractFuseDirective(err error) string {
+	msg := err.Error()
+	idx := strings.Index(msg, "fuse:")
+	if idx < 0 {
+		return ""
+	}
+	return msg[idx:]
 }

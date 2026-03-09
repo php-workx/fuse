@@ -1,9 +1,12 @@
 package db
 
-import "database/sql"
+import (
+	"database/sql"
+	"strings"
+)
 
 // currentSchemaVersion is the latest schema version applied by migrate.
-const currentSchemaVersion = "1"
+const currentSchemaVersion = "2"
 
 // migrate creates or updates the database schema.
 func migrate(db *sql.DB) error {
@@ -31,6 +34,13 @@ func migrate(db *sql.DB) error {
 	// Apply schema v1.
 	if version == "" {
 		if err := applyV1(db); err != nil {
+			return err
+		}
+		version = "1"
+	}
+
+	if version == "1" {
+		if err := applyV2(db); err != nil {
 			return err
 		}
 	}
@@ -77,4 +87,38 @@ func applyV1(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+func applyV2(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE approvals ADD COLUMN consumed INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE approvals ADD COLUMN source TEXT NOT NULL DEFAULT 'shell'`,
+		`ALTER TABLE approvals ADD COLUMN command TEXT`,
+		`ALTER TABLE approvals ADD COLUMN reason TEXT`,
+		`ALTER TABLE approvals ADD COLUMN file_inspected TEXT`,
+		`CREATE INDEX IF NOT EXISTS idx_approvals_expires ON approvals(expires_at)`,
+		`UPDATE approvals SET consumed = 1 WHERE consumed_at IS NOT NULL`,
+		`ALTER TABLE events ADD COLUMN source TEXT NOT NULL DEFAULT 'shell'`,
+		`ALTER TABLE events ADD COLUMN agent TEXT`,
+		`ALTER TABLE events ADD COLUMN file_inspected INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN approval_id TEXT`,
+		`ALTER TABLE events ADD COLUMN user_response TEXT`,
+		`ALTER TABLE events ADD COLUMN execution_exit_code INTEGER`,
+		`INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', '2')`,
+	}
+
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func isDuplicateColumnError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "duplicate column name")
 }
