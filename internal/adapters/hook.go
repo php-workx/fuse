@@ -14,6 +14,7 @@ import (
 	"github.com/runger/fuse/internal/config"
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/db"
+	"github.com/runger/fuse/internal/events"
 	"github.com/runger/fuse/internal/policy"
 )
 
@@ -57,6 +58,17 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 
 // runHookInternal contains the core hook logic without timeout management.
 func runHookInternal(stdin io.Reader, stderr io.Writer) int {
+	// Check if fuse is disabled (allow-all mode).
+	if config.IsDisabled() {
+		return 0
+	}
+
+	// Load config for log level.
+	cfg, _ := config.LoadConfig(config.ConfigPath())
+	if cfg != nil && cfg.LogLevel != "" {
+		events.SetLogLevel(cfg.LogLevel)
+	}
+
 	// Read and parse JSON from stdin.
 	data, err := io.ReadAll(stdin)
 	if err != nil {
@@ -189,10 +201,12 @@ func handleBashTool(req HookRequest, stderr io.Writer) int {
 	case core.DecisionBlocked:
 		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", result.Reason)
 		fmt.Fprintln(stderr, msg)
+		logHookEvent(req.SessionID, input.Command, result)
 		return 2
 
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
+		logHookEvent(req.SessionID, input.Command, result)
 		return 0
 
 	case core.DecisionApproval:
@@ -230,6 +244,9 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		return 2
 	}
 
+	_, _ = database.CleanupExpired()
+	_, _ = database.PruneEvents(10000)
+
 	switch decision {
 	case core.DecisionApproval, core.DecisionSafe, core.DecisionCaution:
 		return 0
@@ -237,6 +254,17 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		fmt.Fprintln(stderr, "fuse:USER_DENIED STOP. Do not retry this exact command without new user input.")
 		return 2
 	}
+}
+
+// logHookEvent logs a classification event best-effort (non-blocking).
+// Only called for non-SAFE decisions where audit trail matters.
+func logHookEvent(sessionID, command string, result *core.ClassifyResult) {
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		return // best-effort: skip if DB unavailable
+	}
+	defer func() { _ = database.Close() }()
+	_ = database.LogEvent(sessionID, command, string(result.Decision), result.RuleID, result.Reason, 0, "hook")
 }
 
 // extractCommandFromResult returns the raw command from the first sub-result,

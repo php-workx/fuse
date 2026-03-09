@@ -6,7 +6,11 @@ import (
 )
 
 // BaseDir returns the fuse root directory (~/.fuse/).
+// If FUSE_HOME is set, it is used instead (useful for testing).
 func BaseDir() string {
+	if env := os.Getenv("FUSE_HOME"); env != "" {
+		return env
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), ".fuse")
@@ -47,6 +51,17 @@ func DBPath() string {
 // SecretPath returns ~/.fuse/state/secret.key.
 func SecretPath() string {
 	return filepath.Join(StateDir(), "secret.key")
+}
+
+// EnabledMarkerPath returns the path to the enabled marker file.
+func EnabledMarkerPath() string {
+	return filepath.Join(StateDir(), "enabled")
+}
+
+// IsDisabled returns true when fuse is disabled (marker file does not exist).
+func IsDisabled() bool {
+	_, err := os.Stat(EnabledMarkerPath())
+	return os.IsNotExist(err)
 }
 
 // EnsureDirectories creates the fuse directory structure with correct permissions.

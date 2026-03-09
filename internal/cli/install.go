@@ -112,6 +112,12 @@ func mergeFuseHook(settings map[string]interface{}) {
 				{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
 			},
 		},
+		{
+			Matcher: "mcp__.*",
+			Hooks: []fuseHookEntry{
+				{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
+			},
+		},
 	}
 
 	for _, wanted := range wantedMatchers {

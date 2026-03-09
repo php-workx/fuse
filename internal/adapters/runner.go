@@ -115,6 +115,11 @@ func ExecuteCommand(command string, cwd string) (exitCode int, err error) {
 	}
 	_ = cfg // config used for future features
 
+	// Check if fuse is disabled (allow-all mode).
+	if config.IsDisabled() {
+		return executeShellCommand(command, cwd)
+	}
+
 	// Load policy.
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
 	evaluator := policy.NewEvaluator(policyCfg)
@@ -192,6 +197,11 @@ func ExecuteCommand(command string, cwd string) (exitCode int, err error) {
 		outcome = "error"
 	}
 	logEvent(database, command, result, outcome)
+
+	if database != nil {
+		_, _ = database.CleanupExpired()
+		_, _ = database.PruneEvents(10000)
+	}
 
 	return exitCode, err
 }
