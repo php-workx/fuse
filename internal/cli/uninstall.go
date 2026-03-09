@@ -1,0 +1,138 @@
+package cli
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/runger/fuse/internal/config"
+	"github.com/spf13/cobra"
+)
+
+var uninstallPurge bool
+
+var uninstallCmd = &cobra.Command{
+	Use:   "uninstall",
+	Short: "Remove fuse hooks and optionally purge all data",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		// Step 1: Remove fuse hook entries from Claude Code settings.json.
+		if err := uninstallClaude(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not clean Claude Code settings: %v\n", err)
+		}
+
+		// Step 2: With --purge, remove ~/.fuse/ entirely.
+		if uninstallPurge {
+			baseDir := config.BaseDir()
+			if err := os.RemoveAll(baseDir); err != nil {
+				return fmt.Errorf("removing %s: %w", baseDir, err)
+			}
+			fmt.Printf("Removed %s\n", baseDir)
+		}
+
+		fmt.Println("fuse has been uninstalled.")
+		return nil
+	},
+}
+
+func init() {
+	uninstallCmd.Flags().BoolVar(&uninstallPurge, "purge", false, "Also remove ~/.fuse/ directory entirely")
+	rootCmd.AddCommand(uninstallCmd)
+}
+
+// uninstallClaude removes fuse hook entries from Claude Code's settings.json.
+func uninstallClaude() error {
+	settingsPath := claudeSettingsPath()
+
+	settings, err := readJSONFile(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // Nothing to clean.
+		}
+		return fmt.Errorf("reading %s: %w", settingsPath, err)
+	}
+
+	if removeFuseHook(settings) {
+		if err := writeJSONFile(settingsPath, settings); err != nil {
+			return fmt.Errorf("writing %s: %w", settingsPath, err)
+		}
+		fmt.Printf("Removed fuse hook from %s\n", settingsPath)
+	}
+
+	return nil
+}
+
+// removeFuseHook removes fuse hook entries from a settings map.
+// Returns true if any modifications were made.
+func removeFuseHook(settings map[string]interface{}) bool {
+	hooksObj, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+
+	preToolUseRaw, ok := hooksObj["PreToolUse"]
+	if !ok {
+		return false
+	}
+
+	preToolUse, ok := preToolUseRaw.([]interface{})
+	if !ok {
+		return false
+	}
+
+	modified := false
+	var cleaned []interface{}
+
+	for _, entry := range preToolUse {
+		entryMap, ok := entry.(map[string]interface{})
+		if !ok {
+			cleaned = append(cleaned, entry)
+			continue
+		}
+
+		hooksRaw, ok := entryMap["hooks"]
+		if !ok {
+			cleaned = append(cleaned, entry)
+			continue
+		}
+
+		hooks, ok := hooksRaw.([]interface{})
+		if !ok {
+			cleaned = append(cleaned, entry)
+			continue
+		}
+
+		// Filter out fuse hook commands.
+		var remainingHooks []interface{}
+		for _, h := range hooks {
+			hMap, ok := h.(map[string]interface{})
+			if !ok {
+				remainingHooks = append(remainingHooks, h)
+				continue
+			}
+			cmd, _ := hMap["command"].(string)
+			if cmd == "fuse hook evaluate" {
+				modified = true
+				continue // Skip fuse hook.
+			}
+			remainingHooks = append(remainingHooks, h)
+		}
+
+		// If hooks remain, keep the matcher entry; otherwise drop it.
+		if len(remainingHooks) > 0 {
+			entryMap["hooks"] = remainingHooks
+			cleaned = append(cleaned, entryMap)
+		} else {
+			modified = true
+			// Drop the entire matcher entry since it has no hooks left.
+		}
+	}
+
+	if modified {
+		if len(cleaned) > 0 {
+			hooksObj["PreToolUse"] = cleaned
+		} else {
+			delete(hooksObj, "PreToolUse")
+		}
+	}
+
+	return modified
+}
