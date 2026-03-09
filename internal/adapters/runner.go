@@ -137,7 +137,7 @@ func ExecuteCommand(command string, cwd string) (exitCode int, err error) {
 		database = nil
 	}
 	if database != nil {
-		defer database.Close()
+		defer func() { _ = database.Close() }()
 	}
 
 	// Handle classification result.
@@ -162,12 +162,15 @@ func ExecuteCommand(command string, cwd string) (exitCode int, err error) {
 			return 1, fmt.Errorf("load HMAC secret: %w", secretErr)
 		}
 
-		mgr := approve.NewManager(database, secret)
+		mgr, mgrErr := approve.NewManager(database, secret)
+		if mgrErr != nil {
+			return 1, fmt.Errorf("create approval manager: %w", mgrErr)
+		}
 		decision, promptErr := mgr.RequestApproval(
 			result.DecisionKey,
 			command,
 			result.Reason,
-			"", // no session ID in run mode
+			"",    // no session ID in run mode
 			false, // not hook mode — 5min timeout
 		)
 		if promptErr != nil {
@@ -221,24 +224,37 @@ func executeShellCommand(command string, cwd string) (int, error) {
 
 	// Forward signals to child process group.
 	sigCh := make(chan os.Signal, 1)
+	done := make(chan struct{})
 	signal.Notify(sigCh,
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGHUP,
 	)
 	go func() {
-		for sig := range sigCh {
-			// Send to process group (negative PID).
-			if err := syscall.Kill(-cmd.Process.Pid, sig.(syscall.Signal)); err != nil {
-				// Fallback: retry direct child PID.
-				_ = syscall.Kill(cmd.Process.Pid, sig.(syscall.Signal))
+		for {
+			select {
+			case sig, ok := <-sigCh:
+				if !ok {
+					return
+				}
+				sysSig, isSyscall := sig.(syscall.Signal)
+				if !isSyscall {
+					continue
+				}
+				// Send to process group (negative PID).
+				if err := syscall.Kill(-cmd.Process.Pid, sysSig); err != nil {
+					// Fallback: retry direct child PID.
+					_ = syscall.Kill(cmd.Process.Pid, sysSig)
+				}
+			case <-done:
+				return
 			}
 		}
 	}()
-	defer signal.Stop(sigCh)
-	defer close(sigCh)
 
 	waitErr := cmd.Wait()
+	signal.Stop(sigCh)
+	close(done)
 	if waitErr != nil {
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {

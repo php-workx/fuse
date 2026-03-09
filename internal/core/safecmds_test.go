@@ -51,8 +51,8 @@ func TestUnconditionalSafe(t *testing.T) {
 
 func TestUnconditionalSafeCmd_MultiWord(t *testing.T) {
 	tests := []struct {
-		name    string
-		cmd     string
+		name     string
+		cmd      string
 		wantSafe bool
 	}{
 		// Multi-word safe commands from spec.

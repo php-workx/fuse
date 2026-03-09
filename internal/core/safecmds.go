@@ -144,110 +144,133 @@ func isFindSafe(fields []string) bool {
 	return true
 }
 
+// gitGlobalFlagsWithValue lists git global flags that take a value argument.
+var gitGlobalFlagsWithValue = map[string]bool{
+	"-C": true, "-c": true, "--git-dir": true, "--work-tree": true,
+}
+
+// unconditionalSafeGitSubs are git subcommands safe with any arguments.
+var unconditionalSafeGitSubs = map[string]bool{
+	"status": true, "log": true, "diff": true, "show": true,
+	"fetch": true, "rev-parse": true, "describe": true,
+	"shortlog": true, "ls-files": true, "ls-tree": true,
+}
+
+// conditionalGitCheckers map git subcommands to argument validators.
+// Each function receives the args AFTER the subcommand and returns true if safe.
+var conditionalGitCheckers = map[string]func([]string) bool{
+	"branch":   gitBranchSafe,
+	"stash":    gitStashSafe,
+	"remote":   gitRemoteSafe,
+	"pull":     gitPullSafe,
+	"checkout": gitCheckoutSafe,
+	"config":   gitConfigSafe,
+	"tag":      gitTagSafe,
+}
+
 // isGitSafe: git is safe with read-only subcommands.
+// Uses data-driven lookup tables instead of a monolithic switch.
 func isGitSafe(fields []string) bool {
 	if len(fields) < 2 {
 		return false
 	}
-	sub := fields[1]
 
 	// Skip global flags (e.g. git -C /path status).
 	idx := 1
 	for idx < len(fields) && strings.HasPrefix(fields[idx], "-") {
+		prev := fields[idx]
 		idx++
-		// Some git flags take a value (e.g. -C <path>).
-		if idx < len(fields) && !strings.HasPrefix(fields[idx], "-") {
-			// Could be a flag value; but we can't know for sure, so move past
-			// it only for known value-taking flags.
-			prev := fields[idx-1]
-			if prev == "-C" || prev == "-c" || prev == "--git-dir" || prev == "--work-tree" {
-				idx++
-			}
+		if gitGlobalFlagsWithValue[prev] && idx < len(fields) {
+			idx++
 		}
 	}
 	if idx >= len(fields) {
 		return false
 	}
-	sub = fields[idx]
+	sub := fields[idx]
 	rest := fields[idx+1:]
 
-	safeGitSubs := map[string]bool{
-		"status": true, "log": true, "diff": true, "show": true,
-		"stash": true, "remote": true, "fetch": true, "pull": true,
-		"branch": true, "checkout": true, "config": true, "rev-parse": true,
-		"describe": true, "tag": true, "shortlog": true, "ls-files": true,
-		"ls-tree": true,
+	// Layer 1: Unconditionally safe subcommands.
+	if unconditionalSafeGitSubs[sub] {
+		return true
 	}
 
-	if !safeGitSubs[sub] {
-		return false
+	// Layer 2: Conditionally safe subcommands with argument checks.
+	if checker, ok := conditionalGitCheckers[sub]; ok {
+		return checker(rest)
 	}
 
-	// Additional checks for subcommands that are only conditionally safe.
-	switch sub {
-	case "branch":
-		// branch is unsafe with -D or -d (delete).
-		for _, a := range rest {
-			if a == "-D" || a == "-d" || a == "--delete" {
-				return false
-			}
-		}
-	case "stash":
-		// Only "stash list" is safe.
-		if len(rest) == 0 || rest[0] != "list" {
+	return false
+}
+
+// gitBranchSafe: branch is unsafe with -D, -d, or --delete.
+func gitBranchSafe(args []string) bool {
+	for _, a := range args {
+		if a == "-D" || a == "-d" || a == "--delete" {
 			return false
 		}
-	case "remote":
-		// Only "remote -v" / "remote" (no sub) is safe reading.
-		// Allow: remote, remote -v, remote show <name>.
-		// Disallow: remote add, remote remove, remote rename.
-		if len(rest) > 0 {
-			if rest[0] != "-v" && rest[0] != "--verbose" && rest[0] != "show" {
-				return false
-			}
-		}
-	case "pull":
-		// pull with --force is unsafe.
-		for _, a := range rest {
-			if a == "--force" || a == "-f" || a == "--force-with-lease" {
-				return false
-			}
-		}
-	case "checkout":
-		// "checkout -b" (create branch) is safe; "checkout -- ." is unsafe.
-		hasDashB := false
-		for i, a := range rest {
-			if a == "-b" || a == "-B" {
-				hasDashB = true
-			}
-			if a == "--" && i+1 < len(rest) && rest[i+1] == "." {
-				return false
-			}
-		}
-		if !hasDashB {
+	}
+	return true
+}
+
+// gitStashSafe: only "stash list" is safe.
+func gitStashSafe(args []string) bool {
+	return len(args) > 0 && args[0] == "list"
+}
+
+// gitRemoteSafe: remote (no args), remote -v, remote show are safe.
+func gitRemoteSafe(args []string) bool {
+	if len(args) == 0 {
+		return true
+	}
+	return args[0] == "-v" || args[0] == "--verbose" || args[0] == "show"
+}
+
+// gitPullSafe: pull is unsafe with --force flags.
+func gitPullSafe(args []string) bool {
+	for _, a := range args {
+		if a == "--force" || a == "-f" || a == "--force-with-lease" {
 			return false
 		}
-	case "config":
-		// Only --list and --get are safe.
-		for _, a := range rest {
-			if a == "--list" || a == "--get" || a == "-l" || strings.HasPrefix(a, "--get") {
-				return true
-			}
-		}
-		return false
-	case "tag":
-		// Only listing is safe; explicit -l or no arguments that look like creation.
-		for _, a := range rest {
-			if a == "-l" || a == "--list" {
-				return true
-			}
-			if a == "-d" || a == "--delete" || a == "-a" || a == "-s" {
-				return false
-			}
-		}
-		// Plain "git tag" (list) is safe.
 	}
+	return true
+}
 
+// gitCheckoutSafe: checkout -b (create branch) is safe; checkout -- . is unsafe.
+func gitCheckoutSafe(args []string) bool {
+	hasDashB := false
+	for i, a := range args {
+		if a == "-b" || a == "-B" {
+			hasDashB = true
+		}
+		if a == "--" && i+1 < len(args) && args[i+1] == "." {
+			return false
+		}
+	}
+	return hasDashB
+}
+
+// gitConfigSafe: only --list, --get, and -l are safe.
+func gitConfigSafe(args []string) bool {
+	for _, a := range args {
+		if a == "--list" || a == "--get" || a == "-l" || strings.HasPrefix(a, "--get") {
+			return true
+		}
+	}
+	return false
+}
+
+// gitTagSafe: listing is safe; creation (-a, -s) and deletion (-d) are not.
+func gitTagSafe(args []string) bool {
+	for _, a := range args {
+		if a == "-l" || a == "--list" {
+			return true
+		}
+		if a == "-d" || a == "--delete" || a == "-a" || a == "-s" {
+			return false
+		}
+	}
+	// Plain "git tag" (list) is safe.
 	return true
 }
 

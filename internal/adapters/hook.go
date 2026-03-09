@@ -166,13 +166,18 @@ func handleBashTool(req HookRequest, stderr io.Writer) int {
 	shellReq := core.ShellRequest{
 		RawCommand: input.Command,
 		Cwd:        req.Cwd,
-		Source:      "hook",
+		Source:     "hook",
 		SessionID:  req.SessionID,
 	}
 
 	result, err := core.Classify(shellReq, evaluator)
 	if err != nil {
 		slog.Error("classification error", "error", err)
+		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Classification error. Do not retry this exact command. Ask the user for guidance.")
+		return 2 // fail-closed
+	}
+	if result == nil {
+		slog.Error("classification returned nil result")
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Classification error. Do not retry this exact command. Ask the user for guidance.")
 		return 2 // fail-closed
 	}
@@ -209,9 +214,14 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Internal error (database). Do not retry this exact command. Ask the user for guidance.")
 		return 2
 	}
-	defer database.Close()
+	defer func() { _ = database.Close() }()
 
-	mgr := approve.NewManager(database, secret)
+	mgr, mgrErr := approve.NewManager(database, secret)
+	if mgrErr != nil {
+		slog.Error("failed to create approval manager", "error", mgrErr)
+		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Internal error (approval). Do not retry this exact command. Ask the user for guidance.")
+		return 2
+	}
 
 	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true)
 	if err != nil {
@@ -264,7 +274,7 @@ func openDBAndSecret() (*db.DB, []byte, error) {
 
 	secret, err := os.ReadFile(config.SecretPath())
 	if err != nil {
-		database.Close()
+		_ = database.Close()
 		return nil, nil, fmt.Errorf("read secret: %w", err)
 	}
 
