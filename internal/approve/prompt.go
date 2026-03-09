@@ -24,7 +24,7 @@ func PromptUser(command, reason string, hookMode bool) (approved bool, scope str
 	fd := int(tty.Fd())
 
 	// Save original terminal state.
-	origTermios, err := unix.IoctlGetTermios(fd, unix.TIOCGETA)
+	origTermios, err := unix.IoctlGetTermios(fd, ioctlGetTermios)
 	if err != nil {
 		return false, "", fmt.Errorf("get terminal state: %w", err)
 	}
@@ -32,7 +32,7 @@ func PromptUser(command, reason string, hookMode bool) (approved bool, scope str
 	// Restore terminal on panic.
 	defer func() {
 		if r := recover(); r != nil {
-			_ = unix.IoctlSetTermios(fd, unix.TIOCSETA, origTermios)
+			_ = unix.IoctlSetTermios(fd, ioctlSetTermios, origTermios)
 			fmt.Fprintf(os.Stderr, "fuse: prompt panic recovered: %v\n", r)
 			approved = false
 			scope = ""
@@ -50,13 +50,13 @@ func PromptUser(command, reason string, hookMode bool) (approved bool, scope str
 	rawTermios.Lflag &^= unix.ECHO | unix.ICANON | unix.ISIG
 	rawTermios.Cc[unix.VMIN] = 0  // Non-blocking with VTIME.
 	rawTermios.Cc[unix.VTIME] = 1 // 100ms read timeout for polling.
-	if err := unix.IoctlSetTermios(fd, unix.TIOCSETA, &rawTermios); err != nil {
+	if err := unix.IoctlSetTermios(fd, ioctlSetTermios, &rawTermios); err != nil {
 		return false, "", fmt.Errorf("set raw mode: %w", err)
 	}
 
 	// Ensure terminal is always restored.
 	restoreTerminal := func() {
-		_ = unix.IoctlSetTermios(fd, unix.TIOCSETA, origTermios)
+		_ = unix.IoctlSetTermios(fd, ioctlSetTermios, origTermios)
 	}
 	defer restoreTerminal()
 

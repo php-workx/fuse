@@ -1,0 +1,27 @@
+package cli
+
+import (
+	"os"
+
+	"github.com/runger/fuse/internal/adapters"
+	"github.com/spf13/cobra"
+)
+
+var hookCmd = &cobra.Command{
+	Use:   "hook",
+	Short: "Hook commands for AI agent integration",
+}
+
+var hookEvaluateCmd = &cobra.Command{
+	Use:   "evaluate",
+	Short: "Evaluate a tool call from stdin (Claude Code hook protocol)",
+	Run: func(cmd *cobra.Command, args []string) {
+		exitCode := adapters.RunHook(os.Stdin, os.Stderr)
+		os.Exit(exitCode)
+	},
+}
+
+func init() {
+	hookCmd.AddCommand(hookEvaluateCmd)
+	rootCmd.AddCommand(hookCmd)
+}
