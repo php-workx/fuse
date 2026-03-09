@@ -93,6 +93,9 @@ func ScanJavaScript(content []byte) []Signal {
 				// Multi-line block comment starts here.
 				// Scan only the part before the comment start.
 				start := strings.Index(trimmed, "/*")
+				if start < 0 {
+					start = 0
+				}
 				lineStr = trimmed[:start]
 				trimmed = strings.TrimSpace(lineStr)
 				inBlockComment = true

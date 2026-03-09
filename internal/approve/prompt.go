@@ -19,7 +19,7 @@ func PromptUser(command, reason string, hookMode bool) (approved bool, scope str
 	if err != nil {
 		return false, "", fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
 	}
-	defer tty.Close()
+	defer func() { _ = tty.Close() }()
 
 	fd := int(tty.Fd())
 

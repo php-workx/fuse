@@ -80,9 +80,9 @@ var inlineScriptPatterns = []struct {
 	{reInlinePipeNode, true},
 	{reInlinePipeRuby, true},
 	{reInlineBase64Sh, true},
-	{reInlineCmdSubst, false},      // CAUTION only
-	{reInlineExportPATH, false},    // CAUTION only
-	{reInlineShellConfig, false},   // CAUTION only
+	{reInlineCmdSubst, false},    // CAUTION only
+	{reInlineExportPATH, false},  // CAUTION only
+	{reInlineShellConfig, false}, // CAUTION only
 }
 
 // Sensitive env var detection (§5.3 from the issue description).

@@ -78,7 +78,7 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var content []byte
 	if truncated {

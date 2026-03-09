@@ -16,8 +16,8 @@ var KnownSafeVerbs = map[string]bool{
 }
 
 var (
-	singleQuoteRe = regexp.MustCompile(`'[^']*'`)
-	doubleQuoteRe = regexp.MustCompile(`"[^"]*"`)
+	singleQuoteRe   = regexp.MustCompile(`'[^']*'`)
+	doubleQuoteRe   = regexp.MustCompile(`"[^"]*"`)
 	trailingComment = regexp.MustCompile(`\s+#\s.*$`)
 )
 

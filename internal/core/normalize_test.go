@@ -338,10 +338,10 @@ func TestClassificationNormalize_WrapperStripping(t *testing.T) {
 
 func TestClassificationNormalize_SudoEscalation(t *testing.T) {
 	tests := []struct {
-		name       string
-		sub        string
-		wantEscal  bool
-		wantOuter  string
+		name      string
+		sub       string
+		wantEscal bool
+		wantOuter string
 	}{
 		{
 			name:      "sudo sets escalation",
