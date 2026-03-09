@@ -1,0 +1,38 @@
+version: "2"
+
+linters:
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - ineffassign
+    - gocritic
+    - misspell
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      exclude-functions:
+        # Writing to stderr/tty for diagnostics — errors are not actionable.
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - fmt.Printf
+        # Setting env in tests.
+        - os.Setenv
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - appendCombine
+
+  exclusions:
+    rules:
+      # Deferred Close and cleanup in test files — not worth checking.
+      - path: _test\.go
+        linters:
+          - errcheck
+          - gocritic
+    paths:
+      - testdata

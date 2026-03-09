@@ -2,7 +2,10 @@
 .agents/
 
 # Build artifacts
+bin/
 fuse
+coverage.out
+coverage.html
 
 # Firebase
 firebase-debug.log
