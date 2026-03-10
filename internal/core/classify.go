@@ -186,6 +186,13 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	classified := ClassificationNormalize(subCmd)
 	outerCmd := classified.Outer
 
+	// Fail-closed: if bash -c extraction failed, force APPROVAL.
+	if classified.ExtractionFailed {
+		sub.Decision = DecisionApproval
+		sub.Reason = "bash -c extraction failed (fail-closed)"
+		return sub
+	}
+
 	// Classify all commands (outer + inner), take most restrictive.
 	allCmds := []string{outerCmd}
 	allCmds = append(allCmds, classified.Inner...)

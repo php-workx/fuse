@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"sync/atomic"
 
 	_ "modernc.org/sqlite"
 )
+
+// cleanupCycleCount tracks how many cleanup cycles have been performed.
+var cleanupCycleCount int64
 
 // DB wraps a *sql.DB connection to the fuse state database.
 type DB struct {
@@ -73,6 +77,25 @@ func (d *DB) Close() error {
 		return nil
 	}
 	return d.db.Close()
+}
+
+// WalCheckpoint performs a WAL checkpoint with TRUNCATE mode to reclaim space.
+func (d *DB) WalCheckpoint() error {
+	_, err := d.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
+	if err != nil {
+		return fmt.Errorf("wal checkpoint: %w", err)
+	}
+	atomic.AddInt64(&cleanupCycleCount, 1)
+	return nil
+}
+
+// Vacuum runs VACUUM to rebuild the database file and reclaim unused space.
+func (d *DB) Vacuum() error {
+	_, err := d.db.Exec("VACUUM")
+	if err != nil {
+		return fmt.Errorf("vacuum: %w", err)
+	}
+	return nil
 }
 
 // parentDir returns the parent directory of path.

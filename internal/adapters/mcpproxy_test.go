@@ -159,6 +159,79 @@ func TestRunMCPProxy_ReturnsWhenAgentClosesAndDownstreamStaysAlive(t *testing.T)
 	}
 }
 
+func TestProxyAgentToDownstream_SensitiveResourceReadBlocked(t *testing.T) {
+	var downstream bytes.Buffer
+	var agent bytes.Buffer
+
+	request := `{"jsonrpc":"2.0","id":1,"method":"resources/read","params":{"uri":"~/.fuse/state/fuse.db"}}`
+	input := rawMCPFrame([]byte(request))
+
+	err := proxyAgentToDownstream(strings.NewReader(input), &downstream, &agent, newInFlightRequests())
+	if err != nil {
+		t.Fatalf("proxyAgentToDownstream returned error: %v", err)
+	}
+
+	payload, err := readMCPFrame(bufio.NewReader(&agent))
+	if err != nil {
+		t.Fatalf("readMCPFrame(agent): %v", err)
+	}
+	msg, err := decodeJSONRPC(payload)
+	if err != nil {
+		t.Fatalf("decodeJSONRPC(agent): %v", err)
+	}
+
+	errObj, _ := msg["error"].(map[string]interface{})
+	if errObj == nil {
+		t.Fatalf("expected JSON-RPC error response, got %#v", msg)
+	}
+	message, _ := errObj["message"].(string)
+	if !strings.Contains(message, "sensitive") {
+		t.Fatalf("expected sensitive resource denial message, got %q", message)
+	}
+	if downstream.Len() != 0 {
+		t.Fatalf("expected sensitive request not to be forwarded downstream, wrote %d bytes", downstream.Len())
+	}
+}
+
+func TestProxyAgentToDownstream_NonSensitiveResourceForwarded(t *testing.T) {
+	var downstream bytes.Buffer
+	var agent bytes.Buffer
+
+	request := `{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"/tmp/public.txt"}}`
+	input := rawMCPFrame([]byte(request))
+
+	err := proxyAgentToDownstream(strings.NewReader(input), &downstream, &agent, newInFlightRequests())
+	if err != nil {
+		t.Fatalf("proxyAgentToDownstream returned error: %v", err)
+	}
+
+	if downstream.Len() == 0 {
+		t.Fatal("expected non-sensitive request to be forwarded downstream, but nothing was written")
+	}
+
+	payload, err := readMCPFrame(bufio.NewReader(&downstream))
+	if err != nil {
+		t.Fatalf("readMCPFrame(downstream): %v", err)
+	}
+	msg, err := decodeJSONRPC(payload)
+	if err != nil {
+		t.Fatalf("decodeJSONRPC(downstream): %v", err)
+	}
+
+	method, _ := msg["method"].(string)
+	if method != "resources/read" {
+		t.Fatalf("expected forwarded method resources/read, got %q", method)
+	}
+	params, _ := msg["params"].(map[string]interface{})
+	uri, _ := params["uri"].(string)
+	if uri != "/tmp/public.txt" {
+		t.Fatalf("expected forwarded uri /tmp/public.txt, got %q", uri)
+	}
+	if agent.Len() != 0 {
+		t.Fatalf("expected no error written to agent for safe resource, but %d bytes written", agent.Len())
+	}
+}
+
 func rawMCPFrame(payload []byte) string {
 	return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(payload), payload)
 }

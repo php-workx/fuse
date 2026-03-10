@@ -119,9 +119,9 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 		result.Reason = "unsupported file type"
 		return result, nil
 	default:
-		// Unknown extension, no scanner — treat as safe.
-		result.Decision = DecisionSafe
-		result.Reason = "no scanner for extension"
+		// Unknown extension, no scanner — treat with caution.
+		result.Decision = DecisionCaution
+		result.Reason = "unknown file type, no scanner available"
 		return result, nil
 	}
 
@@ -151,23 +151,37 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 }
 
 // inferDecisionFromSignals returns the decision based on the highest-severity
-// signal category found. Network/process signals yield APPROVAL; filesystem
-// signals yield CAUTION; anything else yields CAUTION.
+// signal category found. Network/process signals yield APPROVAL; cloud_sdk
+// alone yields CAUTION but combined with destructive or subprocess signals
+// yields APPROVAL; anything else yields CAUTION.
 func inferDecisionFromSignals(signals []inspect.Signal) Decision {
 	decision := DecisionCaution
+	hasCloudSDK := false
+	hasDestructive := false
+	hasSubprocess := false
 	for _, s := range signals {
 		switch s.Category {
-		case "subprocess", "cloud_sdk", "cloud_cli", "http_control_plane",
+		case "subprocess":
+			hasSubprocess = true
+			return DecisionApproval
+		case "cloud_cli", "http_control_plane",
 			"dynamic_exec", "dynamic_import":
 			// Network/process signals escalate to APPROVAL.
 			return DecisionApproval
+		case "cloud_sdk":
+			hasCloudSDK = true
 		case "destructive_fs", "destructive_verb":
+			hasDestructive = true
 			// Filesystem/destructive signals are CAUTION (keep looking
 			// in case a higher severity category is also present).
 			decision = DecisionCaution
 		default:
 			decision = DecisionCaution
 		}
+	}
+	// cloud_sdk combined with destructive or subprocess signals → APPROVAL.
+	if hasCloudSDK && (hasDestructive || hasSubprocess) {
+		return DecisionApproval
 	}
 	return decision
 }

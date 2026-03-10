@@ -105,16 +105,18 @@ func (d *DB) ConsumeApproval(decisionKey, sessionID string) (*Approval, error) {
 	return &a, nil
 }
 
-// CleanupExpired deletes consumed approvals and expired approvals.
-// Returns the number of rows deleted.
+// CleanupExpired deletes old consumed approvals and expired approvals.
+// Consumed approvals are retained for 1 hour after consumption to allow
+// auditing of recent decisions. Returns the number of rows deleted.
 func (d *DB) CleanupExpired() (int64, error) {
 	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	cutoff := time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
 
 	result, err := d.db.Exec(`
 		DELETE FROM approvals
-		WHERE consumed_at IS NOT NULL
+		WHERE (consumed_at IS NOT NULL AND consumed_at < ?)
 		   OR (expires_at IS NOT NULL AND expires_at <= ?)
-	`, now)
+	`, cutoff, now)
 	if err != nil {
 		return 0, fmt.Errorf("cleanup expired: %w", err)
 	}

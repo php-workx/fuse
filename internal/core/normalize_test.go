@@ -649,6 +649,64 @@ func TestClassificationNormalize_SpecExamples(t *testing.T) {
 	}
 }
 
+func TestClassificationNormalize_BashCExtractionFailure(t *testing.T) {
+	tests := []struct {
+		name               string
+		sub                string
+		wantExtrFailed     bool
+		wantInnerEmpty     bool
+	}{
+		{
+			name:           "unbalanced single quote",
+			sub:            "bash -c 'echo hello",
+			wantExtrFailed: true,
+			wantInnerEmpty: true,
+		},
+		{
+			name:           "unbalanced double quote",
+			sub:            `bash -c "echo hello`,
+			wantExtrFailed: true,
+			wantInnerEmpty: true,
+		},
+		{
+			name:           "sh -c unbalanced quote",
+			sub:            "sh -c 'echo hello",
+			wantExtrFailed: true,
+			wantInnerEmpty: true,
+		},
+		{
+			name:           "bash -c with valid quotes does not fail",
+			sub:            "bash -c 'echo hello'",
+			wantExtrFailed: false,
+			wantInnerEmpty: false,
+		},
+		{
+			name:           "bash without -c does not set extraction failed",
+			sub:            "bash script.sh",
+			wantExtrFailed: false,
+			wantInnerEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassificationNormalize(tt.sub)
+			if got.ExtractionFailed != tt.wantExtrFailed {
+				t.Errorf("ClassificationNormalize(%q).ExtractionFailed = %v, want %v",
+					tt.sub, got.ExtractionFailed, tt.wantExtrFailed)
+			}
+			if tt.wantInnerEmpty && len(got.Inner) != 0 {
+				t.Errorf("ClassificationNormalize(%q).Inner = %v, want empty",
+					tt.sub, got.Inner)
+			}
+			if !tt.wantInnerEmpty && len(got.Inner) == 0 {
+				t.Errorf("ClassificationNormalize(%q).Inner is empty, want non-empty",
+					tt.sub)
+			}
+		})
+	}
+}
+
 // stringSliceEqual compares two string slices for equality, treating nil and empty as equal.
 func stringSliceEqual(a, b []string) bool {
 	if len(a) == 0 && len(b) == 0 {

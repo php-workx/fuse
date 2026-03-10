@@ -287,27 +287,27 @@ func TestCredentialScrubbing(t *testing.T) {
 		{
 			name:  "API key",
 			input: "curl -H api_key=sk-1234abcd https://api.example.com",
-			want:  "curl -H api_key=***REDACTED*** https://api.example.com",
+			want:  "curl -H api_key=[REDACTED] https://api.example.com",
 		},
 		{
 			name:  "token",
 			input: "export TOKEN=mysecrettoken123",
-			want:  "export TOKEN=***REDACTED***",
+			want:  "export TOKEN=[REDACTED]",
 		},
 		{
 			name:  "password",
 			input: "mysql -u root password=hunter2",
-			want:  "mysql -u root password=***REDACTED***",
+			want:  "mysql -u root password=[REDACTED]",
 		},
 		{
 			name:  "AWS access key",
 			input: "aws configure set aws_access_key_id AKIAIOSFODNN7EXAMPLE",
-			want:  "aws configure set aws_access_key_id ***AWS_KEY***",
+			want:  "aws configure set aws_access_key_id [REDACTED]",
 		},
 		{
 			name:  "Bearer token",
 			input: "curl -H Authorization: Bearer eyJhbGciOiJIUzI1NiJ9 https://api.example.com",
-			want:  "curl -H Authorization: Bearer ***REDACTED*** https://api.example.com",
+			want:  "curl -H Authorization: [REDACTED] [REDACTED] https://api.example.com",
 		},
 		{
 			name:  "no credentials",
@@ -317,12 +317,12 @@ func TestCredentialScrubbing(t *testing.T) {
 		{
 			name:  "secret",
 			input: "export secret=mysecret",
-			want:  "export secret=***REDACTED***",
+			want:  "export secret=[REDACTED]",
 		},
 		{
 			name:  "credential with colon",
 			input: "credential: superSecret123",
-			want:  "credential=***REDACTED***",
+			want:  "credential=[REDACTED]",
 		},
 	}
 
@@ -395,16 +395,56 @@ func TestCleanupExpired(t *testing.T) {
 		t.Fatalf("CreateApproval valid: %v", err)
 	}
 
-	// Cleanup should remove the expired and consumed ones.
+	// Cleanup should remove only the expired one; the recently consumed
+	// approval is retained for 1 hour.
 	deleted, err := d.CleanupExpired()
 	if err != nil {
 		t.Fatalf("CleanupExpired: %v", err)
 	}
-	if deleted != 2 {
-		t.Errorf("deleted = %d, want 2", deleted)
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want 1", deleted)
 	}
 
-	// The valid one should still be there.
+	// The valid one and the recently consumed one should still be there.
+	var count int
+	err = d.db.QueryRow("SELECT COUNT(*) FROM approvals").Scan(&count)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("remaining = %d, want 2", count)
+	}
+}
+
+func TestCleanupExpired_RetainsRecentlyConsumed(t *testing.T) {
+	d := openTestDB(t)
+
+	// Create and consume an approval 30 minutes ago (within the 1-hour retention window).
+	future := time.Now().Add(2 * time.Hour)
+	err := d.CreateApproval("recent1", "k-recent", "APPROVAL", "once", "", "h1", &future)
+	if err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+	_, err = d.ConsumeApproval("k-recent", "")
+	if err != nil {
+		t.Fatalf("ConsumeApproval: %v", err)
+	}
+
+	// Backdate consumed_at to 30 minutes ago (within 1-hour retention).
+	thirtyMinAgo := time.Now().Add(-30 * time.Minute).UTC().Format("2006-01-02T15:04:05.000Z")
+	_, err = d.db.Exec(`UPDATE approvals SET consumed_at = ? WHERE id = ?`, thirtyMinAgo, "recent1")
+	if err != nil {
+		t.Fatalf("backdate consumed_at: %v", err)
+	}
+
+	deleted, err := d.CleanupExpired()
+	if err != nil {
+		t.Fatalf("CleanupExpired: %v", err)
+	}
+	if deleted != 0 {
+		t.Errorf("deleted = %d, want 0 (recently consumed should be retained)", deleted)
+	}
+
 	var count int
 	err = d.db.QueryRow("SELECT COUNT(*) FROM approvals").Scan(&count)
 	if err != nil {
@@ -412,6 +452,45 @@ func TestCleanupExpired(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("remaining = %d, want 1", count)
+	}
+}
+
+func TestCleanupExpired_DeletesOldConsumed(t *testing.T) {
+	d := openTestDB(t)
+
+	// Create and consume an approval, then backdate consumed_at to 2 hours ago.
+	future := time.Now().Add(2 * time.Hour)
+	err := d.CreateApproval("old1", "k-old", "APPROVAL", "once", "", "h1", &future)
+	if err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+	_, err = d.ConsumeApproval("k-old", "")
+	if err != nil {
+		t.Fatalf("ConsumeApproval: %v", err)
+	}
+
+	// Backdate consumed_at to 2 hours ago (beyond 1-hour retention).
+	twoHoursAgo := time.Now().Add(-2 * time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
+	_, err = d.db.Exec(`UPDATE approvals SET consumed_at = ? WHERE id = ?`, twoHoursAgo, "old1")
+	if err != nil {
+		t.Fatalf("backdate consumed_at: %v", err)
+	}
+
+	deleted, err := d.CleanupExpired()
+	if err != nil {
+		t.Fatalf("CleanupExpired: %v", err)
+	}
+	if deleted != 1 {
+		t.Errorf("deleted = %d, want 1 (old consumed should be deleted)", deleted)
+	}
+
+	var count int
+	err = d.db.QueryRow("SELECT COUNT(*) FROM approvals").Scan(&count)
+	if err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("remaining = %d, want 0", count)
 	}
 }
 

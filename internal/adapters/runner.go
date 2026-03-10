@@ -32,15 +32,13 @@ type commandExecution struct {
 // strippedEnvVars lists environment variables that are stripped from the child
 // process environment for security (§10.1).
 var strippedEnvVars = map[string]bool{
-	"LD_PRELOAD":            true,
-	"LD_LIBRARY_PATH":       true,
-	"DYLD_INSERT_LIBRARIES": true,
-	"DYLD_LIBRARY_PATH":     true,
-	"PYTHONPATH":            true,
-	"NODE_PATH":             true,
-	"RUBYLIB":               true,
-	"BASH_ENV":              true,
-	"ENV":                   true,
+	"LD_PRELOAD":      true,
+	"LD_LIBRARY_PATH": true,
+	"PYTHONPATH":      true,
+	"NODE_PATH":       true,
+	"RUBYLIB":         true,
+	"BASH_ENV":        true,
+	"ENV":             true,
 }
 
 // BuildChildEnv sanitizes the environment for child process execution.
@@ -58,7 +56,7 @@ func BuildChildEnv(environ []string) []string {
 		name := parts[0]
 
 		// Strip dangerous variables.
-		if strippedEnvVars[name] {
+		if strippedEnvVars[name] || strings.HasPrefix(name, "DYLD_") {
 			continue
 		}
 

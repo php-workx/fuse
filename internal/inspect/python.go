@@ -94,5 +94,48 @@ func ScanPython(content []byte) []Signal {
 		}
 	}
 
-	return signals
+	return scopeImportSignals(signals)
+}
+
+// importShutilPattern and importOsPattern identify import-level signals that
+// should be removed when no corresponding dangerous call is present.
+var (
+	importShutilPattern = regexp.MustCompile(`^\s*(import|from)\s+shutil\b`)
+	importOsPattern     = regexp.MustCompile(`^\s*(import|from)\s+os\b`)
+)
+
+// scopeImportSignals removes import-only signals when no corresponding
+// dangerous call was found in the same file. Specifically:
+//   - destructive_fs from "import shutil" is removed unless a shutil.rmtree
+//     or shutil.move call signal also exists.
+//   - subprocess from "import os" is removed unless an os.system, os.remove,
+//     os.unlink, or os.rmdir call signal also exists.
+func scopeImportSignals(signals []Signal) []Signal {
+	hasShutilCall := false
+	hasOsCall := false
+
+	for _, s := range signals {
+		m := s.Match
+		if strings.Contains(m, "shutil.rmtree") || strings.Contains(m, "shutil.move") {
+			hasShutilCall = true
+		}
+		if strings.Contains(m, "os.system") || strings.Contains(m, "os.remove") ||
+			strings.Contains(m, "os.unlink") || strings.Contains(m, "os.rmdir") {
+			hasOsCall = true
+		}
+	}
+
+	filtered := make([]Signal, 0, len(signals))
+	for _, s := range signals {
+		// Drop destructive_fs from bare "import shutil" when no shutil call found.
+		if s.Category == "destructive_fs" && importShutilPattern.MatchString(s.Match) && !hasShutilCall {
+			continue
+		}
+		// Drop subprocess from bare "import os" when no os dangerous call found.
+		if s.Category == "subprocess" && importOsPattern.MatchString(s.Match) && !hasOsCall {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered
 }

@@ -174,9 +174,10 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 		return 2
 	}
 
-	// Empty command is allowed (no-op).
+	// Empty command is blocked per spec §3.1.
 	if input.Command == "" {
-		return 0
+		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Empty command. Do not retry this exact command. Ask the user for guidance.")
+		return 2
 	}
 
 	// Load policy for classification.

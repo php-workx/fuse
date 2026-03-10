@@ -46,6 +46,7 @@ type ClassifiedCommand struct {
 	Outer                  string
 	Inner                  []string
 	EscalateClassification bool
+	ExtractionFailed       bool
 }
 
 // ComputeDecisionKey produces a SHA-256 hash used for approval record lookup.

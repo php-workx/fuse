@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/runger/fuse/internal/inspect"
 )
 
 // testdataDir returns the absolute path to the testdata/scripts directory at
@@ -370,6 +372,49 @@ func TestDetectReferencedFile_DirectExecutablePath(t *testing.T) {
 	got := DetectReferencedFile(scriptPath)
 	if got != scriptPath {
 		t.Fatalf("DetectReferencedFile(%q) = %q, want %q", scriptPath, got, scriptPath)
+	}
+}
+
+func TestInspectFile_UnknownExtensionReturnsCaution(t *testing.T) {
+	tmpDir := t.TempDir()
+	luaFile := filepath.Join(tmpDir, "script.lua")
+	if err := os.WriteFile(luaFile, []byte("print('hello')\n"), 0644); err != nil {
+		t.Fatalf("failed to create temp .lua file: %v", err)
+	}
+
+	result, err := InspectFile(luaFile, DefaultMaxBytes)
+	if err != nil {
+		t.Fatalf("InspectFile returned error: %v", err)
+	}
+	if !result.Exists {
+		t.Fatal("expected file to exist")
+	}
+	if result.Decision != DecisionCaution {
+		t.Errorf("expected CAUTION for unknown extension, got %s", result.Decision)
+	}
+	if result.Reason != "unknown file type, no scanner available" {
+		t.Errorf("expected reason 'unknown file type, no scanner available', got %q", result.Reason)
+	}
+}
+
+func TestInferDecisionFromSignals_CloudSDKAloneIsCaution(t *testing.T) {
+	signals := []inspect.Signal{
+		{Category: "cloud_sdk", Pattern: "boto3", Line: 1, Match: "import boto3"},
+	}
+	got := inferDecisionFromSignals(signals)
+	if got != DecisionCaution {
+		t.Errorf("expected CAUTION for cloud_sdk alone, got %s", got)
+	}
+}
+
+func TestInferDecisionFromSignals_CloudSDKPlusDestructiveIsApproval(t *testing.T) {
+	signals := []inspect.Signal{
+		{Category: "cloud_sdk", Pattern: "boto3", Line: 1, Match: "import boto3"},
+		{Category: "destructive_fs", Pattern: "rm -rf", Line: 2, Match: "rm -rf /tmp"},
+	}
+	got := inferDecisionFromSignals(signals)
+	if got != DecisionApproval {
+		t.Errorf("expected APPROVAL for cloud_sdk + destructive_fs, got %s", got)
 	}
 }
 

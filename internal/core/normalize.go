@@ -117,7 +117,7 @@ const maxRecursionDepth = 3
 func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCommand {
 	result := ClassifiedCommand{}
 
-	tokens := tokenize(subCommand)
+	tokens, unbalancedQuotes := tokenizeQuoteAware(subCommand)
 	if len(tokens) == 0 {
 		result.Outer = ""
 		return result
@@ -142,7 +142,7 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 	// Check for bash -c / sh -c pattern.
 	if (firstToken == "bash" || firstToken == "sh") && i+1 < len(tokens) {
 		innerCmd, ok := extractBashCInner(tokens, i)
-		if ok {
+		if ok && !unbalancedQuotes {
 			// The outer command is the full remaining tokens joined.
 			result.Outer = strings.Join(tokens[i:], " ")
 			if depth < maxRecursionDepth {
@@ -156,6 +156,12 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 				result.Inner = append(result.Inner, innerCmd)
 			}
 			return result
+		}
+		// bash/sh with -c detected but extraction failed: either the tokenizer
+		// extracted ok but quotes were unbalanced (ok==true, unbalancedQuotes==true),
+		// or -c was present but had no argument token (ok==false with -c in tokens).
+		if ok || containsDashC(tokens[i+1:]) {
+			result.ExtractionFailed = true
 		}
 	}
 
@@ -180,6 +186,13 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 
 // tokenize splits a command string into tokens, respecting single and double quotes.
 func tokenize(s string) []string {
+	tokens, _ := tokenizeQuoteAware(s)
+	return tokens
+}
+
+// tokenizeQuoteAware splits a command string into tokens like tokenize, but also
+// reports whether the input had unbalanced (unclosed) quotes.
+func tokenizeQuoteAware(s string) ([]string, bool) {
 	var tokens []string
 	var current strings.Builder
 	inSingle := false
@@ -227,7 +240,8 @@ func tokenize(s string) []string {
 		tokens = append(tokens, current.String())
 	}
 
-	return tokens
+	unbalanced := inSingle || inDouble
+	return tokens, unbalanced
 }
 
 // stripWrappers removes known wrapper prefixes and their flags/arguments
@@ -569,6 +583,21 @@ func skipSetsidArgs(tokens []string, i int) int {
 		break
 	}
 	return i
+}
+
+// containsDashC checks if any token in the slice is "-c" or a combined short flag
+// ending in "c" (like "-lc", "-xc"). Used to distinguish "bash script.sh" (no -c)
+// from "bash -c ..." where extraction failed.
+func containsDashC(tokens []string) bool {
+	for _, t := range tokens {
+		if t == "-c" {
+			return true
+		}
+		if len(t) > 2 && t[0] == '-' && t[1] != '-' && strings.HasSuffix(t, "c") {
+			return true
+		}
+	}
+	return false
 }
 
 // extractBashCInner extracts the inner command from "bash -c 'cmd'" or "sh -c 'cmd'" patterns.

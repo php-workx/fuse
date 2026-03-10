@@ -152,6 +152,60 @@ func TestBuildChildEnv_StripsDangerous(t *testing.T) {
 	}
 }
 
+func TestBuildChildEnv_StripsDYLDPrefix(t *testing.T) {
+	input := []string{
+		"HOME=/home/user",
+		"DYLD_FRAMEWORK_PATH=bad",
+		"EDITOR=vim",
+	}
+
+	result := BuildChildEnv(input)
+
+	for _, env := range result {
+		if strings.HasPrefix(env, "DYLD_FRAMEWORK_PATH=") {
+			t.Error("DYLD_FRAMEWORK_PATH should be stripped but was present")
+		}
+	}
+}
+
+func TestBuildChildEnv_ResetsPathToTrusted(t *testing.T) {
+	input := []string{
+		"PATH=/evil",
+		"HOME=/home/user",
+	}
+
+	result := BuildChildEnv(input)
+
+	envMap := make(map[string]string)
+	for _, e := range result {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if path, ok := envMap["PATH"]; !ok {
+		t.Error("PATH not set in output")
+	} else if path != trustedPath() {
+		t.Errorf("PATH = %q, want %q", path, trustedPath())
+	}
+}
+
+func TestBuildChildEnv_StripsLDPreload(t *testing.T) {
+	input := []string{
+		"LD_PRELOAD=/lib",
+		"HOME=/home/user",
+	}
+
+	result := BuildChildEnv(input)
+
+	for _, env := range result {
+		if strings.HasPrefix(env, "LD_PRELOAD=") {
+			t.Error("LD_PRELOAD should be stripped but was present")
+		}
+	}
+}
+
 func TestExecuteCommand_SafeCommand(t *testing.T) {
 	// This test actually executes a command, so use a safe one.
 	// We need to set up a temporary working directory.

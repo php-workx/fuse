@@ -12,15 +12,23 @@ var credentialPatterns = []struct {
 }{
 	{
 		re:          regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password|credential)[=:]\s*\S+`),
-		replacement: "${1}=***REDACTED***",
+		replacement: "${1}=[REDACTED]",
 	},
 	{
 		re:          regexp.MustCompile(`AKIA[0-9A-Z]{16}`),
-		replacement: "***AWS_KEY***",
+		replacement: "[REDACTED]",
 	},
 	{
 		re:          regexp.MustCompile(`(?i)Bearer\s+\S+`),
-		replacement: "Bearer ***REDACTED***",
+		replacement: "Bearer [REDACTED]",
+	},
+	{
+		re:          regexp.MustCompile(`(?i)(-p\s+|--password[= ]\s*)\S+`),
+		replacement: "${1}[REDACTED]",
+	},
+	{
+		re:          regexp.MustCompile(`(?i)Authorization:\s*\S+`),
+		replacement: "Authorization: [REDACTED]",
 	},
 }
 
