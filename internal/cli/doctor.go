@@ -2,10 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"strings"
 
 	"golang.org/x/sys/unix"
@@ -267,11 +269,17 @@ func hasFuseHook(settings map[string]interface{}) bool {
 		return false
 	}
 
+	requiredMatchers := map[string]bool{
+		"Bash":    false,
+		"mcp__.*": false,
+	}
+
 	for _, entry := range preToolUse {
 		entryMap, ok := entry.(map[string]interface{})
 		if !ok {
 			continue
 		}
+		matcher, _ := entryMap["matcher"].(string)
 		hooksRaw, ok := entryMap["hooks"]
 		if !ok {
 			continue
@@ -285,14 +293,23 @@ func hasFuseHook(settings map[string]interface{}) bool {
 			if !ok {
 				continue
 			}
+			hookType, _ := hMap["type"].(string)
 			cmd, _ := hMap["command"].(string)
-			if cmd == "fuse hook evaluate" {
-				return true
+			timeout, _ := hMap["timeout"].(float64)
+			if cmd == "fuse hook evaluate" && hookType == "command" && timeout == 30 {
+				if _, wanted := requiredMatchers[matcher]; wanted {
+					requiredMatchers[matcher] = true
+				}
 			}
 		}
 	}
 
-	return false
+	for _, found := range requiredMatchers {
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 // checkSQLiteDB checks that the SQLite database is accessible if it exists.
@@ -410,18 +427,51 @@ func checkLiveTTYAccess() checkResult {
 }
 
 func checkLiveRawMode() checkResult {
-	fd := int(os.Stdin.Fd())
-	if _, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP); err != nil {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
 		return checkResult{
 			name:   "Live terminal raw mode",
 			status: "WARN",
-			detail: "stdin is not a terminal; raw mode not probed",
+			detail: fmt.Sprintf("cannot open /dev/tty: %v", err),
+		}
+	}
+	defer func() { _ = tty.Close() }()
+
+	fd := int(tty.Fd())
+	orig, err := unix.IoctlGetTermios(fd, doctorIoctlGetTermios)
+	if err != nil {
+		return checkResult{
+			name:   "Live terminal raw mode",
+			status: "WARN",
+			detail: fmt.Sprintf("raw mode not available: %v", err),
+		}
+	}
+	raw := *orig
+	raw.Lflag &^= unix.ICANON | unix.ECHO
+	if len(raw.Cc) > unix.VMIN {
+		raw.Cc[unix.VMIN] = 1
+	}
+	if len(raw.Cc) > unix.VTIME {
+		raw.Cc[unix.VTIME] = 0
+	}
+	if err := unix.IoctlSetTermios(fd, doctorIoctlSetTermios, &raw); err != nil {
+		return checkResult{
+			name:   "Live terminal raw mode",
+			status: "FAIL",
+			detail: fmt.Sprintf("enter raw mode: %v", err),
+		}
+	}
+	if err := unix.IoctlSetTermios(fd, doctorIoctlSetTermios, orig); err != nil {
+		return checkResult{
+			name:   "Live terminal raw mode",
+			status: "FAIL",
+			detail: fmt.Sprintf("restore terminal state: %v", err),
 		}
 	}
 	return checkResult{
 		name:   "Live terminal raw mode",
 		status: "PASS",
-		detail: "stdin is a terminal and raw-mode prompt handling can be attempted",
+		detail: "entered and restored raw mode on /dev/tty",
 	}
 }
 
@@ -434,7 +484,25 @@ func checkLiveForegroundProcessGroup() checkResult {
 			detail: "stdin is not a terminal; foreground process-group handoff not probed",
 		}
 	}
-	restore, err := adapters.ForegroundChildProcessGroupIfTTY(os.Getpid())
+
+	cmd := exec.Command("/bin/sh", "-c", "sleep 0.1")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return checkResult{
+			name:   "Live foreground process-group handoff",
+			status: "FAIL",
+			detail: fmt.Sprintf("start probe child: %v", err),
+		}
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	restore, err := adapters.ForegroundChildProcessGroupIfTTY(cmd.Process.Pid)
 	if err != nil {
 		return checkResult{
 			name:   "Live foreground process-group handoff",
@@ -448,6 +516,6 @@ func checkLiveForegroundProcessGroup() checkResult {
 	return checkResult{
 		name:   "Live foreground process-group handoff",
 		status: "PASS",
-		detail: "terminal supports foreground process-group inspection",
+		detail: "foreground handoff to a child process group succeeded",
 	}
 }

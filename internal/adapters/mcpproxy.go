@@ -88,16 +88,25 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 	}()
 
 	requests := newInFlightRequests()
+	agentWriter := &lockedWriter{w: stdout}
 	errCh := make(chan error, 2)
 
 	go func() {
-		errCh <- proxyAgentToDownstream(stdin, downstreamIn, stdout, requests)
+		err := proxyAgentToDownstream(stdin, downstreamIn, agentWriter, requests)
+		_ = downstreamIn.Close()
+		errCh <- err
 	}()
 	go func() {
-		errCh <- proxyDownstreamToAgent(downstreamOut, stdout, requests)
+		errCh <- proxyDownstreamToAgent(downstreamOut, agentWriter, requests)
 	}()
 
-	return <-errCh
+	var firstErr error
+	for i := 0; i < 2; i++ {
+		if err := <-errCh; err != nil && !errors.Is(err, io.EOF) && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writer, requests *inFlightRequests) error {
@@ -107,9 +116,6 @@ func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writ
 		if err != nil {
 			var frameErr *mcpFrameTooLargeError
 			if errors.As(err, &frameErr) {
-				if drainErr := drainOversizeFrame(reader, frameErr.contentLength); drainErr != nil {
-					return drainErr
-				}
 				slog.Warn("rejecting oversized MCP agent request", "content_length", frameErr.contentLength)
 				data, encodeErr := encodeJSONRPC(jsonRPCErrorResponse(nil, -32600, frameErr.Error()))
 				if encodeErr != nil {
@@ -118,7 +124,7 @@ func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writ
 				if writeErr := writeMCPFrame(agent, data); writeErr != nil {
 					return writeErr
 				}
-				continue
+				return nil
 			}
 			if err == io.EOF {
 				return nil
@@ -128,7 +134,11 @@ func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writ
 
 		msg, err := decodeJSONRPC(payload)
 		if err != nil {
-			return err
+			slog.Warn("forwarding malformed downstream payload", "error", err)
+			if writeErr := writeMCPFrame(agent, payload); writeErr != nil {
+				return writeErr
+			}
+			continue
 		}
 
 		if method, _ := msg["method"].(string); method != "" {
@@ -171,7 +181,11 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 
 		msg, err := decodeJSONRPC(payload)
 		if err != nil {
-			return err
+			slog.Warn("forwarding malformed downstream payload", "error", err)
+			if writeErr := writeMCPFrame(agent, payload); writeErr != nil {
+				return writeErr
+			}
+			continue
 		}
 		if !isJSONRPCResponseEnvelope(msg) {
 			slog.Warn("forwarding malformed downstream JSON-RPC envelope", "message", msg)
@@ -338,11 +352,6 @@ func buildProxyEnv(extra map[string]string) []string {
 	return env
 }
 
-func drainOversizeFrame(reader *bufio.Reader, contentLength int) error {
-	_, err := io.CopyN(io.Discard, reader, int64(contentLength))
-	return err
-}
-
 func isJSONRPCResponseEnvelope(msg jsonRPCMessage) bool {
 	if jsonrpc, _ := msg["jsonrpc"].(string); jsonrpc != "2.0" {
 		return false
@@ -353,4 +362,15 @@ func isJSONRPCResponseEnvelope(msg jsonRPCMessage) bool {
 	_, hasResult := msg["result"]
 	_, hasError := msg["error"]
 	return hasResult != hasError
+}
+
+type lockedWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.w.Write(p)
 }

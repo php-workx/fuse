@@ -2,6 +2,7 @@ package fuse_test
 
 import (
 	"bytes"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -18,6 +19,32 @@ func skipIfShort(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
+	}
+}
+
+func TestIntegration_RunUsageErrorsExitTwo(t *testing.T) {
+	skipIfShort(t)
+
+	binPath := filepath.Join(t.TempDir(), "fuse-test-bin")
+	build := exec.Command("go", "build", "-o", binPath, "./cmd/fuse")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, string(output))
+	}
+
+	cmd := exec.Command(binPath, "run")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected fuse run without command to fail, output:\n%s", string(output))
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected ExitError, got %T (%v)", err, err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Fatalf("expected exit code 2, got %d\noutput:\n%s", exitErr.ExitCode(), string(output))
+	}
+	if !strings.Contains(string(output), "exactly one shell command string") {
+		t.Fatalf("expected usage error in output, got:\n%s", string(output))
 	}
 }
 

@@ -20,7 +20,7 @@ var runCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command, err := parseSingleCommandArg(args)
 		if err != nil {
-			return err
+			return withExitCode(err, 2)
 		}
 		cwd, _ := os.Getwd()
 		exitCode, err := adapters.ExecuteCommand(command, cwd, runTimeout)

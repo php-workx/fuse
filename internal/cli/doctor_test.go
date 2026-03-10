@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,35 @@ func TestRunDoctorLive_ReportsTerminalCapabilityChecks(t *testing.T) {
 	}
 }
 
+func TestHasFuseHook_RequiresExpectedMatchersAndTimeout(t *testing.T) {
+	settings := mustClaudeSettings(t, []map[string]interface{}{
+		{
+			"matcher": "Bash",
+			"hooks": []map[string]interface{}{
+				{
+					"type":    "command",
+					"command": "fuse hook evaluate",
+					"timeout": float64(5),
+				},
+			},
+		},
+		{
+			"matcher": "Read",
+			"hooks": []map[string]interface{}{
+				{
+					"type":    "command",
+					"command": "fuse hook evaluate",
+					"timeout": float64(30),
+				},
+			},
+		},
+	})
+
+	if hasFuseHook(settings) {
+		t.Fatal("expected malformed hook schema to fail doctor validation")
+	}
+}
+
 func captureDoctorOutput(t *testing.T, fn func() error) (string, string, error) {
 	t.Helper()
 
@@ -95,4 +125,23 @@ func configPathForTest(t *testing.T) string {
 		t.Fatal("FUSE_HOME not set")
 	}
 	return filepath.Join(fuseHome, "config", "config.yaml")
+}
+
+func mustClaudeSettings(t *testing.T, entries []map[string]interface{}) map[string]interface{} {
+	t.Helper()
+	data := map[string]interface{}{
+		"hooks": map[string]interface{}{
+			"PreToolUse": entries,
+		},
+	}
+
+	blob, err := json.Marshal(data)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(blob, &settings); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+	return settings
 }

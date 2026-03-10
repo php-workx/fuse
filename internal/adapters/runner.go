@@ -251,6 +251,10 @@ func executeShellCommand(command string, cwd string, timeout time.Duration) (int
 		return -1, fmt.Errorf("start command: %w", err)
 	}
 
+	return waitForManagedCommand(cmd)
+}
+
+func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 	// Transfer foreground TTY ownership to child process group.
 	restoreTTY, err := ForegroundChildProcessGroupIfTTY(cmd.Process.Pid)
 	if err != nil {
@@ -316,29 +320,21 @@ func executeCapturedShellCommand(command string, cwd string, timeout time.Durati
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = cwd
+	cmd.Stdin = os.Stdin
 	cmd.Env = BuildChildEnv(os.Environ())
+	cmd.SysProcAttr = platformSysProcAttr()
 
 	var stdoutBuf strings.Builder
 	var stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
 
-	err := cmd.Run()
+	if err := cmd.Start(); err != nil {
+		return commandExecution{}, fmt.Errorf("start command: %w", err)
+	}
+
+	exitCode, err := waitForManagedCommand(cmd)
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-				return commandExecution{
-					Stdout:   stdoutBuf.String(),
-					Stderr:   stderrBuf.String(),
-					ExitCode: 128 + int(status.Signal()),
-				}, nil
-			}
-			return commandExecution{
-				Stdout:   stdoutBuf.String(),
-				Stderr:   stderrBuf.String(),
-				ExitCode: exitErr.ExitCode(),
-			}, nil
-		}
 		return commandExecution{
 			Stdout: stdoutBuf.String(),
 			Stderr: stderrBuf.String(),
@@ -348,7 +344,7 @@ func executeCapturedShellCommand(command string, cwd string, timeout time.Durati
 	return commandExecution{
 		Stdout:   stdoutBuf.String(),
 		Stderr:   stderrBuf.String(),
-		ExitCode: 0,
+		ExitCode: exitCode,
 	}, nil
 }
 

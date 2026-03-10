@@ -231,6 +231,12 @@ func writeJSONFile(path string, data map[string]interface{}) error {
 }
 
 func codexConfigPath() string {
+	if cwd, err := os.Getwd(); err == nil {
+		localPath := filepath.Join(cwd, ".codex", "config.toml")
+		if _, statErr := os.Stat(localPath); statErr == nil {
+			return localPath
+		}
+	}
 	if home := os.Getenv("CODEX_HOME"); home != "" {
 		return filepath.Join(home, "config.toml")
 	}
