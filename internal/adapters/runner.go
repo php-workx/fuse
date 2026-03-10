@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,6 +19,14 @@ import (
 	"github.com/runger/fuse/internal/db"
 	"github.com/runger/fuse/internal/policy"
 )
+
+var errApprovalDenied = errors.New("fuse denied command")
+
+type commandExecution struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+}
 
 // strippedEnvVars lists environment variables that are stripped from the child
 // process environment for security (§10.1).
@@ -110,12 +119,7 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 // In run mode, it: classify -> prompt if needed -> execute with safety controls.
 func ExecuteCommand(command string, cwd string, timeout time.Duration) (exitCode int, err error) {
 	// Load configuration.
-	cfg, err := config.LoadConfig(config.ConfigPath())
-	if err != nil {
-		// Non-fatal: proceed with defaults.
-		cfg = nil
-	}
-	_ = cfg // config used for future features
+	cfg := loadRuntimeConfig()
 
 	// Check if fuse is disabled (allow-all mode).
 	if config.IsDisabled() {
@@ -152,12 +156,16 @@ func ExecuteCommand(command string, cwd string, timeout time.Duration) (exitCode
 	case core.DecisionBlocked:
 		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
 		logEvent(database, command, result, "blocked")
+		cleanupExecutionState(database, cfg)
 		return 1, nil
 
 	case core.DecisionSafe:
 		// Execute directly.
 
-	case core.DecisionCaution, core.DecisionApproval:
+	case core.DecisionCaution:
+		// Execute directly.
+
+	case core.DecisionApproval:
 		// Prompt user for approval.
 		if database == nil {
 			fmt.Fprintf(os.Stderr, "fuse: approval required but database unavailable\n")
@@ -186,6 +194,7 @@ func ExecuteCommand(command string, cwd string, timeout time.Duration) (exitCode
 		if decision == core.DecisionBlocked {
 			fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
 			logEvent(database, command, result, "denied")
+			cleanupExecutionState(database, cfg)
 			return 1, nil
 		}
 	}
@@ -203,11 +212,7 @@ func ExecuteCommand(command string, cwd string, timeout time.Duration) (exitCode
 		outcome = "error"
 	}
 	logEvent(database, command, result, outcome)
-
-	if database != nil {
-		_, _ = database.CleanupExpired()
-		_, _ = database.PruneEvents(10000)
-	}
+	cleanupExecutionState(database, cfg)
 
 	return exitCode, err
 }
@@ -301,6 +306,52 @@ func executeShellCommand(command string, cwd string, timeout time.Duration) (int
 	return 0, nil
 }
 
+func executeCapturedShellCommand(command string, cwd string, timeout time.Duration) (commandExecution, error) {
+	ctx := context.Background()
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd.Dir = cwd
+	cmd.Env = BuildChildEnv(os.Environ())
+
+	var stdoutBuf strings.Builder
+	var stderrBuf strings.Builder
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err := cmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+				return commandExecution{
+					Stdout:   stdoutBuf.String(),
+					Stderr:   stderrBuf.String(),
+					ExitCode: 128 + int(status.Signal()),
+				}, nil
+			}
+			return commandExecution{
+				Stdout:   stdoutBuf.String(),
+				Stderr:   stderrBuf.String(),
+				ExitCode: exitErr.ExitCode(),
+			}, nil
+		}
+		return commandExecution{
+			Stdout: stdoutBuf.String(),
+			Stderr: stderrBuf.String(),
+		}, err
+	}
+
+	return commandExecution{
+		Stdout:   stdoutBuf.String(),
+		Stderr:   stderrBuf.String(),
+		ExitCode: 0,
+	}, nil
+}
+
 // logEvent logs an execution event to the database if available.
 func logEvent(database *db.DB, command string, result *core.ClassifyResult, outcome string) {
 	if database == nil {
@@ -315,4 +366,27 @@ func logEvent(database *db.DB, command string, result *core.ClassifyResult, outc
 		0,                       // durationMs
 		outcome,                 // metadata (used for outcome)
 	)
+}
+
+func loadRuntimeConfig() *config.Config {
+	cfg, err := config.LoadConfig(config.ConfigPath())
+	if err != nil {
+		return config.DefaultConfig()
+	}
+	return cfg
+}
+
+func cleanupExecutionState(database *db.DB, cfg *config.Config) {
+	if database == nil {
+		return
+	}
+	_, _ = database.CleanupExpired()
+	_, _ = database.PruneEvents(eventLogLimit(cfg))
+}
+
+func eventLogLimit(cfg *config.Config) int {
+	if cfg == nil || cfg.MaxEventLogRows <= 0 {
+		return 10000
+	}
+	return cfg.MaxEventLogRows
 }

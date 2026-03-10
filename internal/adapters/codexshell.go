@@ -2,16 +2,14 @@ package adapters
 
 import (
 	"bufio"
-	"bytes"
-	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"time"
 
 	"github.com/runger/fuse/internal/approve"
 	"github.com/runger/fuse/internal/config"
 	"github.com/runger/fuse/internal/core"
+	"github.com/runger/fuse/internal/db"
 	"github.com/runger/fuse/internal/policy"
 )
 
@@ -143,6 +141,12 @@ func handleCodexShellToolCall(msg jsonRPCMessage) (jsonRPCMessage, bool, error) 
 }
 
 func executeCodexShellCommand(command, cwd string, timeout time.Duration) (string, string, int, error) {
+	cfg := loadRuntimeConfig()
+	if config.IsDisabled() {
+		execResult, err := executeCapturedShellCommand(command, cwd, timeout)
+		return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
+	}
+
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
 	evaluator := policy.NewEvaluator(policyCfg)
 	req := core.ShellRequest{
@@ -156,15 +160,27 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 		return "", "", 0, err
 	}
 
+	database, dbErr := db.OpenDB(config.DBPath())
+	if dbErr != nil {
+		database = nil
+	}
+	if database != nil {
+		defer func() { _ = database.Close() }()
+	}
+
 	switch result.Decision {
 	case core.DecisionBlocked:
+		logEvent(database, command, result, "blocked")
+		cleanupExecutionState(database, cfg)
 		return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
 	case core.DecisionApproval:
-		database, secret, err := openDBAndSecret()
+		if database == nil {
+			return "", "", 0, fmt.Errorf("database unavailable for approval")
+		}
+		secret, err := db.EnsureSecret(config.SecretPath())
 		if err != nil {
 			return "", "", 0, err
 		}
-		defer func() { _ = database.Close() }()
 
 		mgr, err := approve.NewManager(database, secret)
 		if err != nil {
@@ -175,7 +191,9 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 			return "", "", 0, err
 		}
 		if decision == core.DecisionBlocked {
-			return "", "", 0, fmt.Errorf("fuse denied command")
+			logEvent(database, command, result, "denied")
+			cleanupExecutionState(database, cfg)
+			return "", "", 0, errApprovalDenied
 		}
 	}
 
@@ -183,27 +201,12 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 		return "", "", 0, err
 	}
 
-	ctx := context.Background()
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
-	cmd.Dir = cwd
-	cmd.Env = BuildChildEnv(cmd.Environ())
-	var stdoutBuf bytes.Buffer
-	var stderrBuf bytes.Buffer
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-
-	err = cmd.Run()
+	execResult, err := executeCapturedShellCommand(command, cwd, timeout)
+	outcome := "executed"
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return stdoutBuf.String(), stderrBuf.String(), exitErr.ExitCode(), nil
-		}
-		return stdoutBuf.String(), stderrBuf.String(), 0, err
+		outcome = "error"
 	}
-	return stdoutBuf.String(), stderrBuf.String(), 0, nil
+	logEvent(database, command, result, outcome)
+	cleanupExecutionState(database, cfg)
+	return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
 }

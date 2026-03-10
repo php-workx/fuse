@@ -13,6 +13,14 @@ const maxMCPFrameBytes = 1 << 20
 
 type jsonRPCMessage map[string]interface{}
 
+type mcpFrameTooLargeError struct {
+	contentLength int
+}
+
+func (e *mcpFrameTooLargeError) Error() string {
+	return fmt.Sprintf("content length %d exceeds limit %d", e.contentLength, maxMCPFrameBytes)
+}
+
 func readMCPFrame(r *bufio.Reader) ([]byte, error) {
 	contentLength := -1
 	for {
@@ -42,7 +50,7 @@ func readMCPFrame(r *bufio.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("missing Content-Length header")
 	}
 	if contentLength > maxMCPFrameBytes {
-		return nil, fmt.Errorf("content length %d exceeds limit %d", contentLength, maxMCPFrameBytes)
+		return nil, &mcpFrameTooLargeError{contentLength: contentLength}
 	}
 
 	payload := make([]byte, contentLength)

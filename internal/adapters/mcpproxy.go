@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -104,6 +105,21 @@ func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writ
 	for {
 		payload, err := readMCPFrame(reader)
 		if err != nil {
+			var frameErr *mcpFrameTooLargeError
+			if errors.As(err, &frameErr) {
+				if drainErr := drainOversizeFrame(reader, frameErr.contentLength); drainErr != nil {
+					return drainErr
+				}
+				slog.Warn("rejecting oversized MCP agent request", "content_length", frameErr.contentLength)
+				data, encodeErr := encodeJSONRPC(jsonRPCErrorResponse(nil, -32600, frameErr.Error()))
+				if encodeErr != nil {
+					return encodeErr
+				}
+				if writeErr := writeMCPFrame(agent, data); writeErr != nil {
+					return writeErr
+				}
+				continue
+			}
 			if err == io.EOF {
 				return nil
 			}
@@ -146,6 +162,7 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 	for {
 		payload, err := readMCPFrame(reader)
 		if err != nil {
+			slog.Warn("downstream MCP frame error", "error", err)
 			if err == io.EOF {
 				return nil
 			}
@@ -155,6 +172,9 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 		msg, err := decodeJSONRPC(payload)
 		if err != nil {
 			return err
+		}
+		if !isJSONRPCResponseEnvelope(msg) {
+			slog.Warn("forwarding malformed downstream JSON-RPC envelope", "message", msg)
 		}
 
 		if _, hasID := msg["id"]; hasID {
@@ -316,4 +336,21 @@ func buildProxyEnv(extra map[string]string) []string {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 	return env
+}
+
+func drainOversizeFrame(reader *bufio.Reader, contentLength int) error {
+	_, err := io.CopyN(io.Discard, reader, int64(contentLength))
+	return err
+}
+
+func isJSONRPCResponseEnvelope(msg jsonRPCMessage) bool {
+	if jsonrpc, _ := msg["jsonrpc"].(string); jsonrpc != "2.0" {
+		return false
+	}
+	if _, ok := msg["id"]; !ok {
+		return false
+	}
+	_, hasResult := msg["result"]
+	_, hasError := msg["error"]
+	return hasResult != hasError
 }

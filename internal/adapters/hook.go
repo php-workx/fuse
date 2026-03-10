@@ -63,7 +63,7 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 	}
 
 	// Load config for log level.
-	cfg, _ := config.LoadConfig(config.ConfigPath())
+	cfg := loadRuntimeConfig()
 	if cfg != nil && cfg.LogLevel != "" {
 		events.SetLogLevel(cfg.LogLevel)
 	}
@@ -91,7 +91,7 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 
 	// Route based on tool_name.
 	if strings.HasPrefix(req.ToolName, "mcp__") {
-		return handleMCPTool(req, stderr)
+		return handleMCPTool(req, stderr, cfg)
 	}
 
 	if req.ToolName != "Bash" {
@@ -99,11 +99,11 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 		return 0
 	}
 
-	return handleBashTool(req, stderr)
+	return handleBashTool(req, stderr, cfg)
 }
 
 // handleMCPTool handles MCP tool classification.
-func handleMCPTool(req HookRequest, stderr io.Writer) int {
+func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 	// Parse tool_input as a generic map for MCP argument scanning.
 	var args map[string]interface{}
 	if len(req.ToolInput) > 0 {
@@ -138,7 +138,7 @@ func handleMCPTool(req HookRequest, stderr io.Writer) int {
 				},
 			},
 		}
-		return handleApproval(req, result, stderr)
+		return handleApproval(req, result, stderr, cfg)
 	default:
 		// SAFE
 		return 0
@@ -161,7 +161,7 @@ func extractMCPAction(toolName string) string {
 }
 
 // handleBashTool handles Bash tool classification.
-func handleBashTool(req HookRequest, stderr io.Writer) int {
+func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 	// Parse tool_input to extract command.
 	if len(req.ToolInput) == 0 {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Missing tool_input. Do not retry this exact command. Ask the user for guidance.")
@@ -218,7 +218,7 @@ func handleBashTool(req HookRequest, stderr io.Writer) int {
 		return 0
 
 	case core.DecisionApproval:
-		return handleApproval(req, result, stderr)
+		return handleApproval(req, result, stderr, cfg)
 
 	default:
 		// Unknown decision: fail-closed.
@@ -228,7 +228,7 @@ func handleBashTool(req HookRequest, stderr io.Writer) int {
 }
 
 // handleApproval handles the APPROVAL decision path, which requires DB access.
-func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writer) int {
+func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writer, cfg *config.Config) int {
 	// Lazy DB access: only APPROVAL path opens the database.
 	database, secret, err := openDBAndSecret()
 	if err != nil {
@@ -256,8 +256,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		return 2
 	}
 
-	_, _ = database.CleanupExpired()
-	_, _ = database.PruneEvents(10000)
+	cleanupExecutionState(database, cfg)
 
 	switch decision {
 	case core.DecisionApproval, core.DecisionSafe, core.DecisionCaution:
@@ -277,6 +276,7 @@ func logHookEvent(sessionID, command string, result *core.ClassifyResult) {
 	}
 	defer func() { _ = database.Close() }()
 	_ = database.LogEvent(sessionID, command, string(result.Decision), result.RuleID, result.Reason, 0, "hook")
+	cleanupExecutionState(database, loadRuntimeConfig())
 }
 
 // extractCommandFromResult returns the raw command from the first sub-result,

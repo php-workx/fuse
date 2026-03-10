@@ -6,9 +6,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 
+	"golang.org/x/sys/unix"
+
+	"github.com/runger/fuse/internal/adapters"
 	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/db"
 	"github.com/runger/fuse/internal/policy"
 	"github.com/spf13/cobra"
@@ -45,10 +48,13 @@ func runDoctor(live bool) error {
 	results = append(results, checkPolicyYAML())
 	results = append(results, checkClaudeSettings())
 	results = append(results, checkSQLiteDB())
+	results = append(results, checkMCPProxyConfiguration())
 	results = append(results, checkFuseInPath())
 
 	if live {
-		results = append(results, checkLiveClassification())
+		results = append(results, checkLiveTTYAccess())
+		results = append(results, checkLiveRawMode())
+		results = append(results, checkLiveForegroundProcessGroup())
 	}
 
 	// Print results.
@@ -349,49 +355,99 @@ func checkFuseInPath() checkResult {
 }
 
 // checkLiveClassification runs a test classification to verify the pipeline.
-func checkLiveClassification() checkResult {
-	req := core.ShellRequest{
-		RawCommand: "echo hello",
-		Cwd:        "/tmp",
-		Source:     "doctor",
-	}
-
-	// Load policy if available.
-	var evaluator core.PolicyEvaluator
-	policyPath := config.PolicyPath()
-	if _, err := os.Stat(policyPath); err == nil {
-		pol, loadErr := policy.LoadPolicy(policyPath)
-		if loadErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: policy.yaml exists but failed to parse: %v\n", loadErr)
-		}
-		if pol != nil {
-			evaluator = policy.NewEvaluator(pol)
-		}
-	}
-	if evaluator == nil {
-		evaluator = policy.NewEvaluator(nil)
-	}
-
-	result, err := core.Classify(req, evaluator)
+func checkMCPProxyConfiguration() checkResult {
+	cfg, err := config.LoadConfig(config.ConfigPath())
 	if err != nil {
 		return checkResult{
-			name:   "Live classification test",
+			name:   "MCP proxy configuration",
 			status: "FAIL",
-			detail: fmt.Sprintf("classification error: %v", err),
+			detail: fmt.Sprintf("error loading config: %v", err),
 		}
 	}
-
-	if result.Decision != core.DecisionSafe {
+	if cfg == nil || len(cfg.MCPProxies) == 0 {
 		return checkResult{
-			name:   "Live classification test",
-			status: "WARN",
-			detail: fmt.Sprintf("'echo hello' classified as %s (expected SAFE): %s", result.Decision, result.Reason),
+			name:   "MCP proxy configuration",
+			status: "PASS",
+			detail: "no MCP proxies configured",
 		}
 	}
 
+	var missing []string
+	for _, proxy := range cfg.MCPProxies {
+		if _, err := exec.LookPath(proxy.Command); err != nil {
+			missing = append(missing, fmt.Sprintf("%s (%s)", proxy.Name, proxy.Command))
+		}
+	}
+	if len(missing) > 0 {
+		return checkResult{
+			name:   "MCP proxy configuration",
+			status: "FAIL",
+			detail: "downstream command not found: " + strings.Join(missing, ", "),
+		}
+	}
 	return checkResult{
-		name:   "Live classification test",
+		name:   "MCP proxy configuration",
 		status: "PASS",
-		detail: fmt.Sprintf("'echo hello' -> %s", result.Decision),
+		detail: fmt.Sprintf("%d proxy command(s) available", len(cfg.MCPProxies)),
+	}
+}
+
+func checkLiveTTYAccess() checkResult {
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return checkResult{
+			name:   "Live terminal /dev/tty access",
+			status: "WARN",
+			detail: fmt.Sprintf("cannot open /dev/tty: %v", err),
+		}
+	}
+	_ = tty.Close()
+	return checkResult{
+		name:   "Live terminal /dev/tty access",
+		status: "PASS",
+		detail: "/dev/tty opened successfully",
+	}
+}
+
+func checkLiveRawMode() checkResult {
+	fd := int(os.Stdin.Fd())
+	if _, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP); err != nil {
+		return checkResult{
+			name:   "Live terminal raw mode",
+			status: "WARN",
+			detail: "stdin is not a terminal; raw mode not probed",
+		}
+	}
+	return checkResult{
+		name:   "Live terminal raw mode",
+		status: "PASS",
+		detail: "stdin is a terminal and raw-mode prompt handling can be attempted",
+	}
+}
+
+func checkLiveForegroundProcessGroup() checkResult {
+	fd := int(os.Stdin.Fd())
+	if _, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP); err != nil {
+		return checkResult{
+			name:   "Live foreground process-group handoff",
+			status: "WARN",
+			detail: "stdin is not a terminal; foreground process-group handoff not probed",
+		}
+	}
+	restore, err := adapters.ForegroundChildProcessGroupIfTTY(os.Getpid())
+	if err != nil {
+		return checkResult{
+			name:   "Live foreground process-group handoff",
+			status: "FAIL",
+			detail: fmt.Sprintf("handoff probe failed: %v", err),
+		}
+	}
+	if restore != nil {
+		restore()
+	}
+	return checkResult{
+		name:   "Live foreground process-group handoff",
+		status: "PASS",
+		detail: "terminal supports foreground process-group inspection",
 	}
 }
