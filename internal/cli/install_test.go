@@ -84,3 +84,49 @@ func TestCodexConfigPath_PrefersLocalRepoConfig(t *testing.T) {
 		t.Fatalf("codexConfigPath() = %q (%q), want %q (%q)", got, gotEval, localConfigPath, wantEval)
 	}
 }
+
+func TestInstallCodex_RejectsSymlinkedLocalConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	targetPath := filepath.Join(t.TempDir(), "target.toml")
+	if err := os.WriteFile(targetPath, []byte("original\n"), 0644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+
+	localConfigDir := filepath.Join(tmpDir, ".codex")
+	if err := os.MkdirAll(localConfigDir, 0755); err != nil {
+		t.Fatalf("mkdir .codex: %v", err)
+	}
+	localConfigPath := filepath.Join(localConfigDir, "config.toml")
+	if err := os.Symlink(targetPath, localConfigPath); err != nil {
+		t.Fatalf("symlink local config: %v", err)
+	}
+
+	origWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	defer func() {
+		if err := os.Chdir(origWd); err != nil {
+			t.Fatalf("restore wd: %v", err)
+		}
+	}()
+
+	err = installCodex()
+	if err == nil {
+		t.Fatal("expected installCodex to reject symlinked local config")
+	}
+	if !strings.Contains(err.Error(), "symlinked") {
+		t.Fatalf("expected symlink rejection error, got %v", err)
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "original\n" {
+		t.Fatalf("expected symlink target to remain unchanged, got %q", string(data))
+	}
+}

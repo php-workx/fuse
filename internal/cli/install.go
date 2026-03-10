@@ -247,8 +247,44 @@ func codexConfigPath() string {
 	return filepath.Join(home, ".codex", "config.toml")
 }
 
+func rejectSymlinkedCodexConfigPath(configPath string) error {
+	absPath, err := filepath.Abs(configPath)
+	if err != nil {
+		return fmt.Errorf("resolve config path: %w", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	absCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return nil
+	}
+	rel, err := filepath.Rel(absCwd, absPath)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return nil
+	}
+
+	for _, candidate := range []string{filepath.Join(absCwd, ".codex"), absPath} {
+		info, err := os.Lstat(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("inspect %s: %w", candidate, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to use symlinked Codex config path %s", candidate)
+		}
+	}
+	return nil
+}
+
 func installCodex() error {
 	configPath := codexConfigPath()
+	if err := rejectSymlinkedCodexConfigPath(configPath); err != nil {
+		return err
+	}
 	existing, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("reading %s: %w", configPath, err)

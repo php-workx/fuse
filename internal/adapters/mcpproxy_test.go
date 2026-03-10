@@ -5,9 +5,13 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/runger/fuse/internal/config"
 )
 
 func TestProxyAgentToDownstream_OversizeRequestReturnsJSONRPCError(t *testing.T) {
@@ -90,6 +94,68 @@ func TestProxyDownstreamToAgent_ForwardsMalformedJSONPayload(t *testing.T) {
 	}
 	if string(payload) != `{"jsonrpc":"2.0","id":1,"result":` {
 		t.Fatalf("expected malformed payload forwarded unchanged, got %q", string(payload))
+	}
+}
+
+func TestProxyAgentToDownstream_MalformedPayloadReturnsParseError(t *testing.T) {
+	var downstream bytes.Buffer
+	var agent bytes.Buffer
+
+	input := rawMCPFrame([]byte(`{"jsonrpc":"2.0","id":1,"method":`))
+	err := proxyAgentToDownstream(strings.NewReader(input), &downstream, &agent, newInFlightRequests())
+	if err != nil {
+		t.Fatalf("proxyAgentToDownstream returned error: %v", err)
+	}
+
+	payload, err := readMCPFrame(bufio.NewReader(&agent))
+	if err != nil {
+		t.Fatalf("readMCPFrame(agent): %v", err)
+	}
+	msg, err := decodeJSONRPC(payload)
+	if err != nil {
+		t.Fatalf("decodeJSONRPC(agent): %v", err)
+	}
+
+	if msg["id"] != nil {
+		t.Fatalf("expected parse rejection to use id=null, got %#v", msg["id"])
+	}
+	errObj, _ := msg["error"].(map[string]interface{})
+	if errObj == nil {
+		t.Fatalf("expected JSON-RPC error response, got %#v", msg)
+	}
+	if code, _ := errObj["code"].(float64); code != -32700 {
+		t.Fatalf("expected JSON-RPC parse error code -32700, got %#v", errObj["code"])
+	}
+	if downstream.Len() != 0 {
+		t.Fatalf("expected malformed request not to be forwarded downstream, wrote %d bytes", downstream.Len())
+	}
+}
+
+func TestRunMCPProxy_ReturnsWhenAgentClosesAndDownstreamStaysAlive(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("FUSE_HOME", tmpDir)
+
+	configDir := filepath.Join(tmpDir, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configYAML := "mcp_proxies:\n  - name: sleepy\n    command: /bin/sh\n    args:\n      - -c\n      - sleep 10\n    env: {}\n"
+	if err := os.WriteFile(config.ConfigPath(), []byte(configYAML), 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- RunMCPProxy("sleepy", strings.NewReader(""), io.Discard, io.Discard)
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("RunMCPProxy returned error: %v", err)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("RunMCPProxy hung after agent EOF while downstream kept stdout open")
 	}
 }
 

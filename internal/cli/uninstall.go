@@ -144,6 +144,9 @@ func removeFuseHook(settings map[string]interface{}) bool {
 
 func uninstallCodex() error {
 	configPath := codexConfigPath()
+	if err := rejectSymlinkedCodexConfigPath(configPath); err != nil {
+		return err
+	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		if os.IsNotExist(err) {

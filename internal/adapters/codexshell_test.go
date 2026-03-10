@@ -12,6 +12,36 @@ import (
 	"github.com/runger/fuse/internal/config"
 )
 
+func TestExecuteCapturedShellCommand_DoesNotInheritProcessStdin(t *testing.T) {
+	origStdin := os.Stdin
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	if _, err := w.Write([]byte("transport-bytes")); err != nil {
+		t.Fatalf("write pipe: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+	os.Stdin = r
+	defer func() {
+		os.Stdin = origStdin
+		_ = r.Close()
+	}()
+
+	result, err := executeCapturedShellCommand("cat", "", time.Second)
+	if err != nil {
+		t.Fatalf("executeCapturedShellCommand: %v", err)
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d", result.ExitCode)
+	}
+	if result.Stdout != "" {
+		t.Fatalf("expected captured command to ignore process stdin, got %q", result.Stdout)
+	}
+}
+
 func TestExecuteCodexShellCommand_AllowsBlockedCommandWhenDisabled(t *testing.T) {
 	enabledMarker := config.EnabledMarkerPath()
 	if err := os.Remove(enabledMarker); err != nil {

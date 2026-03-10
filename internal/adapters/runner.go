@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -311,6 +312,10 @@ func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 }
 
 func executeCapturedShellCommand(command string, cwd string, timeout time.Duration) (commandExecution, error) {
+	return executeCapturedShellCommandWithStdin(command, cwd, timeout, nil)
+}
+
+func executeCapturedShellCommandWithStdin(command string, cwd string, timeout time.Duration, stdin io.Reader) (commandExecution, error) {
 	ctx := context.Background()
 	if timeout > 0 {
 		var cancel context.CancelFunc
@@ -320,7 +325,7 @@ func executeCapturedShellCommand(command string, cwd string, timeout time.Durati
 
 	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
 	cmd.Dir = cwd
-	cmd.Stdin = os.Stdin
+	cmd.Stdin = stdin
 	cmd.Env = BuildChildEnv(os.Environ())
 	cmd.SysProcAttr = platformSysProcAttr()
 

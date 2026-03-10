@@ -100,13 +100,11 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 		errCh <- proxyDownstreamToAgent(downstreamOut, agentWriter, requests)
 	}()
 
-	var firstErr error
-	for i := 0; i < 2; i++ {
-		if err := <-errCh; err != nil && !errors.Is(err, io.EOF) && firstErr == nil {
-			firstErr = err
-		}
+	err = <-errCh
+	if errors.Is(err, io.EOF) {
+		return nil
 	}
-	return firstErr
+	return err
 }
 
 func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writer, requests *inFlightRequests) error {
@@ -134,8 +132,12 @@ func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writ
 
 		msg, err := decodeJSONRPC(payload)
 		if err != nil {
-			slog.Warn("forwarding malformed downstream payload", "error", err)
-			if writeErr := writeMCPFrame(agent, payload); writeErr != nil {
+			slog.Warn("rejecting malformed MCP agent request", "error", err)
+			data, encodeErr := encodeJSONRPC(jsonRPCErrorResponse(nil, -32700, fmt.Sprintf("invalid JSON-RPC request: %v", err)))
+			if encodeErr != nil {
+				return encodeErr
+			}
+			if writeErr := writeMCPFrame(agent, data); writeErr != nil {
 				return writeErr
 			}
 			continue

@@ -7,8 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"syscall"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 
@@ -485,12 +485,8 @@ func checkLiveForegroundProcessGroup() checkResult {
 		}
 	}
 
-	cmd := exec.Command("/bin/sh", "-c", "sleep 0.1")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
+	cmd, err := startForegroundProbeProcess(os.Stdin, io.Discard, io.Discard)
+	if err != nil {
 		return checkResult{
 			name:   "Live foreground process-group handoff",
 			status: "FAIL",
@@ -518,4 +514,16 @@ func checkLiveForegroundProcessGroup() checkResult {
 		status: "PASS",
 		detail: "foreground handoff to a child process group succeeded",
 	}
+}
+
+func startForegroundProbeProcess(stdin io.Reader, stdout, stderr io.Writer) (*exec.Cmd, error) {
+	cmd := exec.Command("/bin/sh", "-c", "trap 'exit 0' TERM INT HUP; while :; do sleep 1; done")
+	cmd.Stdin = stdin
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	return cmd, nil
 }
