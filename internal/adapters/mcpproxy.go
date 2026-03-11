@@ -222,6 +222,8 @@ func interceptProxyRequest(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
 		if sensitive, target := isSensitiveResourceRequest(msg); sensitive {
 			return false, jsonRPCErrorResponse(msg["id"], -32000, fmt.Sprintf("fuse denied sensitive resource access: %s", target)), nil
 		}
+	default:
+		// Pass through unrecognised methods.
 	}
 	return true, nil, nil
 }
@@ -233,6 +235,8 @@ func interceptToolCall(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
 
 	decision := core.ClassifyMCPTool(name, arguments)
 	switch decision {
+	default:
+		// Safe/Caution — pass through.
 	case core.DecisionBlocked:
 		return false, jsonRPCErrorResponse(msg["id"], -32000, fmt.Sprintf("fuse blocked MCP tool %s", name)), nil
 	case core.DecisionApproval:

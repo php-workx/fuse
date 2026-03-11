@@ -196,6 +196,9 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 			cleanupExecutionState(database, cfg)
 			return 1, nil
 		}
+
+	default:
+		// Unknown decision — execute directly (safe fallback).
 	}
 
 	if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {

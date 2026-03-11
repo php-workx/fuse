@@ -114,6 +114,8 @@ func ContainsCwdChange(subCommands []string) bool {
 		switch first {
 		case "cd", "pushd", "popd":
 			return true
+		default:
+			// Not a directory-changing command.
 		}
 	}
 	return false

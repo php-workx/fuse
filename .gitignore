@@ -13,3 +13,8 @@ firebase-debug.log
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+.env
+
+# SonarQube
+.sonarqube/
+.scannerwork/

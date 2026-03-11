@@ -32,22 +32,14 @@ func NewManager(database *db.DB, secret []byte) (*Manager, error) {
 // scopes that do not expire.
 func scopeExpiry(scope string) *time.Time {
 	switch scope {
-	case "once":
-		// "once" approvals expire after 1 hour as a safety net,
-		// but are typically consumed immediately.
-		t := time.Now().Add(1 * time.Hour)
-		return &t
-	case "command":
-		// Command-scoped approvals last 24 hours.
-		t := time.Now().Add(24 * time.Hour)
-		return &t
-	case "session":
-		// Session-scoped approvals last 24 hours.
+	case "command", "session":
+		// Command- and session-scoped approvals last 24 hours.
 		t := time.Now().Add(24 * time.Hour)
 		return &t
 	case "forever":
 		return nil
 	default:
+		// "once" and unknown scopes expire after 1 hour as a safety net.
 		t := time.Now().Add(1 * time.Hour)
 		return &t
 	}

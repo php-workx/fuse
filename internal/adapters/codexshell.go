@@ -174,6 +174,8 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 		logEvent(database, command, result, "blocked")
 		cleanupExecutionState(database, cfg)
 		return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
+	case core.DecisionSafe, core.DecisionCaution:
+		// Execute directly.
 	case core.DecisionApproval:
 		if database == nil {
 			return "", "", 0, fmt.Errorf("database unavailable for approval")
@@ -196,6 +198,9 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 			cleanupExecutionState(database, cfg)
 			return "", "", 0, errApprovalDenied
 		}
+
+	default:
+		// Unknown decision — execute directly (safe fallback).
 	}
 
 	if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {

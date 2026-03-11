@@ -281,6 +281,7 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 			i = skipChrootArgs(tokens, i)
 		case "setsid":
 			i = skipSetsidArgs(tokens, i)
+		default:
 			// command, nohup, time: no special flag handling needed
 		}
 	}
