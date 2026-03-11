@@ -12,7 +12,7 @@ Current honest position:
 - under-proven on Codex
 - under-proven on full test-plan conformance and low-friction claims
 
-## First-Pass Counts
+## First-Pass Grouped Counts
 
 | Status | Count |
 |---|---|
@@ -21,7 +21,7 @@ Current honest position:
 | `gap` | `4` |
 | `accepted-limit` | `1` |
 
-These counts are from the grouped first-pass matrix, not a fully exhaustive per-line spec extraction yet.
+These counts are grouped first-pass row counts from the current audit matrix. They are useful for triage, not a claim that the audit is fully exhaustive yet.
 
 ## Release-Blocker Candidates
 
@@ -56,4 +56,3 @@ If a release had to happen today, the honest statement would be:
 2. Expand or explicitly narrow golden fixture claims.
 3. Strengthen Codex tests and decide Codex release posture from evidence.
 4. Add dogfood and performance/compatibility evidence before RC1.
-

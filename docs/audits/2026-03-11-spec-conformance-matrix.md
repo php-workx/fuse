@@ -2,7 +2,7 @@
 
 ## Scope
 
-This is a first-pass release-readiness audit against:
+This is a grouped first-pass release-readiness audit against:
 
 - `specs/functional.md`
 - `specs/technical_v1.1.md`
@@ -40,7 +40,7 @@ Status meanings:
 | `FUNC-14.2` / `TECH-3.2` | Codex integration is available and release-worthy | `functional.md` §14.2, `technical_v1.1.md` §3.2 | `gap` | `internal/adapters/codexshell.go`, `internal/adapters/codexshell_test.go`, `README.md` | Implementation exists, but current test depth is thin and does not yet justify GA-level confidence. |
 | `FUNC-17` / `TECH-1.2` / `testplan.md` §6 | Performance claims and low-friction hot path are proven | `functional.md` §17, `technical_v1.1.md` §1.2, `specs/testplan.md` §6 | `gap` | `specs/testplan.md`, `README.md`, current repo test inventory | No benchmark or release-gate performance harness was found in the current test surface. |
 | `FUNC-19` / `TECH-12.3` / `testplan.md` §4 | Rule corpus has sufficient golden fixtures | `functional.md` §19, `technical_v1.1.md` §12.3, `specs/testplan.md` §4 | `gap` | `testdata/fixtures/commands.yaml`, `internal/core/classify_test.go`, `internal/policy/hardcoded.go`, `internal/policy/builtins_core.go`, `internal/policy/builtins_security.go` | `162` fixtures is materially below the implied `494` minimum if every built-in and hardcoded rule needs a positive and near-miss row. |
-| `FUNC-18` / `TECH-4` / build reproducibility | Product builds from a clean checkout and clean test environment | `functional.md` §18, `technical_v1.1.md` §4 | `gap` | `.gitignore:6`, `integration_test.go`, worktree baseline failure, original checkout local ignored `cmd/fuse/main.go` | Clean worktree lacks tracked `cmd/fuse`, but root integration test expects it. Current green baseline in the original checkout is contaminated by ignored local files. |
+| `REL-BASELINE-001` | Clean-checkout/build reproducibility | release-readiness baseline | `gap` | `.gitignore:6`, `integration_test.go`, worktree baseline failure, original checkout local ignored `cmd/fuse/main.go` | This is a release-readiness blocker, not a cleanly cited functional/technical subsection mapping. |
 | `FUNC-4.3` / `FUNC-4.4` / `TECH-16.1` / `TECH-16.2` | TOCTOU and obfuscation limitations are honestly documented | `functional.md` §4.3-§4.4, `technical_v1.1.md` §16.1-§16.2 | `accepted-limit` | `README.md`, `specs/functional.md`, `specs/technical_v1.1.md` | Limitation language is present and consistent with the current product shape. |
 | `FUNC-7` / `FUNC-21` | Enforced scope matches marketed scope | `functional.md` §7, §21 | `partial` | `README.md`, `internal/adapters/hook.go`, `internal/adapters/mcpproxy.go`, `internal/adapters/codexshell.go` | The product story is coherent, but release wording still needs to decide whether Codex is GA, beta, or deferred. |
 
@@ -56,3 +56,4 @@ Current confidence by slice:
 - Codex: implemented but under-proven
 - test-plan conformance: currently below release confidence
 
+This matrix is grouped by requirement area for first-pass triage. It is not yet a full per-normative-statement extraction.

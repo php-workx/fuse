@@ -22,7 +22,7 @@
   - fresh worktree created from `HEAD` does not contain `cmd/fuse/`
   - `go test ./...` fails in the worktree because `./cmd/fuse` is missing
 - **Impact:** The repository is not reproducibly buildable/testable from a clean checkout, which invalidates release confidence.
-- **Recommended fix:** Track the real CLI entrypoint in git and remove the ignored-local-file dependency from the root integration path.
+- **Recommended fix:** Make the integration path build the actual tracked CLI target from a clean checkout. That may mean tracking the entrypoint correctly in git, changing the integration test to build the actual tracked target, or both.
 
 ### REL-002
 
@@ -94,4 +94,3 @@
 3. `REL-003` golden fixture depth
 4. `REL-004` performance/compatibility proof
 5. `REL-005` dogfood friction evidence
-
