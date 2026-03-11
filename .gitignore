@@ -3,7 +3,7 @@
 
 # Build artifacts
 bin/
-fuse
+/fuse
 coverage.out
 coverage.html
 
