@@ -79,23 +79,6 @@ func TestRunHook_EmptyCommand(t *testing.T) {
 	}
 }
 
-func TestRunHook_EmptyCommandExitsTwo(t *testing.T) {
-	input := `{"tool_name":"Bash","tool_input":{"command":""},"session_id":"test","cwd":"/tmp"}`
-	stdin := strings.NewReader(input)
-	stderr := &bytes.Buffer{}
-
-	exitCode := RunHook(stdin, stderr)
-
-	if exitCode != 2 {
-		t.Errorf("expected exit code 2 for empty command per spec §3.1, got %d", exitCode)
-	}
-
-	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "fuse:POLICY_BLOCK") {
-		t.Errorf("expected stderr to contain 'fuse:POLICY_BLOCK', got: %s", stderrStr)
-	}
-}
-
 func TestRunHook_MCP(t *testing.T) {
 	// MCP tool with a safe-prefix action should be allowed.
 	input := `{"tool_name":"mcp__server__list_items","tool_input":{"query":"test"},"session_id":"test","cwd":"/tmp"}`

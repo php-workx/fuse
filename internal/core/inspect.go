@@ -158,29 +158,20 @@ func inferDecisionFromSignals(signals []inspect.Signal) Decision {
 	decision := DecisionCaution
 	hasCloudSDK := false
 	hasDestructive := false
-	hasSubprocess := false
 	for _, s := range signals {
 		switch s.Category {
-		case "subprocess":
-			hasSubprocess = true
-			return DecisionApproval
-		case "cloud_cli", "http_control_plane",
+		case "subprocess", "cloud_cli", "http_control_plane",
 			"dynamic_exec", "dynamic_import":
-			// Network/process signals escalate to APPROVAL.
 			return DecisionApproval
 		case "cloud_sdk":
 			hasCloudSDK = true
 		case "destructive_fs", "destructive_verb":
 			hasDestructive = true
-			// Filesystem/destructive signals are CAUTION (keep looking
-			// in case a higher severity category is also present).
-			decision = DecisionCaution
 		default:
 			decision = DecisionCaution
 		}
 	}
-	// cloud_sdk combined with destructive or subprocess signals → APPROVAL.
-	if hasCloudSDK && (hasDestructive || hasSubprocess) {
+	if hasCloudSDK && hasDestructive {
 		return DecisionApproval
 	}
 	return decision
