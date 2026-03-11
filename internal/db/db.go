@@ -80,12 +80,16 @@ func (d *DB) Close() error {
 }
 
 // WalCheckpoint performs a WAL checkpoint with TRUNCATE mode to reclaim space.
+// Every 100th checkpoint triggers a VACUUM to rebuild the database file.
 func (d *DB) WalCheckpoint() error {
 	_, err := d.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 	if err != nil {
 		return fmt.Errorf("wal checkpoint: %w", err)
 	}
-	atomic.AddInt64(&cleanupCycleCount, 1)
+	count := atomic.AddInt64(&cleanupCycleCount, 1)
+	if count%100 == 0 {
+		_ = d.Vacuum()
+	}
 	return nil
 }
 

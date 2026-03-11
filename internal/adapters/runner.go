@@ -381,6 +381,7 @@ func cleanupExecutionState(database *db.DB, cfg *config.Config) {
 	}
 	_, _ = database.CleanupExpired()
 	_, _ = database.PruneEvents(eventLogLimit(cfg))
+	_ = database.WalCheckpoint()
 }
 
 func eventLogLimit(cfg *config.Config) int {
