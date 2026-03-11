@@ -85,9 +85,9 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 	fd := int(os.Stdin.Fd())
 
 	// Check if stdin is a terminal using the platform-specific ioctl.
-	if _, err := unix.IoctlGetTermios(fd, ioctlGetTermios); err != nil {
+	if _, termErr := unix.IoctlGetTermios(fd, ioctlGetTermios); termErr != nil {
 		// Not a terminal — nothing to do.
-		return nil, nil
+		return nil, nil //nolint:nilerr // termErr means not-a-tty, which is a valid no-op
 	}
 
 	// Get the current foreground process group.
@@ -116,7 +116,7 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 
 // ExecuteCommand classifies and optionally runs a shell command.
 // In run mode, it: classify -> prompt if needed -> execute with safety controls.
-func ExecuteCommand(command string, cwd string, timeout time.Duration) (exitCode int, err error) {
+func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, err error) {
 	// Load configuration.
 	cfg := loadRuntimeConfig()
 
@@ -198,8 +198,8 @@ func ExecuteCommand(command string, cwd string, timeout time.Duration) (exitCode
 		}
 	}
 
-	if err := reverifyDecisionKey(req, evaluator, result.DecisionKey); err != nil {
-		return 1, err
+	if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
+		return 1, verifyErr
 	}
 
 	// Execute the command.
@@ -228,7 +228,7 @@ func reverifyDecisionKey(req core.ShellRequest, evaluator core.PolicyEvaluator, 
 }
 
 // executeShellCommand runs a shell command with safety controls (§10.1).
-func executeShellCommand(command string, cwd string, timeout time.Duration) (int, error) {
+func executeShellCommand(command, cwd string, timeout time.Duration) (int, error) {
 	ctx := context.Background()
 	if timeout > 0 {
 		var cancel context.CancelFunc
@@ -298,7 +298,8 @@ func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 	signal.Stop(sigCh)
 	close(done)
 	if waitErr != nil {
-		if exitErr, ok := waitErr.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(waitErr, &exitErr) {
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
 				return 128 + int(status.Signal()), nil
 			}
@@ -309,11 +310,11 @@ func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 	return 0, nil
 }
 
-func executeCapturedShellCommand(command string, cwd string, timeout time.Duration) (commandExecution, error) {
+func executeCapturedShellCommand(command, cwd string, timeout time.Duration) (commandExecution, error) {
 	return executeCapturedShellCommandWithStdin(command, cwd, timeout, nil)
 }
 
-func executeCapturedShellCommandWithStdin(command string, cwd string, timeout time.Duration, stdin io.Reader) (commandExecution, error) {
+func executeCapturedShellCommandWithStdin(command, cwd string, timeout time.Duration, stdin io.Reader) (commandExecution, error) {
 	ctx := context.Background()
 	if timeout > 0 {
 		var cancel context.CancelFunc

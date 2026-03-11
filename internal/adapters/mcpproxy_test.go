@@ -136,11 +136,11 @@ func TestRunMCPProxy_ReturnsWhenAgentClosesAndDownstreamStaysAlive(t *testing.T)
 	t.Setenv("FUSE_HOME", tmpDir)
 
 	configDir := filepath.Join(tmpDir, "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	configYAML := "mcp_proxies:\n  - name: sleepy\n    command: /bin/sh\n    args:\n      - -c\n      - sleep 10\n    env: {}\n"
-	if err := os.WriteFile(config.ConfigPath(), []byte(configYAML), 0644); err != nil {
+	if err := os.WriteFile(config.ConfigPath(), []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

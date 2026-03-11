@@ -651,10 +651,10 @@ func TestClassificationNormalize_SpecExamples(t *testing.T) {
 
 func TestClassificationNormalize_BashCExtractionFailure(t *testing.T) {
 	tests := []struct {
-		name               string
-		sub                string
-		wantExtrFailed     bool
-		wantInnerEmpty     bool
+		name           string
+		sub            string
+		wantExtrFailed bool
+		wantInnerEmpty bool
 	}{
 		{
 			name:           "unbalanced single quote",

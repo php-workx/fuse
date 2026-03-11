@@ -153,7 +153,7 @@ func TestInspectFile_UnsupportedType(t *testing.T) {
 	// Create a temporary .rb file.
 	tmpDir := t.TempDir()
 	rbFile := filepath.Join(tmpDir, "test.rb")
-	if err := os.WriteFile(rbFile, []byte("puts 'hello'\n"), 0644); err != nil {
+	if err := os.WriteFile(rbFile, []byte("puts 'hello'\n"), 0o644); err != nil {
 		t.Fatalf("failed to create temp .rb file: %v", err)
 	}
 
@@ -177,7 +177,7 @@ func TestInspectFile_Symlink(t *testing.T) {
 	tmpDir := t.TempDir()
 	realFile := filepath.Join(tmpDir, "real.py")
 	content := []byte("import math\nprint(math.pi)\n")
-	if err := os.WriteFile(realFile, content, 0644); err != nil {
+	if err := os.WriteFile(realFile, content, 0o644); err != nil {
 		t.Fatalf("failed to write real file: %v", err)
 	}
 
@@ -213,7 +213,7 @@ func TestInspectFile_Hash(t *testing.T) {
 	tmpDir := t.TempDir()
 	pyFile := filepath.Join(tmpDir, "hash_test.py")
 	content := []byte("print('hello world')\n")
-	if err := os.WriteFile(pyFile, content, 0644); err != nil {
+	if err := os.WriteFile(pyFile, content, 0o644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
@@ -236,7 +236,7 @@ func TestInspectFile_Truncated(t *testing.T) {
 	pyFile := filepath.Join(tmpDir, "big.py")
 	// Create safe content that's 200 bytes.
 	content := []byte(strings.Repeat("x = 1\n", 40))
-	if err := os.WriteFile(pyFile, content, 0644); err != nil {
+	if err := os.WriteFile(pyFile, content, 0o644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
@@ -258,7 +258,7 @@ func TestInspectFile_TruncatedHashUsesFullContent(t *testing.T) {
 	tmpDir := t.TempDir()
 	pyFile := filepath.Join(tmpDir, "big_hash.py")
 	content := []byte(strings.Repeat("print('hello world')\n", 128))
-	if err := os.WriteFile(pyFile, content, 0644); err != nil {
+	if err := os.WriteFile(pyFile, content, 0o644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
 
@@ -365,7 +365,7 @@ func TestDetectReferencedFile(t *testing.T) {
 func TestDetectReferencedFile_DirectExecutablePath(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "run.sh")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho hi\n"), 0755); err != nil {
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho hi\n"), 0o755); err != nil {
 		t.Fatalf("failed to create script: %v", err)
 	}
 
@@ -378,7 +378,7 @@ func TestDetectReferencedFile_DirectExecutablePath(t *testing.T) {
 func TestInspectFile_UnknownExtensionReturnsCaution(t *testing.T) {
 	tmpDir := t.TempDir()
 	luaFile := filepath.Join(tmpDir, "script.lua")
-	if err := os.WriteFile(luaFile, []byte("print('hello')\n"), 0644); err != nil {
+	if err := os.WriteFile(luaFile, []byte("print('hello')\n"), 0o644); err != nil {
 		t.Fatalf("failed to create temp .lua file: %v", err)
 	}
 

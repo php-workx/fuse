@@ -5,8 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/runger/fuse/internal/config"
 	"github.com/spf13/cobra"
+
+	"github.com/runger/fuse/internal/config"
 )
 
 var disableCmd = &cobra.Command{

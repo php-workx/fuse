@@ -70,9 +70,9 @@ func EnsureDirectories() error {
 		path string
 		perm os.FileMode
 	}{
-		{ConfigDir(), 0755},
-		{StateDir(), 0700},
-		{CacheDir(), 0755},
+		{ConfigDir(), 0o755},
+		{StateDir(), 0o700},
+		{CacheDir(), 0o755},
 	}
 	for _, d := range dirs {
 		if err := os.MkdirAll(d.path, d.perm); err != nil {

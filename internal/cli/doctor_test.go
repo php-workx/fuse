@@ -16,11 +16,11 @@ func TestRunDoctor_ReportsMCPProxyChecks(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FUSE_HOME", tmpDir)
 
-	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
 	configYAML := "mcp_proxies:\n  - name: missing\n    command: definitely-not-a-command\n    args: []\n    env: {}\n"
-	if err := os.WriteFile(configPathForTest(t), []byte(configYAML), 0644); err != nil {
+	if err := os.WriteFile(configPathForTest(t), []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

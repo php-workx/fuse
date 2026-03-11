@@ -3,8 +3,9 @@ package cli
 import (
 	"os"
 
-	"github.com/runger/fuse/internal/adapters"
 	"github.com/spf13/cobra"
+
+	"github.com/runger/fuse/internal/adapters"
 )
 
 var hookCmd = &cobra.Command{

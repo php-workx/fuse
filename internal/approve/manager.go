@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/db"
 )
@@ -54,7 +55,7 @@ func scopeExpiry(scope string) *time.Time {
 
 // RequestApproval checks for an existing valid approval or prompts the user.
 // Returns the decision and any error.
-func (m *Manager) RequestApproval(decisionKey, command, reason string, sessionID string, hookMode bool) (core.Decision, error) {
+func (m *Manager) RequestApproval(decisionKey, command, reason, sessionID string, hookMode bool) (core.Decision, error) {
 	// First, check for an existing valid approval.
 	existing, err := m.ConsumeApproval(decisionKey, sessionID)
 	if err != nil {

@@ -276,13 +276,13 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 		}
 
 		// Layer 3: Built-in preset rules.
-			if d, reason, ruleID := evaluator.EvaluateBuiltins(sanitized); d != "" {
-				if isInspectTriggerRule(ruleID) && fileInspection != nil {
-					return fileInspection.Decision, fileInspection.Reason, ""
-				}
-				return d, reason, ruleID
+		if d, reason, ruleID := evaluator.EvaluateBuiltins(sanitized); d != "" {
+			if isInspectTriggerRule(ruleID) && fileInspection != nil {
+				return fileInspection.Decision, fileInspection.Reason, ""
 			}
+			return d, reason, ruleID
 		}
+	}
 
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {

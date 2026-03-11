@@ -5,8 +5,9 @@ import (
 	"os"
 	"regexp"
 
-	"github.com/runger/fuse/internal/core"
 	"gopkg.in/yaml.v3"
+
+	"github.com/runger/fuse/internal/core"
 )
 
 // PolicyConfig represents user-defined policy loaded from a YAML file.

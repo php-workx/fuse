@@ -72,7 +72,7 @@ func installClaude() error {
 
 	// Ensure the directory exists.
 	dir := filepath.Dir(settingsPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating directory %s: %w", dir, err)
 	}
 
@@ -227,7 +227,7 @@ func writeJSONFile(path string, data map[string]interface{}) error {
 		return fmt.Errorf("marshalling JSON: %w", err)
 	}
 	out = append(out, '\n')
-	return os.WriteFile(path, out, 0644)
+	return os.WriteFile(path, out, 0o644)
 }
 
 func codexConfigPath() string {
@@ -252,17 +252,17 @@ func rejectSymlinkedCodexConfigPath(configPath string) error {
 	if err != nil {
 		return fmt.Errorf("resolve config path: %w", err)
 	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil
+	cwd, cwdErr := os.Getwd()
+	if cwdErr != nil {
+		return nil //nolint:nilerr // non-critical: can't determine cwd, skip symlink check
 	}
-	absCwd, err := filepath.Abs(cwd)
-	if err != nil {
-		return nil
+	absCwd, absCwdErr := filepath.Abs(cwd)
+	if absCwdErr != nil {
+		return nil //nolint:nilerr // non-critical: can't resolve cwd, skip symlink check
 	}
-	rel, err := filepath.Rel(absCwd, absPath)
-	if err != nil || strings.HasPrefix(rel, "..") {
-		return nil
+	rel, relErr := filepath.Rel(absCwd, absPath)
+	if relErr != nil || strings.HasPrefix(rel, "..") {
+		return nil //nolint:nilerr // relErr means path resolution failed, skip check gracefully
 	}
 
 	for _, candidate := range []string{filepath.Join(absCwd, ".codex"), absPath} {
@@ -291,10 +291,10 @@ func installCodex() error {
 	}
 
 	updated := mergeCodexConfig(string(existing))
-	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return fmt.Errorf("creating directory %s: %w", filepath.Dir(configPath), err)
 	}
-	if err := os.WriteFile(configPath, []byte(updated), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", configPath, err)
 	}
 

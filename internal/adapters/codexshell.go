@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -18,7 +19,7 @@ func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 	for {
 		payload, err := readMCPFrame(reader)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
@@ -177,18 +178,18 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 		if database == nil {
 			return "", "", 0, fmt.Errorf("database unavailable for approval")
 		}
-		secret, err := db.EnsureSecret(config.SecretPath())
-		if err != nil {
-			return "", "", 0, err
+		secret, secretErr := db.EnsureSecret(config.SecretPath())
+		if secretErr != nil {
+			return "", "", 0, secretErr
 		}
 
-		mgr, err := approve.NewManager(database, secret)
-		if err != nil {
-			return "", "", 0, err
+		mgr, mgrErr := approve.NewManager(database, secret)
+		if mgrErr != nil {
+			return "", "", 0, mgrErr
 		}
-		decision, err := mgr.RequestApproval(result.DecisionKey, command, result.Reason, "", false)
-		if err != nil {
-			return "", "", 0, err
+		decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, "", false)
+		if promptErr != nil {
+			return "", "", 0, promptErr
 		}
 		if decision == core.DecisionBlocked {
 			logEvent(database, command, result, "denied")
@@ -197,8 +198,8 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 		}
 	}
 
-	if err := reverifyDecisionKey(req, evaluator, result.DecisionKey); err != nil {
-		return "", "", 0, err
+	if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
+		return "", "", 0, verifyErr
 	}
 
 	execResult, err := executeCapturedShellCommand(command, cwd, timeout)

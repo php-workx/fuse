@@ -5,8 +5,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/runger/fuse/internal/config"
 	"github.com/spf13/cobra"
+
+	"github.com/runger/fuse/internal/config"
 )
 
 var enableCmd = &cobra.Command{
@@ -16,12 +17,12 @@ var enableCmd = &cobra.Command{
 		markerPath := filepath.Join(config.StateDir(), "enabled")
 
 		// Ensure the state directory exists.
-		if err := os.MkdirAll(config.StateDir(), 0700); err != nil {
+		if err := os.MkdirAll(config.StateDir(), 0o700); err != nil {
 			return fmt.Errorf("creating state directory: %w", err)
 		}
 
 		// Create the enabled marker file.
-		if err := os.WriteFile(markerPath, []byte("1\n"), 0600); err != nil {
+		if err := os.WriteFile(markerPath, []byte("1\n"), 0o600); err != nil {
 			return fmt.Errorf("creating enabled marker: %w", err)
 		}
 

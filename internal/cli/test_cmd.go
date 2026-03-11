@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/runger/fuse/internal/config"
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/policy"
-	"github.com/spf13/cobra"
 )
 
 var testCmd = &cobra.Command{
@@ -149,5 +150,5 @@ func loadPolicyEvaluator() core.PolicyEvaluator {
 
 // isAbsPath returns true if the path is absolute.
 func isAbsPath(path string) bool {
-	return len(path) > 0 && path[0] == '/'
+	return path != "" && path[0] == '/'
 }

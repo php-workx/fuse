@@ -2,6 +2,7 @@ package fuse_test
 
 import (
 	"bytes"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -36,8 +37,8 @@ func TestIntegration_RunUsageErrorsExitTwo(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected fuse run without command to fail, output:\n%s", string(output))
 	}
-	exitErr, ok := err.(*exec.ExitError)
-	if !ok {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
 		t.Fatalf("expected ExitError, got %T (%v)", err, err)
 	}
 	if exitErr.ExitCode() != 2 {

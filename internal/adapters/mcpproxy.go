@@ -75,8 +75,8 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 		return fmt.Errorf("downstream stdout: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start downstream %s: %w", downstreamName, err)
+	if startErr := cmd.Start(); startErr != nil {
+		return fmt.Errorf("start downstream %s: %w", downstreamName, startErr)
 	}
 	defer func() {
 		_ = downstreamIn.Close()
@@ -92,9 +92,9 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 	errCh := make(chan error, 2)
 
 	go func() {
-		err := proxyAgentToDownstream(stdin, downstreamIn, agentWriter, requests)
+		proxyErr := proxyAgentToDownstream(stdin, downstreamIn, agentWriter, requests)
 		_ = downstreamIn.Close()
-		errCh <- err
+		errCh <- proxyErr
 	}()
 	go func() {
 		errCh <- proxyDownstreamToAgent(downstreamOut, agentWriter, requests)
@@ -107,7 +107,7 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 	return err
 }
 
-func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writer, requests *inFlightRequests) error {
+func proxyAgentToDownstream(stdin io.Reader, downstream, agent io.Writer, requests *inFlightRequests) error {
 	reader := bufio.NewReader(stdin)
 	for {
 		payload, err := readMCPFrame(reader)
@@ -124,7 +124,7 @@ func proxyAgentToDownstream(stdin io.Reader, downstream io.Writer, agent io.Writ
 				}
 				return nil
 			}
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err
@@ -175,7 +175,7 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 		payload, err := readMCPFrame(reader)
 		if err != nil {
 			slog.Warn("downstream MCP frame error", "error", err)
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return nil
 			}
 			return err

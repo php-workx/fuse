@@ -50,11 +50,11 @@ func TestCodexConfigPath_PrefersLocalRepoConfig(t *testing.T) {
 	t.Setenv("CODEX_HOME", "")
 
 	localConfigDir := filepath.Join(tmpDir, ".codex")
-	if err := os.MkdirAll(localConfigDir, 0755); err != nil {
+	if err := os.MkdirAll(localConfigDir, 0o755); err != nil {
 		t.Fatalf("mkdir .codex: %v", err)
 	}
 	localConfigPath := filepath.Join(localConfigDir, "config.toml")
-	if err := os.WriteFile(localConfigPath, []byte("[mcp_servers]\n"), 0644); err != nil {
+	if err := os.WriteFile(localConfigPath, []byte("[mcp_servers]\n"), 0o644); err != nil {
 		t.Fatalf("write local config: %v", err)
 	}
 
@@ -88,12 +88,12 @@ func TestCodexConfigPath_PrefersLocalRepoConfig(t *testing.T) {
 func TestInstallCodex_RejectsSymlinkedLocalConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetPath := filepath.Join(t.TempDir(), "target.toml")
-	if err := os.WriteFile(targetPath, []byte("original\n"), 0644); err != nil {
+	if err := os.WriteFile(targetPath, []byte("original\n"), 0o644); err != nil {
 		t.Fatalf("write target: %v", err)
 	}
 
 	localConfigDir := filepath.Join(tmpDir, ".codex")
-	if err := os.MkdirAll(localConfigDir, 0755); err != nil {
+	if err := os.MkdirAll(localConfigDir, 0o755); err != nil {
 		t.Fatalf("mkdir .codex: %v", err)
 	}
 	localConfigPath := filepath.Join(localConfigDir, "config.toml")

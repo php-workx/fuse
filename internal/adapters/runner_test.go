@@ -228,7 +228,7 @@ func TestExecuteCommand_SafeCommand(t *testing.T) {
 func TestReverifyDecisionKeyDetectsChangedScript(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "task.py")
-	if err := os.WriteFile(scriptPath, []byte("print('safe')\n"), 0644); err != nil {
+	if err := os.WriteFile(scriptPath, []byte("print('safe')\n"), 0o644); err != nil {
 		t.Fatalf("failed to write script: %v", err)
 	}
 
@@ -244,7 +244,7 @@ func TestReverifyDecisionKeyDetectsChangedScript(t *testing.T) {
 		t.Fatalf("initial classify failed: %v", err)
 	}
 
-	if err := os.WriteFile(scriptPath, []byte("import boto3\nboto3.client('cloudformation').delete_stack(StackName='prod')\n"), 0644); err != nil {
+	if err := os.WriteFile(scriptPath, []byte("import boto3\nboto3.client('cloudformation').delete_stack(StackName='prod')\n"), 0o644); err != nil {
 		t.Fatalf("failed to modify script: %v", err)
 	}
 

@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/runger/fuse/internal/adapters"
 	"github.com/spf13/cobra"
+
+	"github.com/runger/fuse/internal/adapters"
 )
 
 var proxyCmd = &cobra.Command{

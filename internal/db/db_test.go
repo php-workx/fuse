@@ -43,8 +43,8 @@ func TestDBPermissions(t *testing.T) {
 	}
 
 	perm := info.Mode().Perm()
-	if perm != 0600 {
-		t.Errorf("db file permissions = %o, want %o", perm, 0600)
+	if perm != 0o600 {
+		t.Errorf("db file permissions = %o, want %o", perm, 0o600)
 	}
 }
 
@@ -354,8 +354,8 @@ func TestEnsureSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0600 {
-		t.Errorf("secret permissions = %o, want %o", perm, 0600)
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("secret permissions = %o, want %o", perm, 0o600)
 	}
 
 	// Second call should read the same secret.

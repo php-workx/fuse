@@ -16,10 +16,10 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tmpDir)
 
 	stateDir := filepath.Join(tmpDir, "state")
-	if err := os.MkdirAll(stateDir, 0700); err != nil {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		panic("failed to create state dir: " + err.Error())
 	}
-	if err := os.WriteFile(filepath.Join(stateDir, "enabled"), []byte("1"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(stateDir, "enabled"), []byte("1"), 0o600); err != nil {
 		panic("failed to create enabled marker: " + err.Error())
 	}
 

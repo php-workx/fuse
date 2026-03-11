@@ -5,9 +5,10 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/policy"
-	"gopkg.in/yaml.v3"
 )
 
 // GoldenFixture represents a single golden test fixture entry.

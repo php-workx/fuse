@@ -117,7 +117,7 @@ disabled_builtins:
 `
 	tmpDir := t.TempDir()
 	policyPath := filepath.Join(tmpDir, "policy.yaml")
-	if err := os.WriteFile(policyPath, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(policyPath, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("writing test policy: %v", err)
 	}
 
@@ -164,7 +164,7 @@ rules:
 `
 	tmpDir := t.TempDir()
 	policyPath := filepath.Join(tmpDir, "policy.yaml")
-	if err := os.WriteFile(policyPath, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(policyPath, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("writing test policy: %v", err)
 	}
 
@@ -185,7 +185,7 @@ rules:
 `
 	tmpDir := t.TempDir()
 	policyPath := filepath.Join(tmpDir, "policy.yaml")
-	if err := os.WriteFile(policyPath, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(policyPath, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("writing test policy: %v", err)
 	}
 
@@ -213,7 +213,7 @@ rules:
 `
 	tmpDir := t.TempDir()
 	policyPath := filepath.Join(tmpDir, "policy.yaml")
-	if err := os.WriteFile(policyPath, []byte(yamlContent), 0644); err != nil {
+	if err := os.WriteFile(policyPath, []byte(yamlContent), 0o644); err != nil {
 		t.Fatalf("writing test policy: %v", err)
 	}
 

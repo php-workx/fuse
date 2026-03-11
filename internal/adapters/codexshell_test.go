@@ -48,13 +48,13 @@ func TestExecuteCodexShellCommand_AllowsBlockedCommandWhenDisabled(t *testing.T)
 		t.Fatalf("remove enabled marker: %v", err)
 	}
 	defer func() {
-		if err := os.WriteFile(enabledMarker, []byte("1"), 0600); err != nil {
+		if err := os.WriteFile(enabledMarker, []byte("1"), 0o600); err != nil {
 			t.Fatalf("restore enabled marker: %v", err)
 		}
 	}()
 
 	targetDir := filepath.Join(t.TempDir(), "to-remove")
-	if err := os.MkdirAll(targetDir, 0755); err != nil {
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		t.Fatalf("mkdir target: %v", err)
 	}
 
@@ -75,7 +75,7 @@ func TestExecuteCodexShellCommand_LogsAndPrunesEvents(t *testing.T) {
 		t.Fatalf("ensure directories: %v", err)
 	}
 	configYAML := "max_event_log_rows: 1\n"
-	if err := os.WriteFile(config.ConfigPath(), []byte(configYAML), 0644); err != nil {
+	if err := os.WriteFile(config.ConfigPath(), []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 

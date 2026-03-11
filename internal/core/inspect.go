@@ -89,8 +89,8 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 			return nil, readErr
 		}
 		content = content[:n]
-		if _, err := io.Copy(hasher, f); err != nil {
-			return nil, err
+		if _, copyErr := io.Copy(hasher, f); copyErr != nil {
+			return nil, copyErr
 		}
 	} else {
 		content, err = io.ReadAll(io.TeeReader(f, hasher))
@@ -216,7 +216,7 @@ func DetectReferencedFile(subCommand string) string {
 // extractFile walks the argument list looking for the first positional argument
 // ending with one of the allowed extensions. If any of the scriptless flags is
 // encountered before a positional file, it returns "".
-func extractFile(args []string, exts []string, scriptlessFlags []string) string {
+func extractFile(args, exts, scriptlessFlags []string) string {
 	scriptlessSet := make(map[string]bool, len(scriptlessFlags))
 	for _, f := range scriptlessFlags {
 		scriptlessSet[f] = true

@@ -91,7 +91,7 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 // safe given the full command string. This implements the conditional safety
 // rules from spec §6.5. If the command is not in the conditionally safe
 // table at all, it returns false (caller should fall through to other rules).
-func IsConditionallySafe(basename string, fullCmd string) bool {
+func IsConditionallySafe(basename, fullCmd string) bool {
 	fields := strings.Fields(fullCmd)
 	switch basename {
 	case "find":

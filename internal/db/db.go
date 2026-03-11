@@ -26,14 +26,14 @@ type DB struct {
 func OpenDB(path string) (*DB, error) {
 	// Ensure parent directory exists.
 	if dir := parentDir(path); dir != "" {
-		if err := os.MkdirAll(dir, 0700); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return nil, fmt.Errorf("create state directory: %w", err)
 		}
 	}
 
 	// Create the file with correct permissions atomically (avoids TOCTOU race).
-	// If the file already exists, this is a no-op; if new, it's created with 0600.
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
+	// If the file already exists, this is a no-op; if new, it's created with 0o600.
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("create database file: %w", err)
 	}

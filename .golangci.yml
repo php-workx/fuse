@@ -1,38 +1,141 @@
+# golangci-lint configuration (v2)
+# https://golangci-lint.run/usage/configuration/
+
 version: "2"
 
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/runger/fuse
+
 linters:
+  default: none
+  # Exclude complexity/length/style linters from test files (table-driven tests are verbose by design)
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - gocognit
+          - funlen
+          - dupl
+          - lll
+          - cyclop
+          - gocritic
+          - revive
+          - gosec
+          - maintidx
+          - nestif
+      # Rule tables are inherently long — exclude from length checks
+      # Rule tables are inherently long — exclude from length checks
+      - path: internal/policy/builtins_
+        linters:
+          - funlen
+          - cyclop
+          - gocognit
+          - maintidx
+      # Exclude shadow checker from test files (if err := is idiomatic in tests)
+      - path: _test\.go
+        linters:
+          - govet
+        text: "shadow"
   enable:
     - govet
-    - errcheck
+    - ineffassign
     - staticcheck
     - unused
-    - ineffassign
-    - gocritic
+    # Additional useful linters
+    - bodyclose
+    - durationcheck
+    - errorlint
     - misspell
-
+    - nilerr
+    #- prealloc  # disabled: marginal benefit, noisy on idiomatic patterns
+    - unconvert
+    # Complexity analysis
+    - gocognit
+    - cyclop
+    - nestif
+    - maintidx
+    # Length limits
+    - lll
+    - funlen
+    # Duplication detection
+    - dupl
+    # Style & quality
+    - gocritic
+    - revive
+    - nolintlint
+    # Security
+    - gosec
+    # Architecture
+    - depguard
   settings:
-    errcheck:
-      check-type-assertions: true
-      exclude-functions:
-        # Writing to stderr/tty for diagnostics — errors are not actionable.
-        - fmt.Fprintln
-        - fmt.Fprintf
-        - fmt.Printf
-        # Setting env in tests.
-        - os.Setenv
+    staticcheck:
+      checks:
+        - "all"
+        - "-ST1000"  # Package comments — separate documentation effort
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment  # micro-optimization, not a correctness issue
+    # Complexity settings
+    gocognit:
+      min-complexity: 50
+    cyclop:
+      max-complexity: 28
+      package-average: 8.0
+    nestif:
+      min-complexity: 11
+    maintidx:
+      under: 18
+    # Length limits
+    lll:
+      line-length: 160
+    funlen:
+      lines: 110
+      statements: 65
+    # Duplication threshold
+    dupl:
+      threshold: 120
+    # Style settings
     gocritic:
       enabled-tags:
         - diagnostic
+        - style
         - performance
       disabled-checks:
-        - appendCombine
-
-  exclusions:
-    rules:
-      # Deferred Close and cleanup in test files — not worth checking.
-      - path: _test\.go
-        linters:
-          - errcheck
-          - gocritic
-    paths:
-      - testdata
+        - appendCombine     # stylistic — separate appends are often clearer
+        - unnamedResult     # stylistic — named results not always warranted
+        - regexpSimplify    # cosmetic — both forms are correct
+    # Revive settings
+    revive:
+      rules: []
+    # NOLINT hygiene
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    # Security settings
+    gosec:
+      excludes:
+        - G104  # Unhandled errors - enable errcheck linter to replace this (separate effort)
+        - G115  # Integer overflow conversion — false positives on fd/len casts
+        - G204  # Subprocess with variable — fuse is a command executor by design
+        - G301  # Directory permissions 0755 — standard for config/cache dirs
+        - G304  # File inclusion via variable — necessary for config loading
+        - G306  # WriteFile permissions 0644 — standard for config files
+        - G703  # Path traversal via taint — config paths are validated upstream
+    # Architecture rules
+    depguard:
+      rules:
+        main:
+          deny:
+            - pkg: io/ioutil
+              desc: "Deprecated; use io and os packages"

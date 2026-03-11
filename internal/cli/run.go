@@ -5,8 +5,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/runger/fuse/internal/adapters"
 	"github.com/spf13/cobra"
+
+	"github.com/runger/fuse/internal/adapters"
 )
 
 const defaultRunTimeout = 30 * time.Minute

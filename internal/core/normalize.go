@@ -184,13 +184,7 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 	return result
 }
 
-// tokenize splits a command string into tokens, respecting single and double quotes.
-func tokenize(s string) []string {
-	tokens, _ := tokenizeQuoteAware(s)
-	return tokens
-}
-
-// tokenizeQuoteAware splits a command string into tokens like tokenize, but also
+// tokenizeQuoteAware splits a command string into tokens, respecting single and double quotes. Also
 // reports whether the input had unbalanced (unclosed) quotes.
 func tokenizeQuoteAware(s string) ([]string, bool) {
 	var tokens []string

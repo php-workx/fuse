@@ -6,8 +6,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/runger/fuse/internal/config"
 	"github.com/spf13/cobra"
+
+	"github.com/runger/fuse/internal/config"
 )
 
 var uninstallPurge bool
@@ -159,7 +160,7 @@ func uninstallCodex() error {
 	if cleaned == string(data) {
 		return nil
 	}
-	return os.WriteFile(configPath, []byte(cleaned), 0644)
+	return os.WriteFile(configPath, []byte(cleaned), 0o644)
 }
 
 func removeCodexIntegration(existing string) string {

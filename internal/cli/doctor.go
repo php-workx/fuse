@@ -12,11 +12,12 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/spf13/cobra"
+
 	"github.com/runger/fuse/internal/adapters"
 	"github.com/runger/fuse/internal/config"
 	"github.com/runger/fuse/internal/db"
 	"github.com/runger/fuse/internal/policy"
-	"github.com/spf13/cobra"
 )
 
 var doctorLive bool
@@ -115,8 +116,8 @@ func checkDirectoryStructure() checkResult {
 		perm os.FileMode
 	}{
 		{baseDir, 0},
-		{config.ConfigDir(), 0755},
-		{config.StateDir(), 0700},
+		{config.ConfigDir(), 0o755},
+		{config.StateDir(), 0o700},
 	}
 
 	for _, d := range dirs {
