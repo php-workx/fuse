@@ -14,7 +14,7 @@
 - **Title:** Clean checkout does not contain the CLI entrypoint expected by integration tests
 - **Severity:** `release-blocker`
 - **Type:** `implementation-gap`
-- **Status:** `open`
+- **Status:** `fixed on release-readiness-audit branch`
 - **Evidence:**
   - `integration_test.go` builds `./cmd/fuse`
   - `.gitignore:6` ignores `fuse`
@@ -23,19 +23,21 @@
   - `go test ./...` fails in the worktree because `./cmd/fuse` is missing
 - **Impact:** The repository is not reproducibly buildable/testable from a clean checkout, which invalidates release confidence.
 - **Recommended fix:** Make the integration path build the actual tracked CLI target from a clean checkout. That may mean tracking the entrypoint correctly in git, changing the integration test to build the actual tracked target, or both.
+- **Resolution:** Fixed in commit `408bc5f` by tracking `cmd/fuse/main.go` and narrowing `.gitignore` from `fuse` to `/fuse`, which restores clean-worktree reproducibility for `go test ./...`.
 
 ### REL-002
 
 - **Title:** Codex integration exists but is under-proven for release confidence
 - **Severity:** `must-fix-before-rc`
 - **Type:** `test-gap`
-- **Status:** `open`
+- **Status:** `partially addressed on release-readiness-audit branch`
 - **Evidence:**
   - `internal/adapters/codexshell.go`
   - `internal/adapters/codexshell_test.go`
   - current direct Codex tests cover stdin isolation, disabled-mode bypass, and event pruning
 - **Impact:** The product may be usable with Codex, but current evidence is too thin to label the path stable or GA.
 - **Recommended fix:** Add explicit tests for enabled-mode SAFE, BLOCKED, and approval-required Codex command handling, then dogfood Codex workflows before release posture is finalized.
+- **Progress:** Commit `b0edc47` adds enabled-mode SAFE, BLOCKED, and approval-without-TTY tests in `internal/adapters/codexshell_test.go`. Remaining work is dogfood evidence and final release posture.
 
 ### REL-003
 
@@ -89,8 +91,8 @@
 
 ## Immediate Priority Order
 
-1. `REL-001` clean-checkout/build reproducibility
-2. `REL-002` Codex release confidence
-3. `REL-003` golden fixture depth
-4. `REL-004` performance/compatibility proof
-5. `REL-005` dogfood friction evidence
+1. `REL-002` Codex release confidence
+2. `REL-003` golden fixture depth
+3. `REL-004` performance/compatibility proof
+4. `REL-005` dogfood friction evidence
+5. carry `REL-001` through normal integration and verify it remains fixed outside this branch

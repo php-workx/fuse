@@ -25,19 +25,20 @@ These counts are grouped first-pass row counts from the current audit matrix. Th
 
 ## Release-Blocker Candidates
 
-### 1. Clean-checkout reproducibility is broken
+### 1. Clean-checkout reproducibility was the first blocker and is now fixed on this branch
 
-The biggest finding is not a classifier edge case. It is build reproducibility:
+The biggest initial finding was not a classifier edge case. It was build reproducibility:
 
 - root integration tests expect `./cmd/fuse`
-- a clean worktree created from `HEAD` does not contain `cmd/fuse`
-- the original checkout passes because ignored local files exist on disk
+- a clean worktree created from `HEAD` originally did not contain `cmd/fuse`
+- the original checkout passed because ignored local files existed on disk
+- commit `408bc5f` fixes this by tracking `cmd/fuse/main.go` and narrowing `.gitignore`
 
-This has to be fixed before any serious RC claim.
+This blocker is resolved on `release-readiness-audit`; it still needs to be carried through normal integration.
 
-### 2. Codex should not be called GA yet
+### 2. Codex should not be called GA yet, but the test baseline improved on this branch
 
-Codex support exists in code and docs, but the current test evidence is not deep enough for a stable release claim.
+Codex support exists in code and docs. This branch now includes explicit enabled-mode SAFE, BLOCKED, and approval-without-TTY tests, but that still falls short of a full GA claim without dogfood evidence.
 
 Recommended current posture:
 
@@ -52,7 +53,6 @@ If a release had to happen today, the honest statement would be:
 
 ## Next Actions
 
-1. Fix `REL-001` and make `go test ./...` green from a clean worktree.
-2. Expand or explicitly narrow golden fixture claims.
-3. Strengthen Codex tests and decide Codex release posture from evidence.
-4. Add dogfood and performance/compatibility evidence before RC1.
+1. Expand or explicitly narrow golden fixture claims.
+2. Strengthen Codex tests and decide Codex release posture from evidence.
+3. Add dogfood and performance/compatibility evidence before RC1.
