@@ -1,14 +1,27 @@
 # fuse
 
-`fuse` is a command-safety runtime for AI coding agents. It classifies shell commands and MCP tool calls as `SAFE`, `CAUTION`, `APPROVAL`, or `BLOCKED`, then prompts the human user when approval is required.
+`fuse` is a local safety runtime for AI coding agents. In normal use, users install it into Claude Code or Codex and the agent invokes it as a hook or MCP proxy behind the scenes. `fuse` classifies shell commands and MCP tool calls as `SAFE`, `CAUTION`, `APPROVAL`, or `BLOCKED`, then prompts the human user when approval is required.
 
-## Supported surfaces
+## Platform support
+
+- macOS: `darwin/arm64`, `darwin/amd64`
+- Linux: `linux/amd64`, `linux/arm64`
+- Windows is not supported in v1
+
+## Primary user path
+
+Most users should think of `fuse` as integration infrastructure, not as a daily typed CLI:
+
+- `fuse install claude`: install the Claude hook integration
+- `fuse install codex`: install the Codex shell MCP integration
+- `fuse doctor [--live]`: verify that the local setup, terminal, and hook/proxy wiring are healthy
+
+The lower-level runtime surfaces still exist:
 
 - `fuse hook evaluate`: Claude Code pre-tool hook entrypoint for Bash and mediated MCP tools
-- `fuse run -- <command>`: manual classify/prompt/execute wrapper
 - `fuse proxy mcp --downstream-name <name>`: stdio MCP proxy with tool-call interception
 - `fuse proxy codex-shell`: Codex shell MCP server exposing `run_command`
-- `fuse doctor [--live]`: setup and terminal capability diagnostics
+- `fuse run -- <command>`: manual debug/admin wrapper for classify/prompt/execute
 
 ## Install
 
@@ -28,15 +41,16 @@ fuse install codex
 
 This writes a `fuse-shell` MCP server entry into `~/.codex/config.toml`, disables Codex’s built-in shell tool, and points Codex at `fuse proxy codex-shell`.
 
-## Usage
-
-### Manual run mode
+## First-run verification
 
 ```bash
-fuse run --timeout 5m -- "terraform destroy prod"
+fuse doctor
+fuse doctor --live
 ```
 
-`fuse run` requires exactly one shell-command string after `--`. It sanitizes inherited environment variables, reclassifies immediately before execution, and aborts if an inspected script changed after approval.
+`--live` checks command classification plus terminal/TTY capabilities needed for approval prompts and foreground execution.
+
+## Advanced usage
 
 ### MCP proxy mode
 
@@ -62,6 +76,14 @@ The proxy enforces a 1 MiB frame limit, classifies `tools/call`, and blocks obvi
 
 `fuse proxy codex-shell` serves a single `run_command` MCP tool. `SAFE` and `CAUTION` commands run immediately; `APPROVAL` commands prompt on `/dev/tty`; `BLOCKED` commands return MCP errors.
 
+### Manual debug wrapper
+
+```bash
+fuse run --timeout 5m -- "terraform destroy prod"
+```
+
+`fuse run` is mainly for debugging, validation, and controlled manual execution. Most end users will not call it directly during normal Claude/Codex usage. It requires exactly one shell-command string after `--`, sanitizes inherited environment variables, reclassifies immediately before execution, and aborts if an inspected script changed after approval.
+
 ## Approval behavior
 
 - Hook-mode approvals time out after 25 seconds.
@@ -69,17 +91,8 @@ The proxy enforces a 1 MiB frame limit, classifies `tools/call`, and blocks obvi
 - If `/dev/tty` is unavailable, approval-required actions are denied with `fuse:NON_INTERACTIVE_MODE`.
 - Approval records are stored in `~/.fuse/state/fuse.db` and signed with an HMAC backed by `~/.fuse/state/secret.key`.
 
-## Diagnostics
-
-```bash
-fuse doctor
-fuse doctor --live
-```
-
-`--live` checks command classification plus terminal/TTY capabilities needed for approval prompts and foreground execution.
-
 ## Limitations
 
 - Hook mode still has a TOCTOU window because Claude Code executes natively after `fuse` allows the call.
 - Classification is heuristic and regex-based; it is a guardrail, not a sandbox.
-- `fuse run` is a foreground wrapper, not a full job-control shell.
+- `fuse run` is a secondary debug/admin surface and a foreground wrapper, not a full job-control shell.

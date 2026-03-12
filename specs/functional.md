@@ -560,14 +560,14 @@ See [technical.md §3](technical.md) for the full shell MCP tool specification.
 
 ### 14.3 Manual CLI usage
 
-fuse supports direct human usage for testing and non-agent workflows:
+Manual CLI usage exists, but it is not the primary product experience. In normal use, users install fuse into Claude Code or Codex and the agent invokes it as hook/proxy infrastructure. Direct CLI usage is mainly for testing, debugging, and controlled non-agent workflows:
 
 ```bash
 fuse run -- terraform destroy my-stack
 fuse run -- python cleanup.py
 ```
 
-This invokes the full classification, approval, and execution pipeline.
+This invokes the full classification, approval, and execution pipeline, but should be treated as a secondary control-plane surface rather than the main daily user interface.
 
 ---
 
