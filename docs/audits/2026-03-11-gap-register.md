@@ -50,9 +50,10 @@
   - current code contains `225` built-in IDs and `22` hardcoded blocked rules
   - `specs/testplan.md` expects positive + near-miss coverage per hardcoded/built-in rule family
   - `internal/core/fixture_coverage_test.go` now enforces hardcoded blocked coverage and minimum coverage for several high-risk command families
+  - `internal/core/classify_test.go` now implements the `UNIT-RULE-006` sentinel matrix across built-in sections `§6.3.1` through `§6.3.21`
 - **Impact:** Current golden tests do not yet justify strong claims about full rule-corpus regression protection.
 - **Recommended fix:** Continue expanding fixtures for highest-risk families and either complete the full target or narrow the release claim before RC1.
-- **Progress:** Commit `65e5038` adds high-risk fixture coverage guards and expands `testdata/fixtures/commands.yaml`. Commit `e6d3793` closes the classifier regression exposed by that fixture work: hardcoded self-protection rules now still win for inline interpreter payloads and unclosed heredoc writes targeting `~/.fuse`, rather than silently downgrading to `APPROVAL`. This branch also fixes inline pipeline handling so commands such as `curl ... | bash` no longer degrade to `SAFE` after compound splitting. Remaining work is broader corpus depth and final contract alignment.
+- **Progress:** Commit `65e5038` adds high-risk fixture coverage guards and expands `testdata/fixtures/commands.yaml`. Commit `e6d3793` closes the classifier regression exposed by that fixture work: hardcoded self-protection rules now still win for inline interpreter payloads and unclosed heredoc writes targeting `~/.fuse`, rather than silently downgrading to `APPROVAL`. This branch also fixes inline pipeline handling so commands such as `curl ... | bash` no longer degrade to `SAFE` after compound splitting, and adds the full built-in-section sentinel matrix from `UNIT-RULE-006`. That sentinel slice also tightened rule behavior for `find . -delete`, `pip install https://...`, and `nc -zv ...` near-miss handling. Remaining work is broader per-rule corpus depth and final contract alignment.
 
 ### REL-007
 

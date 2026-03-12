@@ -50,6 +50,15 @@ That behavior is now fixed on this branch by evaluating hardcoded self-protectio
 
 Codex support exists in code and docs. This branch now includes explicit enabled-mode `SAFE`, `BLOCKED`, and approval-without-TTY executor tests plus MCP/JSON-RPC shell-server tests for `initialize`, `tools/list`, and `tools/call`. That is much stronger evidence than before, but it still falls short of a full GA claim without real dogfood evidence.
 
+### 4. The built-in rule surface is better pinned down, but the exhaustive contract is still open
+
+This branch now has two stronger regression layers for rule behavior:
+
+- high-risk golden coverage guards for hardcoded blocked rules and major command families
+- a passing sentinel matrix across built-in sections `§6.3.1` through `§6.3.21`
+
+That materially improves confidence and exposed/fixed real bugs, but it is still not the same as the written exhaustive per-rule positive + near-miss contract for all `225` built-in IDs.
+
 Recommended current posture:
 
 - `Claude: primary`
@@ -63,6 +72,6 @@ If a release had to happen today, the honest statement would be:
 
 ## Next Actions
 
-1. Expand or explicitly narrow golden fixture claims; `182` rows is still below the written full-rule contract.
+1. Expand or explicitly narrow the remaining per-rule golden-fixture contract; `182` rows is still below the written full-rule target for `225` built-in IDs.
 2. Add stronger Codex end-to-end and dogfood evidence, then decide Codex release posture from evidence.
 3. Add dogfood and performance/compatibility evidence before RC1.
