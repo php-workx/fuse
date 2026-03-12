@@ -137,9 +137,9 @@ func TestReleaseCheckShellColdPathPerf(t *testing.T) {
 	binaryPath := buildFuseBinary(t)
 
 	cases := []struct {
-		id        string
-		command   string
-		wantCode  int
+		id         string
+		command    string
+		wantCode   int
 		wantStderr string
 	}{
 		{
