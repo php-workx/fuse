@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -128,5 +129,103 @@ func TestInstallCodex_RejectsSymlinkedLocalConfig(t *testing.T) {
 	}
 	if string(data) != "original\n" {
 		t.Fatalf("expected symlink target to remain unchanged, got %q", string(data))
+	}
+}
+
+func TestInstallClaudePreservesCurrentBehaviorByDefault(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	if err := installClaude(false); err != nil {
+		t.Fatalf("installClaude(false): %v", err)
+	}
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	if _, ok := settings["permissions"]; ok {
+		t.Fatalf("expected plain install to avoid secure permissions config, got %#v", settings["permissions"])
+	}
+	if _, ok := settings["sandbox"]; ok {
+		t.Fatalf("expected plain install to avoid secure sandbox config, got %#v", settings["sandbox"])
+	}
+
+	hooksObj, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected hooks object, got %#v", settings["hooks"])
+	}
+	if _, ok := hooksObj["PreToolUse"]; !ok {
+		t.Fatalf("expected PreToolUse hook configuration, got %#v", hooksObj)
+	}
+}
+
+func TestInstallClaudeSecureMergesHooksAndSecureSettingsOnDisk(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+
+	existing := map[string]interface{}{
+		"permissions": map[string]interface{}{
+			"defaultMode": "askUser",
+			"deny": []interface{}{
+				"Read(./customer-secrets/**)",
+			},
+		},
+		"sandbox": map[string]interface{}{
+			"enabled": true,
+			"filesystem": map[string]interface{}{
+				"denyRead": []interface{}{
+					"~/private",
+				},
+			},
+		},
+		"theme": "light",
+	}
+	data, err := json.Marshal(existing)
+	if err != nil {
+		t.Fatalf("marshal existing settings: %v", err)
+	}
+	if err := os.WriteFile(settingsPath, append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	if err := installClaude(true); err != nil {
+		t.Fatalf("installClaude(true): %v", err)
+	}
+
+	updatedData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read updated settings: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal(updatedData, &settings); err != nil {
+		t.Fatalf("unmarshal updated settings: %v", err)
+	}
+
+	if settings["theme"] != "light" {
+		t.Fatalf("expected unrelated theme preserved, got %#v", settings["theme"])
+	}
+	assertClaudeSecureDefaults(t, settings, "askUser")
+
+	hooksObj, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected hooks object, got %#v", settings["hooks"])
+	}
+	preToolUse, ok := hooksObj["PreToolUse"].([]interface{})
+	if !ok || len(preToolUse) == 0 {
+		t.Fatalf("expected PreToolUse hooks after secure install, got %#v", hooksObj["PreToolUse"])
 	}
 }
