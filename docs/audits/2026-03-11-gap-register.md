@@ -34,10 +34,10 @@
 - **Evidence:**
   - `internal/adapters/codexshell.go`
   - `internal/adapters/codexshell_test.go`
-  - current direct Codex tests cover stdin isolation, disabled-mode bypass, event pruning, enabled-mode SAFE/BLOCKED/APPROVAL paths, and JSON-RPC shell-server request handling
+  - direct Codex tests now cover stdin isolation, disabled-mode bypass, event pruning, enabled-mode `SAFE`, enabled-mode `BLOCKED`, approval-required handling without a TTY, and JSON-RPC shell-server request handling
 - **Impact:** The product may be usable with Codex, but current evidence is too thin to label the path stable or GA.
-- **Recommended fix:** Add explicit tests for enabled-mode SAFE, BLOCKED, and approval-required Codex command handling, then dogfood Codex workflows before release posture is finalized.
-- **Progress:** Commit `b0edc47` adds enabled-mode SAFE, BLOCKED, and approval-without-TTY tests in `internal/adapters/codexshell_test.go`. This branch now also covers `RunCodexShellServer` at the MCP/JSON-RPC boundary for `initialize`, `tools/list`, and `tools/call` success/error paths. Remaining work is real dogfood evidence and final release posture.
+- **Recommended fix:** Add stronger end-to-end and dogfood evidence around the Codex shell execution seam before release posture is finalized.
+- **Progress:** Commit `b0edc47` adds enabled-mode `SAFE`, `BLOCKED`, and approval-without-TTY tests in `internal/adapters/codexshell_test.go`. Commit `65e5038` hardens those tests by isolating `FUSE_HOME` and using harmless blocked and approval fixtures. This branch also covers `RunCodexShellServer` at the MCP/JSON-RPC boundary for `initialize`, `tools/list`, and `tools/call` success/error paths. Remaining work is real dogfood evidence and final release posture.
 
 ### REL-003
 
@@ -46,12 +46,27 @@
 - **Type:** `test-gap`
 - **Status:** `partially addressed on release-readiness-audit branch`
 - **Evidence:**
-  - `testdata/fixtures/commands.yaml` has `162` fixture rows
+  - `testdata/fixtures/commands.yaml` now has `182` fixture rows
   - current code contains `225` built-in IDs and `22` hardcoded blocked rules
   - `specs/testplan.md` expects positive + near-miss coverage per hardcoded/built-in rule family
+  - `internal/core/fixture_coverage_test.go` now enforces hardcoded blocked coverage and minimum coverage for several high-risk command families
 - **Impact:** Current golden tests do not yet justify strong claims about full rule-corpus regression protection.
-- **Recommended fix:** Expand fixtures for highest-risk families immediately and either complete the full target or narrow the release claim.
-- **Progress:** Commit `65e5038` adds high-risk fixture coverage guards and expands `testdata/fixtures/commands.yaml`. This branch also fixes a classifier regression exposed by the fixture work: hardcoded self-protection rules now still win for inline interpreter payloads and unclosed heredoc writes targeting `~/.fuse`, rather than silently downgrading to `APPROVAL`. Remaining work is broader corpus depth and final contract alignment.
+- **Recommended fix:** Continue expanding fixtures for highest-risk families and either complete the full target or narrow the release claim before RC1.
+- **Progress:** Commit `65e5038` adds high-risk fixture coverage guards and expands `testdata/fixtures/commands.yaml`. Commit `e6d3793` closes the classifier regression exposed by that fixture work: hardcoded self-protection rules now still win for inline interpreter payloads and unclosed heredoc writes targeting `~/.fuse`, rather than silently downgrading to `APPROVAL`. Remaining work is broader corpus depth and final contract alignment.
+
+### REL-007
+
+- **Title:** Hardcoded self-protection rules could be bypassed by inline interpreter handling and heredoc parse failure
+- **Severity:** `release-blocker`
+- **Type:** `implementation-gap`
+- **Status:** `fixed on release-readiness-audit branch`
+- **Evidence:**
+  - `python -c "import shutil; shutil.rmtree('~/.fuse/config')"` was classified `APPROVAL`
+  - `cat > ~/.fuse/config/policy.yaml << EOF` was classified `APPROVAL`
+  - `internal/core/classify.go` evaluated hardcoded rules on sanitized commands and skipped them entirely on compound parse failure
+- **Impact:** Commands targeting fuse-managed config could fall back to approval-required instead of non-overridable `BLOCKED`, weakening self-protection semantics.
+- **Recommended fix:** Evaluate hardcoded rules on the normalized unsanitized command and before parse-error fallback approval.
+- **Resolution:** Fixed in commit `e6d3793` by checking hardcoded rules before parse-failure fallback in `Classify` and before sanitization-based rule evaluation in `classifySingleCommand`, with regression tests for inline interpreter and heredoc cases.
 
 ### REL-004
 
@@ -96,4 +111,3 @@
 2. `REL-003` golden fixture depth and remaining corpus alignment
 3. `REL-004` performance/compatibility proof
 4. `REL-005` dogfood friction evidence
-5. carry `REL-001` through normal integration and verify it remains fixed outside this branch

@@ -59,14 +59,14 @@ Status meanings:
 | `INT-MCP-003` | `internal/adapters/mcpproxy_test.go` | `partial` | Sensitive resource blocking exists. |
 | `INT-MCP-004` | `internal/adapters/mcpproxy_test.go`, `internal/adapters/hook_test.go` | `partial` | Destructive-path denial exists. |
 | `INT-MCP-005` | `internal/adapters/mcpproxy_test.go` | `partial` | Downstream lifecycle coverage exists. |
-| `INT-E2E-001` | `integration_test.go` | `partial` | E2E tests exist, but clean-checkout reproducibility currently breaks confidence. |
+| `INT-E2E-001` | `integration_test.go` | `partial` | E2E tests exist and clean-worktree reproducibility is fixed on this branch, but the full release matrix is still not exhaustively proven. |
 | `INT-RUN-001` | `internal/adapters/runner_test.go`, `integration_test.go` | `partial` | Run-mode safe path exists. |
 | `INT-RUN-002` | `internal/adapters/runner_test.go`, `integration_test.go` | `partial` | Reverify/approval behavior exists. |
 | `INT-POLICY-001` | `internal/policy/policy_test.go` | `covered` | Policy load/evaluation behavior is directly tested. |
 | `INT-CLI-001` | `internal/cli/run_test.go`, `internal/cli/doctor_test.go` | `partial` | CLI entrypoint behavior exists. |
 | `INT-CLI-002` | `internal/cli/install_test.go`, `internal/cli/doctor_test.go` | `partial` | Install/doctor coverage exists. |
-| `GOLD-CMD-001` | `testdata/fixtures/commands.yaml`, `internal/core/classify_test.go` | `partial` | Golden command suite exists. |
-| `GOLD-CMD-002` | `testdata/fixtures/commands.yaml`, `internal/policy/*` | `gap` | Fixture volume is too low for full per-rule confidence. |
+| `GOLD-CMD-001` | `testdata/fixtures/commands.yaml`, `internal/core/classify_test.go`, `internal/core/fixture_coverage_test.go` | `partial` | Golden command suite exists and now includes guard tests for hardcoded blocked coverage and several high-risk families. |
+| `GOLD-CMD-002` | `testdata/fixtures/commands.yaml`, `internal/core/fixture_coverage_test.go`, `internal/policy/*` | `partial` | Fixture volume and coverage are stronger, but still below the full per-rule written target. |
 | `GOLD-SCRIPT-001` | `testdata/scripts/*`, `internal/inspect/*_test.go`, `internal/core/inspect_test.go` | `partial` | Script fixtures exist, but breadth is limited. |
 | `GOLD-MCP-001` | no dedicated MCP golden corpus found | `missing` | MCP is tested via code, not dedicated golden fixtures. |
 | `ADV-NORM-001` | `internal/core/normalize_test.go`, `internal/core/classify_test.go` | `partial` | Some adversarial normalization exists. |
@@ -74,7 +74,7 @@ Status meanings:
 | `ADV-RULE-002` | `internal/policy/policy_test.go`, `internal/core/classify_test.go` | `partial` | Rule hardening exists. |
 | `ADV-RULE-003` | `internal/core/classify_test.go`, `internal/core/mcpclassify_test.go` | `partial` | Edge classification behavior exists. |
 | `ADV-RULE-004` | `internal/core/safecmds_test.go` | `partial` | Safe-path abuse checks exist indirectly. |
-| `ADV-SELF-001` | `internal/policy/hardcoded.go`, `internal/policy/policy_test.go` | `partial` | Self-protection logic exists, but exact dedicated test mapping remains incomplete. |
+| `ADV-SELF-001` | `internal/policy/hardcoded.go`, `internal/policy/policy_test.go`, `internal/core/classify_test.go` | `partial` | Self-protection logic exists and now includes dedicated inline-interpreter and heredoc regression tests, but the full adversarial matrix is still incomplete. |
 | `ADV-APP-001` | `internal/approve/hmac_test.go`, `internal/db/db_test.go` | `partial` | Approval tamper/reuse coverage exists. |
 | `ADV-APP-002` | `internal/adapters/runner_test.go`, `internal/db/db_test.go` | `partial` | Changed-script and lifecycle coverage exist. |
 | `ADV-APP-003` | `internal/adapters/hook_test.go` | `partial` | Non-interactive denial exists. |
@@ -107,5 +107,3 @@ Status meanings:
 2. `GOLD-MCP-001` - no dedicated MCP golden fixture corpus found
 3. `PERF-*` - no explicit performance proof found
 4. `COMPAT-*` - no explicit compatibility proof found
-5. `INT-E2E-001` - clean-checkout reproducibility issue reduces confidence in end-to-end claims
-

@@ -16,9 +16,9 @@ Current honest position:
 
 | Status | Count |
 |---|---|
-| `implemented` | `0` |
-| `partial` | `7` |
-| `gap` | `4` |
+| `implemented` | `1` |
+| `partial` | `8` |
+| `gap` | `2` |
 | `accepted-limit` | `1` |
 
 These counts are grouped first-pass row counts from the current audit matrix. They are useful for triage, not a claim that the audit is fully exhaustive yet.
@@ -47,7 +47,7 @@ That behavior is now fixed on this branch by evaluating hardcoded self-protectio
 
 ### 3. Codex should not be called GA yet, but the test baseline improved again on this branch
 
-Codex support exists in code and docs. This branch now includes explicit enabled-mode SAFE, BLOCKED, and approval-without-TTY executor tests plus MCP/JSON-RPC shell-server tests for `initialize`, `tools/list`, and `tools/call`. That is much stronger evidence than before, but it still falls short of a full GA claim without real dogfood evidence.
+Codex support exists in code and docs. This branch now includes explicit enabled-mode `SAFE`, `BLOCKED`, and approval-without-TTY executor tests plus MCP/JSON-RPC shell-server tests for `initialize`, `tools/list`, and `tools/call`. That is much stronger evidence than before, but it still falls short of a full GA claim without real dogfood evidence.
 
 Recommended current posture:
 
@@ -62,6 +62,6 @@ If a release had to happen today, the honest statement would be:
 
 ## Next Actions
 
-1. Expand or explicitly narrow golden fixture claims.
-2. Strengthen Codex tests and decide Codex release posture from evidence.
+1. Expand or explicitly narrow golden fixture claims; `182` rows is still below the written full-rule contract.
+2. Add stronger Codex end-to-end and dogfood evidence, then decide Codex release posture from evidence.
 3. Add dogfood and performance/compatibility evidence before RC1.
