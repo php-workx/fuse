@@ -335,7 +335,25 @@ func logToolNames(msg jsonRPCMessage) {
 	}
 	if len(names) > 0 {
 		slog.Info("downstream tools listed", "tools", names)
+		if risky := riskyToolNames(names); len(risky) > 0 {
+			slog.Warn("risky downstream tools exposed", "tools", risky)
+		}
 	}
+}
+
+func riskyToolNames(names []string) []string {
+	riskyTokens := []string{"delete_", "remove_", "destroy_", "drop_", "execute_sql", "run_shell"}
+	risky := make([]string, 0, len(names))
+	for _, name := range names {
+		lower := strings.ToLower(name)
+		for _, token := range riskyTokens {
+			if strings.Contains(lower, token) {
+				risky = append(risky, name)
+				break
+			}
+		}
+	}
+	return risky
 }
 
 func findMCPProxy(cfg *config.Config, name string) (*config.MCPProxy, error) {

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -232,6 +233,70 @@ func TestProxyAgentToDownstream_NonSensitiveResourceForwarded(t *testing.T) {
 	}
 }
 
+func TestProxyDownstreamToAgent_ToolsListPassesThroughUnchanged(t *testing.T) {
+	var agent bytes.Buffer
+	requests := newInFlightRequests()
+	requests.add(float64(7), "tools/list")
+
+	response := `{"jsonrpc":"2.0","id":7,"result":{"tools":[{"name":"list_items"},{"name":"read_file"}]}}`
+	input := rawMCPFrame([]byte(response))
+
+	err := proxyDownstreamToAgent(strings.NewReader(input), &agent, requests)
+	if err != nil {
+		t.Fatalf("proxyDownstreamToAgent returned error: %v", err)
+	}
+
+	payload, err := readMCPFrame(bufio.NewReader(&agent))
+	if err != nil {
+		t.Fatalf("readMCPFrame(agent): %v", err)
+	}
+	if string(payload) != response {
+		t.Fatalf("expected tools/list response forwarded unchanged, got %q", string(payload))
+	}
+}
+
+func TestProxyDownstreamToAgent_ToolsListWarnsForRiskyToolNamesWithoutBlocking(t *testing.T) {
+	var agent bytes.Buffer
+	requests := newInFlightRequests()
+	requests.add(float64(8), "tools/list")
+
+	var logs bytes.Buffer
+	restore := setDefaultLoggerForTest(&logs)
+	defer restore()
+
+	response := `{"jsonrpc":"2.0","id":8,"result":{"tools":[{"name":"delete_records"},{"name":"run_shell"},{"name":"list_items"}]}}`
+	input := rawMCPFrame([]byte(response))
+
+	err := proxyDownstreamToAgent(strings.NewReader(input), &agent, requests)
+	if err != nil {
+		t.Fatalf("proxyDownstreamToAgent returned error: %v", err)
+	}
+
+	payload, err := readMCPFrame(bufio.NewReader(&agent))
+	if err != nil {
+		t.Fatalf("readMCPFrame(agent): %v", err)
+	}
+	if string(payload) != response {
+		t.Fatalf("expected risky tools/list response forwarded unchanged, got %q", string(payload))
+	}
+
+	logOutput := logs.String()
+	for _, want := range []string{"risky downstream tools exposed", "delete_records", "run_shell"} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("expected log output to include %q, got %q", want, logOutput)
+		}
+	}
+}
+
 func rawMCPFrame(payload []byte) string {
 	return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(payload), payload)
+}
+
+func setDefaultLoggerForTest(dst io.Writer) func() {
+	orig := slog.Default()
+	logger := slog.New(slog.NewTextHandler(dst, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+	return func() {
+		slog.SetDefault(orig)
+	}
 }

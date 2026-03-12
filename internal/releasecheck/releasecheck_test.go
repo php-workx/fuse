@@ -133,8 +133,8 @@ func TestReleaseCheckShellWarmPathPerf(t *testing.T) {
 
 func TestReleaseCheckShellColdPathPerf(t *testing.T) {
 	requireReleaseCheck(t)
-	enableIsolatedFuseHome(t)
 	binaryPath := buildFuseBinary(t)
+	enableIsolatedFuseHome(t)
 
 	cases := []struct {
 		id         string
@@ -277,8 +277,8 @@ func TestReleaseCheckRegexPathologicalPerf(t *testing.T) {
 
 func TestReleaseCheckShellWrapperCompatibility(t *testing.T) {
 	requireReleaseCheck(t)
-	enableIsolatedFuseHome(t)
 	binaryPath := buildFuseBinary(t)
+	enableIsolatedFuseHome(t)
 
 	type shellSpec struct {
 		name string
