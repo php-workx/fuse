@@ -179,7 +179,7 @@ func codexSecurityWarnings(configText string) []string {
 	return warnings
 }
 
-func claudeMCPServerWarnings(settings map[string]interface{}) ([]string, int) {
+func claudeMCPServerWarnings(settings map[string]interface{}, configured map[string]struct{}) ([]string, int) {
 	raw, ok := settings["mcpServers"]
 	if !ok || raw == nil {
 		return nil, 0
@@ -191,7 +191,7 @@ func claudeMCPServerWarnings(settings map[string]interface{}) ([]string, int) {
 	}
 
 	var warnings []string
-	mediated := 0
+	mediatedCount := 0
 	for name, entryRaw := range servers {
 		entry, ok := entryRaw.(map[string]interface{})
 		if !ok {
@@ -205,21 +205,56 @@ func claudeMCPServerWarnings(settings map[string]interface{}) ([]string, int) {
 			warnings = append(warnings, fmt.Sprintf("mcpServers.%s has invalid args: %v", name, err))
 			continue
 		}
-		if isMediatedClaudeMCPServer(command, args) {
-			mediated++
+		downstreamName, isMediated := mediatedClaudeMCPDownstreamName(command, args)
+		if isMediated && downstreamName == "" {
+			warnings = append(warnings, fmt.Sprintf("mcpServers.%s is missing configured --downstream-name", name))
+			continue
+		}
+		if isMediated && !configuredMCPProxyExists(configured, downstreamName) {
+			warnings = append(warnings, fmt.Sprintf("mcpServers.%s references unknown downstream MCP proxy %q", name, downstreamName))
+			continue
+		}
+		if isMediated {
+			mediatedCount++
 			continue
 		}
 		warnings = append(warnings, fmt.Sprintf("mcpServers.%s is not mediated through fuse", name))
 	}
 
-	return warnings, mediated
+	return warnings, mediatedCount
 }
 
-func isMediatedClaudeMCPServer(command string, args []string) bool {
+func mediatedClaudeMCPDownstreamName(command string, args []string) (string, bool) {
 	if filepath.Base(command) != "fuse" {
+		return "", false
+	}
+	if len(args) < 2 || args[0] != "proxy" || args[1] != "mcp" {
+		return "", false
+	}
+	for i := 2; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--downstream-name" {
+			if i+1 >= len(args) {
+				return "", true
+			}
+			return args[i+1], true
+		}
+		if strings.HasPrefix(arg, "--downstream-name=") {
+			return strings.TrimPrefix(arg, "--downstream-name="), true
+		}
+	}
+	return "", true
+}
+
+func configuredMCPProxyExists(configured map[string]struct{}, name string) bool {
+	if name == "" {
 		return false
 	}
-	return len(args) >= 2 && args[0] == "proxy" && args[1] == "mcp"
+	if len(configured) == 0 {
+		return false
+	}
+	_, ok := configured[name]
+	return ok
 }
 
 func ensureOptionalObject(parent map[string]interface{}, key string) (map[string]interface{}, error) {

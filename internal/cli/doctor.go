@@ -527,7 +527,8 @@ func checkMCPMediationPosture() checkResult {
 	}
 
 	hookInstalled := hasFuseHook(settings)
-	claudeMCPWarnings, mediatedServers := claudeMCPServerWarnings(settings)
+	configuredProxies := configuredMCPProxyNames(cfg)
+	claudeMCPWarnings, mediatedServers := claudeMCPServerWarnings(settings, configuredProxies)
 	var warnings []string
 	warnings = append(warnings, claudeMCPWarnings...)
 
@@ -562,6 +563,20 @@ func checkMCPMediationPosture() checkResult {
 		status: "PASS",
 		detail: fmt.Sprintf("%d MCP proxy configuration(s) present", len(cfg.MCPProxies)),
 	}
+}
+
+func configuredMCPProxyNames(cfg *config.Config) map[string]struct{} {
+	if cfg == nil {
+		return map[string]struct{}{}
+	}
+	names := make(map[string]struct{}, len(cfg.MCPProxies))
+	for _, proxy := range cfg.MCPProxies {
+		if proxy.Name == "" {
+			continue
+		}
+		names[proxy.Name] = struct{}{}
+	}
+	return names
 }
 
 func checkApprovalTerminalTrust() checkResult {
