@@ -89,6 +89,38 @@ func TestRunDoctorSecurity_WarnsWhenClaudeHookExistsWithoutSecureSettings(t *tes
 	}
 }
 
+func TestCheckClaudeSecurityPosture_WarnsWhenSettingsMissing(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	got := checkClaudeSecurityPosture()
+	if got.status != "WARN" {
+		t.Fatalf("checkClaudeSecurityPosture() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "not evaluated") && !strings.Contains(got.detail, "not found") {
+		t.Fatalf("expected warning detail about missing settings, got %q", got.detail)
+	}
+}
+
+func TestCheckClaudeSecurityPosture_WarnsWhenHookMissing(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	writeJSONForTest(t, settingsPath, map[string]interface{}{"theme": "light"})
+
+	got := checkClaudeSecurityPosture()
+	if got.status != "WARN" {
+		t.Fatalf("checkClaudeSecurityPosture() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "not evaluated") && !strings.Contains(got.detail, "missing") {
+		t.Fatalf("expected warning detail about missing hook, got %q", got.detail)
+	}
+}
+
 func TestRunDoctorSecurity_PassesWithSecureClaudeSettingsPresent(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -138,6 +170,18 @@ func TestRunDoctorSecurity_PassesWithSecureClaudeSettingsPresent(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "Claude security posture") || !strings.Contains(stdout, "secure Claude settings present") {
 		t.Fatalf("expected secure Claude PASS output, got:\n%s", stdout)
+	}
+}
+
+func TestCheckCodexSecurityPosture_WarnsWhenConfigMissing(t *testing.T) {
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), ".codex"))
+
+	got := checkCodexSecurityPosture()
+	if got.status != "WARN" {
+		t.Fatalf("checkCodexSecurityPosture() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "not found") && !strings.Contains(got.detail, "skipping") {
+		t.Fatalf("expected warning detail about missing config, got %q", got.detail)
 	}
 }
 
@@ -237,6 +281,27 @@ func TestRunDoctorSecurity_WarnsAboutMCPRiskWhenClaudeHookExistsWithoutProxies(t
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected doctor --security output to include %q, got:\n%s", want, stdout)
 		}
+	}
+}
+
+func TestCheckMCPMediationPosture_WarnsWhenNotAssessed(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("FUSE_HOME", t.TempDir())
+
+	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPathForTest(t), []byte("log_level: warn\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	got := checkMCPMediationPosture()
+	if got.status != "WARN" {
+		t.Fatalf("checkMCPMediationPosture() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "not assessed") {
+		t.Fatalf("expected warning detail about unassessed posture, got %q", got.detail)
 	}
 }
 

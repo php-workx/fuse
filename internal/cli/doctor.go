@@ -269,7 +269,7 @@ func checkClaudeSecurityPosture() checkResult {
 		if os.IsNotExist(err) {
 			return checkResult{
 				name:   "Claude security posture",
-				status: "PASS",
+				status: "WARN",
 				detail: "Claude settings not found; security posture not evaluated",
 			}
 		}
@@ -283,7 +283,7 @@ func checkClaudeSecurityPosture() checkResult {
 	if !hasFuseHook(settings) {
 		return checkResult{
 			name:   "Claude security posture",
-			status: "PASS",
+			status: "WARN",
 			detail: "fuse hook missing; secure Claude settings not evaluated",
 		}
 	}
@@ -474,7 +474,7 @@ func checkCodexSecurityPosture() checkResult {
 		if os.IsNotExist(err) {
 			return checkResult{
 				name:   "Codex security posture",
-				status: "PASS",
+				status: "WARN",
 				detail: "Codex config not found; skipping Codex security checks",
 			}
 		}
@@ -515,7 +515,7 @@ func checkMCPMediationPosture() checkResult {
 		if os.IsNotExist(err) {
 			return checkResult{
 				name:   "MCP mediation posture",
-				status: "PASS",
+				status: "WARN",
 				detail: "no Claude fuse hook detected; MCP mediation risk not assessed",
 			}
 		}
@@ -546,7 +546,7 @@ func checkMCPMediationPosture() checkResult {
 	if !hookInstalled && mediatedServers == 0 {
 		return checkResult{
 			name:   "MCP mediation posture",
-			status: "PASS",
+			status: "WARN",
 			detail: "no Claude fuse hook detected; MCP mediation risk not assessed",
 		}
 	}

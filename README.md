@@ -103,7 +103,7 @@ The repo-managed git hooks live under `.githooks/`:
 - `pre-commit` runs the fast checks for early feedback
 - `pre-push` runs the slower last-resort safety net before CI
 
-If you already use the Python `pre-commit` tool, this repo also ships [.pre-commit-config.yaml](/Users/runger/.config/superpowers/worktrees/fuse/security-hardening/.pre-commit-config.yaml). Install it separately with `pipx install pre-commit` or your preferred Python toolchain, then the repo hooks will delegate to it automatically.
+If you already use the Python `pre-commit` tool, this repo also ships [.pre-commit-config.yaml](.pre-commit-config.yaml). Install it separately with `pipx install pre-commit` or your preferred Python toolchain, then the repo hooks will delegate to it automatically.
 
 ## Limitations
 
