@@ -256,6 +256,63 @@ func TestRunHook_NativeFileProtectedPathsAreBlocked(t *testing.T) {
 	}
 }
 
+func TestRunHook_NativeFileAbsoluteProjectConfigPathsAreBlocked(t *testing.T) {
+	enableHookForTest(t)
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	projectDir := t.TempDir()
+	tests := []struct {
+		name     string
+		toolName string
+		path     string
+	}{
+		{
+			name:     "absolute project claude settings blocked",
+			toolName: "Edit",
+			path:     filepath.Join(projectDir, ".claude", "settings.json"),
+		},
+		{
+			name:     "absolute project codex config blocked",
+			toolName: "Write",
+			path:     filepath.Join(projectDir, ".codex", "config.toml"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := `{"tool_name":"` + tt.toolName + `","tool_input":{"file_path":"` + filepath.ToSlash(tt.path) + `"},"session_id":"test","cwd":"` + filepath.ToSlash(projectDir) + `"}`
+			stdin := strings.NewReader(input)
+			stderr := &bytes.Buffer{}
+
+			exitCode := RunHook(stdin, stderr)
+
+			if exitCode != 2 {
+				t.Fatalf("expected exit code 2 for blocked absolute project config path, got %d", exitCode)
+			}
+			if !strings.Contains(stderr.String(), "fuse:POLICY_BLOCK") {
+				t.Fatalf("expected policy block directive, got %q", stderr.String())
+			}
+		})
+	}
+}
+
+func TestRunHook_NativeFileIgnoresNestedMetadataPaths(t *testing.T) {
+	enableHookForTest(t)
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	input := `{"tool_name":"Read","tool_input":{"file_path":"docs/readme.md","metadata":{"path":".env","file_path":"secrets/prod.env"}},"session_id":"test","cwd":"/tmp/project"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := RunHook(stdin, stderr)
+
+	if exitCode != 0 {
+		t.Fatalf("expected exit code 0 when only nested metadata mentions sensitive paths, got %d with stderr %q", exitCode, stderr.String())
+	}
+}
+
 func enableHookForTest(t *testing.T) {
 	t.Helper()
 
