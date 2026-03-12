@@ -178,19 +178,19 @@ func nativeFilePathInfo(path, cwd string) filePathInfo {
 	}
 }
 
-func (p filePathInfo) matchesRelative(want string) bool {
+func (p *filePathInfo) matchesRelative(want string) bool {
 	want = filepath.ToSlash(filepath.Clean(want))
 	return p.slashRaw == want || strings.HasPrefix(p.slashRaw, want+"/")
 }
 
-func (p filePathInfo) matchesAbsolute(want string) bool {
+func (p *filePathInfo) matchesAbsolute(want string) bool {
 	if want == "" {
 		return false
 	}
 	return p.slashAbs == filepath.ToSlash(filepath.Clean(want))
 }
 
-func (p filePathInfo) endsWithPathSuffix(suffix string) bool {
+func (p *filePathInfo) endsWithPathSuffix(suffix string) bool {
 	suffix = filepath.ToSlash(filepath.Clean(suffix))
 	return p.slashRaw == suffix ||
 		p.slashAbs == suffix ||
@@ -198,17 +198,17 @@ func (p filePathInfo) endsWithPathSuffix(suffix string) bool {
 		strings.HasSuffix(p.slashAbs, "/"+suffix)
 }
 
-func (p filePathInfo) isClaudeSettingsPath() bool {
+func (p *filePathInfo) isClaudeSettingsPath() bool {
 	return p.matchesAbsolute(filepath.Join(p.homeDir, ".claude", "settings.json")) ||
 		p.endsWithPathSuffix(".claude/settings.json")
 }
 
-func (p filePathInfo) isCodexConfigPath() bool {
+func (p *filePathInfo) isCodexConfigPath() bool {
 	return p.matchesAbsolute(filepath.Join(p.homeDir, ".codex", "config.toml")) ||
 		p.endsWithPathSuffix(".codex/config.toml")
 }
 
-func (p filePathInfo) isUnder(base string) bool {
+func (p *filePathInfo) isUnder(base string) bool {
 	if base == "" {
 		return false
 	}
@@ -220,15 +220,15 @@ func (p filePathInfo) isUnder(base string) bool {
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
 
-func (p filePathInfo) hasBase(name string) bool {
+func (p *filePathInfo) hasBase(name string) bool {
 	return filepath.Base(p.cleanRaw) == name || filepath.Base(p.abs) == name
 }
 
-func (p filePathInfo) isGitHookPath() bool {
+func (p *filePathInfo) isGitHookPath() bool {
 	return p.matchesRelative(".git/hooks") || strings.Contains(p.slashAbs, "/.git/hooks/")
 }
 
-func (p filePathInfo) isEnvFile() bool {
+func (p *filePathInfo) isEnvFile() bool {
 	base := filepath.Base(p.cleanRaw)
 	if base == "." || base == string(filepath.Separator) {
 		base = filepath.Base(p.abs)
@@ -236,7 +236,7 @@ func (p filePathInfo) isEnvFile() bool {
 	return base == ".env" || strings.HasPrefix(base, ".env.")
 }
 
-func (p filePathInfo) hasSensitiveExtension() bool {
+func (p *filePathInfo) hasSensitiveExtension() bool {
 	ext := strings.ToLower(filepath.Ext(p.cleanRaw))
 	switch ext {
 	case ".pem", ".key", ".crt", ".p12", ".pfx", ".jks", ".keystore":
