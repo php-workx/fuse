@@ -10,15 +10,16 @@ Current honest position:
 - strongest on Claude shell/hook path
 - promising on file inspection and MCP mediation
 - under-proven on Codex
-- under-proven on full test-plan conformance and low-friction claims
+- under-proven on full test-plan conformance
+- partially measured on performance/compatibility, with two confirmed misses
 
 ## First-Pass Grouped Counts
 
 | Status | Count |
 |---|---|
 | `implemented` | `1` |
-| `partial` | `8` |
-| `gap` | `2` |
+| `partial` | `9` |
+| `gap` | `1` |
 | `accepted-limit` | `1` |
 
 These counts are grouped first-pass row counts from the current audit matrix. They are useful for triage, not a claim that the audit is fully exhaustive yet.
@@ -59,6 +60,23 @@ This branch now has two stronger regression layers for rule behavior:
 
 That materially improves confidence and exposed/fixed real bugs, but it is still not the same as the written exhaustive per-rule positive + near-miss contract for all `225` built-in IDs.
 
+### 5. We now have a real perf/compat harness, and it exposed two concrete release blockers
+
+This branch now has a repeatable release-check runner in `scripts/run-release-checks.sh` and env-gated perf/compat tests in `internal/releasecheck/releasecheck_test.go`.
+
+Current measured results on this `darwin/arm64` machine are strong for the hot paths:
+
+- shell warm path and cold path are well under the stated thresholds
+- MCP hot-path classification is far under the stated threshold
+- shell wrapper compatibility passes locally for `bash`, `zsh`, and `fish`
+- locale invariance passes locally
+- cross-builds pass for the four declared `GOOS/GOARCH` targets
+
+But the same harness also found two hard mismatches:
+
+- the repo currently does not support the written `go1.21.x` floor because `go.mod` and current dependencies require newer Go versions
+- pathological long unmatched inputs currently miss the `PERF-003` `<100 ms` target on this machine
+
 Recommended current posture:
 
 - `Claude: primary`
@@ -74,4 +92,4 @@ If a release had to happen today, the honest statement would be:
 
 1. Expand or explicitly narrow the remaining per-rule golden-fixture contract; `182` rows is still below the written full-rule target for `225` built-in IDs.
 2. Add stronger Codex end-to-end and dogfood evidence, then decide Codex release posture from evidence.
-3. Add dogfood and performance/compatibility evidence before RC1.
+3. Resolve the Go-version floor mismatch and `PERF-003` long-input miss, then add the remaining prompt/sqlite/memory evidence before RC1.

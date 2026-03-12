@@ -82,20 +82,20 @@ Status meanings:
 | `ADV-MCP-002` | `internal/adapters/mcpproxy_test.go` | `partial` | Sensitive resource handling exists. |
 | `ADV-FILE-001` | `internal/core/inspect_test.go`, `internal/inspect/*_test.go` | `partial` | File-edge coverage exists. |
 | `ADV-FILE-002` | `internal/core/inspect_test.go` | `partial` | Unsupported/truncated/symlink behavior exists. |
-| `PERF-001` | no harness found | `missing` | No explicit performance test evidence found. |
-| `PERF-002` | no harness found | `missing` | No explicit performance test evidence found. |
-| `PERF-002A` | no harness found | `missing` | No explicit performance test evidence found. |
+| `PERF-001` | `internal/releasecheck/releasecheck_test.go`, `scripts/run-release-checks.sh` | `partial` | Warm-path shell latency is now measured and currently passes on the baseline machine. |
+| `PERF-002` | `internal/releasecheck/releasecheck_test.go`, `scripts/run-release-checks.sh` | `partial` | Cold-process shell latency is now measured and currently passes on the baseline machine. |
+| `PERF-002A` | `internal/releasecheck/releasecheck_test.go`, `scripts/run-release-checks.sh` | `partial` | MCP hot-path classification latency is now measured and currently passes on the baseline machine. |
 | `PERF-002B` | no harness found | `missing` | No explicit performance test evidence found. |
-| `PERF-003` | no harness found | `missing` | No explicit performance test evidence found. |
+| `PERF-003` | `internal/releasecheck/releasecheck_test.go`, `scripts/run-release-checks.sh` | `partial` | Regex/pathological input latency is now measured, but large unmatched uppercase inputs currently miss the written threshold. |
 | `PERF-004` | no harness found | `missing` | No explicit performance test evidence found. |
 | `PERF-005` | no harness found | `missing` | No explicit performance test evidence found. |
-| `COMPAT-001` | no compatibility harness found | `missing` | No explicit compatibility matrix found. |
-| `COMPAT-002` | no compatibility harness found | `missing` | No explicit compatibility matrix found. |
-| `COMPAT-003` | no compatibility harness found | `missing` | No explicit compatibility matrix found. |
-| `COMPAT-004` | no compatibility harness found | `missing` | No explicit compatibility matrix found. |
+| `COMPAT-001` | `scripts/run-release-checks.sh` | `partial` | Cross-builds now pass for the four declared `GOOS/GOARCH` targets, but runtime validation still exists only on the current host. |
+| `COMPAT-002` | `scripts/run-release-checks.sh` | `partial` | The Go-version matrix is now exercised, and it currently proves a mismatch: the repo requires Go `1.25+`, not the written `1.21.x` floor. |
+| `COMPAT-003` | `internal/releasecheck/releasecheck_test.go`, `scripts/run-release-checks.sh` | `covered` | `fuse run` shell-wrapper behavior passes locally under `bash`, `zsh`, and `fish`. |
+| `COMPAT-004` | `internal/releasecheck/releasecheck_test.go`, `scripts/run-release-checks.sh` | `covered` | Locale-invariance is now checked directly and passes on the baseline machine. |
 | `COMPAT-005` | no compatibility harness found | `missing` | No explicit compatibility matrix found. |
 | `COMPAT-006` | no compatibility harness found | `missing` | No explicit compatibility matrix found. |
-| `COMPAT-007` | no compatibility harness found | `missing` | No explicit compatibility matrix found. |
+| `COMPAT-007` | `internal/adapters/hook_test.go`, existing hook coverage | `partial` | Hook behavior is tested in code, but no oldest/newest Claude Code version matrix is pinned in the release checks yet. |
 | `REG-001` | `go test ./...`, package tests, `integration_test.go` | `partial` | Regression surface exists. |
 | `REG-002` | `go test ./...`, golden fixtures | `partial` | Regression intent exists. |
 | `REG-003` | package tests, fixture tests | `partial` | Regression evidence exists. |
@@ -105,5 +105,5 @@ Status meanings:
 
 1. `GOLD-CMD-002` - fixture depth is below the written target
 2. `GOLD-MCP-001` - no dedicated MCP golden fixture corpus found
-3. `PERF-*` - no explicit performance proof found
-4. `COMPAT-*` - no explicit compatibility proof found
+3. `COMPAT-002` - the current repo requires Go `1.25+`, contradicting the written `go1.21.x` floor
+4. `PERF-003` / `PERF-002B` / `PERF-004` / `PERF-005` - the harness exists now, but pathological-input, prompt, SQLite, and memory proof are still incomplete

@@ -74,12 +74,19 @@
 - **Title:** Performance and compatibility gates are not currently proven
 - **Severity:** `must-fix-before-rc`
 - **Type:** `test-gap`
-- **Status:** `open`
+- **Status:** `partially addressed on release-readiness-audit branch`
 - **Evidence:**
-  - no benchmark or compatibility harness found in current test surface
+  - `internal/releasecheck/releasecheck_test.go`
+  - `scripts/run-release-checks.sh`
+  - current `darwin/arm64` smoke run shows `PERF-001`, `PERF-002`, and `PERF-002A` comfortably under their stated thresholds
+  - cross-builds now pass for `darwin/arm64`, `darwin/amd64`, `linux/amd64`, and `linux/arm64`
+  - shell wrapper compatibility passes locally for `bash`, `zsh`, and `fish`
+  - locale invariance passes locally for `LC_ALL=C`, `en_US.UTF-8`, and `ja_JP.UTF-8`
+  - `GOTOOLCHAIN=go1.21.13 go test ./...` fails immediately because `go.mod` requires `go >= 1.25.0`
+  - `PERF-003` currently fails on large unmatched uppercase inputs (`32 KB` p95 about `104 ms`, `64 KB` p95 about `208 ms`)
   - `specs/testplan.md` defines `PERF-*` and `COMPAT-*` sections
-- **Impact:** We cannot honestly claim low-friction hot paths or platform support at release confidence.
-- **Recommended fix:** Add explicit release-gate commands for performance and a lightweight compatibility matrix, then record results in the readiness report.
+- **Impact:** We can now make several measured current-machine claims, but we still cannot honestly claim the written Go-version floor or full pathological-input performance target at release confidence.
+- **Recommended fix:** Keep the new release-check harness, then either lower the actual Go/dependency floor and optimize long-input classification or narrow the written compatibility/performance contract before RC1.
 
 ### REL-005
 
