@@ -54,6 +54,15 @@ func loadGoldenFixtures(t *testing.T) GoldenFixtures {
 	return fixtures
 }
 
+func testRepoRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+}
+
 func TestClassify_GoldenFixtures(t *testing.T) {
 	fixtures := loadGoldenFixtures(t)
 

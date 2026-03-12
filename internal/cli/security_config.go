@@ -269,18 +269,6 @@ func ensureOptionalObject(parent map[string]interface{}, key string) (map[string
 	return created, nil
 }
 
-func requireObject(parent map[string]interface{}, key string) (map[string]interface{}, error) {
-	existing, ok := parent[key]
-	if !ok || existing == nil {
-		return nil, fmt.Errorf("%s is missing", key)
-	}
-	obj, ok := existing.(map[string]interface{})
-	if !ok {
-		return nil, fmt.Errorf("%s must be an object", key)
-	}
-	return obj, nil
-}
-
 func optionalObjectForValidation(parent map[string]interface{}, key string) (map[string]interface{}, bool, error) {
 	if parent == nil {
 		return map[string]interface{}{}, false, nil
