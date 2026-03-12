@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 )
 
@@ -172,7 +171,7 @@ func codexSecurityWarnings(configText string) []string {
 	}
 
 	argsValue := tomlAssignment(fuseShellSection, "args")
-	if !regexp.MustCompile(`^\[\s*"proxy"\s*,\s*"codex-shell"\s*\]$`).MatchString(argsValue) {
+	if !isExpectedCodexArgs(argsValue) {
 		warnings = append(warnings, `mcp_servers.fuse-shell.args should be ["proxy", "codex-shell"]`)
 	}
 
@@ -389,10 +388,94 @@ func tomlSection(content, header string) (string, bool) {
 }
 
 func tomlAssignment(section, key string) string {
-	re := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `\s*=\s*(.+)$`)
-	matches := re.FindStringSubmatch(section)
-	if len(matches) != 2 {
-		return ""
+	lines := strings.Split(section, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if !strings.HasPrefix(line, key) {
+			continue
+		}
+
+		remainder := strings.TrimSpace(strings.TrimPrefix(line, key))
+		if !strings.HasPrefix(remainder, "=") {
+			continue
+		}
+
+		value := strings.TrimSpace(strings.TrimPrefix(remainder, "="))
+		if value == "" {
+			return ""
+		}
+		if strings.HasPrefix(value, "[") && !hasBalancedTOMLBrackets(value) {
+			var builder strings.Builder
+			builder.WriteString(value)
+			for j := i + 1; j < len(lines); j++ {
+				next := strings.TrimSpace(lines[j])
+				if next == "" || strings.HasPrefix(next, "#") {
+					continue
+				}
+				builder.WriteString("\n")
+				builder.WriteString(next)
+				if hasBalancedTOMLBrackets(builder.String()) {
+					return builder.String()
+				}
+			}
+		}
+		return value
 	}
-	return strings.TrimSpace(matches[1])
+	return ""
+}
+
+func hasBalancedTOMLBrackets(value string) bool {
+	depth := 0
+	inString := false
+	escaped := false
+
+	for _, r := range value {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\' && inString:
+			escaped = true
+		case r == '"':
+			inString = !inString
+		case !inString && r == '[':
+			depth++
+		case !inString && r == ']':
+			depth--
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func isExpectedCodexArgs(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || !strings.HasPrefix(value, "[") || !strings.HasSuffix(value, "]") {
+		return false
+	}
+
+	inner := strings.TrimSpace(value[1 : len(value)-1])
+	if inner == "" {
+		return false
+	}
+
+	parts := strings.Split(inner, ",")
+	var args []string
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		if len(trimmed) < 2 || trimmed[0] != '"' || trimmed[len(trimmed)-1] != '"' {
+			return false
+		}
+		args = append(args, trimmed[1:len(trimmed)-1])
+	}
+
+	return len(args) == 2 && args[0] == "proxy" && args[1] == "codex-shell"
 }

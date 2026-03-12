@@ -264,6 +264,26 @@ func TestMergeClaudeSecureSettingsRejectsUnexpectedShapes(t *testing.T) {
 	}
 }
 
+func TestCodexSecurityWarnings_AcceptsMultilineArgsArray(t *testing.T) {
+	configText := `[features]
+shell_tool = false
+
+[mcp_servers.fuse-shell]
+command = "fuse"
+args = [
+  "proxy",
+  "codex-shell",
+]
+`
+
+	warnings := codexSecurityWarnings(configText)
+	for _, warning := range warnings {
+		if strings.Contains(warning, "mcp_servers.fuse-shell.args") {
+			t.Fatalf("expected multiline args array to be accepted, got warnings %v", warnings)
+		}
+	}
+}
+
 func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, expectedDefaultMode string) {
 	t.Helper()
 

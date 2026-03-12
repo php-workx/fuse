@@ -240,6 +240,44 @@ func TestRunDoctorSecurity_WarnsAboutMCPRiskWhenClaudeHookExistsWithoutProxies(t
 	}
 }
 
+func TestRunDoctorSecurity_WarnsWhenClaudeSettingsCannotBeReadForMCPAssessment(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), ".codex"))
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("{not valid json\n"), 0o644); err != nil {
+		t.Fatalf("write malformed settings: %v", err)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPathForTest(t), []byte("log_level: warn\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	stdout, stderr, err := captureDoctorOutput(t, func() error {
+		return runDoctor(false, true)
+	})
+	if err == nil {
+		t.Fatalf("expected doctor --security to still report the malformed Claude settings failure\nstdout:\n%s", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no stderr, got %q", stderr)
+	}
+	for _, want := range []string{"MCP mediation posture", "cannot assess MCP mediation posture safely", "settings"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected doctor --security output to include %q, got:\n%s", want, stdout)
+		}
+	}
+}
+
 func TestRunDoctorLive_ReportsTerminalCapabilityChecks(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FUSE_HOME", tmpDir)
