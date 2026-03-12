@@ -262,26 +262,42 @@ func TestRunHook_NativeFileAbsoluteProjectConfigPathsAreBlocked(t *testing.T) {
 	t.Setenv("HOME", tmpHome)
 
 	projectDir := t.TempDir()
+	subdir := filepath.Join(projectDir, "subdir")
 	tests := []struct {
 		name     string
 		toolName string
 		path     string
+		cwd      string
 	}{
+		{
+			name:     "subdir relative parent claude settings blocked",
+			toolName: "Edit",
+			path:     "../.claude/settings.json",
+			cwd:      subdir,
+		},
 		{
 			name:     "absolute project claude settings blocked",
 			toolName: "Edit",
 			path:     filepath.Join(projectDir, ".claude", "settings.json"),
+			cwd:      subdir,
+		},
+		{
+			name:     "subdir relative parent codex config blocked",
+			toolName: "Write",
+			path:     "../.codex/config.toml",
+			cwd:      subdir,
 		},
 		{
 			name:     "absolute project codex config blocked",
 			toolName: "Write",
 			path:     filepath.Join(projectDir, ".codex", "config.toml"),
+			cwd:      subdir,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			input := `{"tool_name":"` + tt.toolName + `","tool_input":{"file_path":"` + filepath.ToSlash(tt.path) + `"},"session_id":"test","cwd":"` + filepath.ToSlash(projectDir) + `"}`
+			input := `{"tool_name":"` + tt.toolName + `","tool_input":{"file_path":"` + filepath.ToSlash(tt.path) + `"},"session_id":"test","cwd":"` + filepath.ToSlash(tt.cwd) + `"}`
 			stdin := strings.NewReader(input)
 			stderr := &bytes.Buffer{}
 
