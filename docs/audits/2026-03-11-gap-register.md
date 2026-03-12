@@ -34,10 +34,10 @@
 - **Evidence:**
   - `internal/adapters/codexshell.go`
   - `internal/adapters/codexshell_test.go`
-  - current direct Codex tests cover stdin isolation, disabled-mode bypass, and event pruning
+  - current direct Codex tests cover stdin isolation, disabled-mode bypass, event pruning, enabled-mode SAFE/BLOCKED/APPROVAL paths, and JSON-RPC shell-server request handling
 - **Impact:** The product may be usable with Codex, but current evidence is too thin to label the path stable or GA.
 - **Recommended fix:** Add explicit tests for enabled-mode SAFE, BLOCKED, and approval-required Codex command handling, then dogfood Codex workflows before release posture is finalized.
-- **Progress:** Commit `b0edc47` adds enabled-mode SAFE, BLOCKED, and approval-without-TTY tests in `internal/adapters/codexshell_test.go`. Remaining work is dogfood evidence and final release posture.
+- **Progress:** Commit `b0edc47` adds enabled-mode SAFE, BLOCKED, and approval-without-TTY tests in `internal/adapters/codexshell_test.go`. This branch now also covers `RunCodexShellServer` at the MCP/JSON-RPC boundary for `initialize`, `tools/list`, and `tools/call` success/error paths. Remaining work is real dogfood evidence and final release posture.
 
 ### REL-003
 

@@ -45,9 +45,9 @@ Fixture expansion exposed a real correctness bug in classifier precedence:
 
 That behavior is now fixed on this branch by evaluating hardcoded self-protection rules before sanitized inline-script approval and also on compound parse-error paths. This closes a meaningful gap in the repo's ability to prevent unintended tampering with Fuse-managed state.
 
-### 3. Codex should not be called GA yet, but the test baseline improved on this branch
+### 3. Codex should not be called GA yet, but the test baseline improved again on this branch
 
-Codex support exists in code and docs. This branch now includes explicit enabled-mode SAFE, BLOCKED, and approval-without-TTY tests, but that still falls short of a full GA claim without dogfood evidence.
+Codex support exists in code and docs. This branch now includes explicit enabled-mode SAFE, BLOCKED, and approval-without-TTY executor tests plus MCP/JSON-RPC shell-server tests for `initialize`, `tools/list`, and `tools/call`. That is much stronger evidence than before, but it still falls short of a full GA claim without real dogfood evidence.
 
 Recommended current posture:
 

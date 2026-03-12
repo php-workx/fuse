@@ -1,7 +1,11 @@
 package adapters
 
 import (
+	"bufio"
+	"bytes"
 	"database/sql"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,6 +52,45 @@ func enableFuseForTest(t *testing.T) {
 	if err := os.WriteFile(config.EnabledMarkerPath(), []byte("1"), 0o600); err != nil {
 		t.Fatalf("write enabled marker: %v", err)
 	}
+}
+
+func runCodexShellServerRequests(t *testing.T, requests ...jsonRPCMessage) []jsonRPCMessage {
+	t.Helper()
+
+	var input bytes.Buffer
+	for _, request := range requests {
+		payload, err := encodeJSONRPC(request)
+		if err != nil {
+			t.Fatalf("encode JSON-RPC request: %v", err)
+		}
+		if _, err := input.WriteString(rawMCPFrame(payload)); err != nil {
+			t.Fatalf("write input frame: %v", err)
+		}
+	}
+
+	var output bytes.Buffer
+	if err := RunCodexShellServer(&input, &output); err != nil {
+		t.Fatalf("RunCodexShellServer: %v", err)
+	}
+
+	reader := bufio.NewReader(&output)
+	var responses []jsonRPCMessage
+	for {
+		payload, err := readMCPFrame(reader)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("readMCPFrame(response): %v", err)
+		}
+		msg, err := decodeJSONRPC(payload)
+		if err != nil {
+			t.Fatalf("decodeJSONRPC(response): %v", err)
+		}
+		responses = append(responses, msg)
+	}
+
+	return responses
 }
 
 func TestExecuteCapturedShellCommand_DoesNotInheritProcessStdin(t *testing.T) {
@@ -189,5 +232,146 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	}
 	if exitCode != 0 {
 		t.Fatalf("expected exit code 0 on approval error path, got %d", exitCode)
+	}
+}
+
+func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
+	responses := runCodexShellServerRequests(t,
+		jsonRPCMessage{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "initialize",
+		},
+		jsonRPCMessage{
+			"jsonrpc": "2.0",
+			"method":  "notifications/initialized",
+		},
+		jsonRPCMessage{
+			"jsonrpc": "2.0",
+			"id":      2,
+			"method":  "tools/list",
+		},
+	)
+
+	if len(responses) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(responses))
+	}
+
+	initResult, _ := responses[0]["result"].(map[string]interface{})
+	if initResult == nil {
+		t.Fatalf("expected initialize result, got %#v", responses[0])
+	}
+	if protocolVersion, _ := initResult["protocolVersion"].(string); protocolVersion != "2024-11-05" {
+		t.Fatalf("protocolVersion = %q, want %q", protocolVersion, "2024-11-05")
+	}
+	serverInfo, _ := initResult["serverInfo"].(map[string]interface{})
+	if name, _ := serverInfo["name"].(string); name != "fuse-shell" {
+		t.Fatalf("serverInfo.name = %q, want %q", name, "fuse-shell")
+	}
+
+	listResult, _ := responses[1]["result"].(map[string]interface{})
+	tools, _ := listResult["tools"].([]interface{})
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	tool, _ := tools[0].(map[string]interface{})
+	if name, _ := tool["name"].(string); name != "run_command" {
+		t.Fatalf("tool name = %q, want %q", name, "run_command")
+	}
+}
+
+func TestRunCodexShellServer_ToolCallSafe(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	responses := runCodexShellServerRequests(t, jsonRPCMessage{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name": "run_command",
+			"arguments": map[string]interface{}{
+				"command": "printf safe",
+			},
+		},
+	})
+
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	result, _ := responses[0]["result"].(map[string]interface{})
+	if result == nil {
+		t.Fatalf("expected success result, got %#v", responses[0])
+	}
+	if stdout, _ := result["stdout"].(string); stdout != "safe" {
+		t.Fatalf("stdout = %q, want %q", stdout, "safe")
+	}
+	if exitCode, _ := result["exit_code"].(float64); exitCode != 0 {
+		t.Fatalf("exit_code = %v, want 0", exitCode)
+	}
+}
+
+func TestRunCodexShellServer_ToolCallBlocked(t *testing.T) {
+	fuseHome := withFuseHome(t)
+	enableFuseForTest(t)
+
+	responses := runCodexShellServerRequests(t, jsonRPCMessage{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name": "run_command",
+			"arguments": map[string]interface{}{
+				"command": "printf blocked > " + filepath.Join(fuseHome, "config", "policy.yaml"),
+			},
+		},
+	})
+
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	errObj, _ := responses[0]["error"].(map[string]interface{})
+	if errObj == nil {
+		t.Fatalf("expected JSON-RPC error, got %#v", responses[0])
+	}
+	if code, _ := errObj["code"].(float64); code != -32000 {
+		t.Fatalf("error code = %v, want -32000", code)
+	}
+	if message, _ := errObj["message"].(string); !strings.Contains(message, "fuse blocked command") {
+		t.Fatalf("error message = %q, want fuse blocked command", message)
+	}
+}
+
+func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	responses := runCodexShellServerRequests(t, jsonRPCMessage{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name": "run_command",
+			"arguments": map[string]interface{}{
+				"command": "python nonexistent_script.py",
+			},
+		},
+	})
+
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	errObj, _ := responses[0]["error"].(map[string]interface{})
+	if errObj == nil {
+		t.Fatalf("expected JSON-RPC error, got %#v", responses[0])
+	}
+	if code, _ := errObj["code"].(float64); code != -32000 {
+		t.Fatalf("error code = %v, want -32000", code)
+	}
+	if message, _ := errObj["message"].(string); !strings.Contains(message, "NON_INTERACTIVE_MODE") {
+		t.Fatalf("error message = %q, want NON_INTERACTIVE_MODE", message)
 	}
 }
