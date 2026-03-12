@@ -21,18 +21,20 @@ import (
 )
 
 var doctorLive bool
+var doctorSecurity bool
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
 	Short: "Run diagnostic checks on fuse setup",
 	Long:  "Checks configuration, directory structure, hook installation, and optionally runs a live test.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoctor(doctorLive)
+		return runDoctor(doctorLive, doctorSecurity)
 	},
 }
 
 func init() {
 	doctorCmd.Flags().BoolVar(&doctorLive, "live", false, "Run a live classification test")
+	doctorCmd.Flags().BoolVar(&doctorSecurity, "security", false, "Run additional security posture diagnostics")
 	rootCmd.AddCommand(doctorCmd)
 }
 
@@ -42,7 +44,7 @@ type checkResult struct {
 	detail string
 }
 
-func runDoctor(live bool) error {
+func runDoctor(live, security bool) error {
 	var results []checkResult
 
 	results = append(results, checkGoVersion())
@@ -53,6 +55,13 @@ func runDoctor(live bool) error {
 	results = append(results, checkSQLiteDB())
 	results = append(results, checkMCPProxyConfiguration())
 	results = append(results, checkFuseInPath())
+
+	if security {
+		results = append(results, checkClaudeSecurityPosture())
+		results = append(results, checkCodexSecurityPosture())
+		results = append(results, checkMCPMediationPosture())
+		results = append(results, checkApprovalTerminalTrust())
+	}
 
 	if live {
 		results = append(results, checkLiveTTYAccess())
@@ -253,6 +262,54 @@ func checkClaudeSettings() checkResult {
 	}
 }
 
+func checkClaudeSecurityPosture() checkResult {
+	settingsPath := claudeSettingsPath()
+	settings, err := readJSONFile(settingsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return checkResult{
+				name:   "Claude security posture",
+				status: "PASS",
+				detail: "Claude settings not found; security posture not evaluated",
+			}
+		}
+		return checkResult{
+			name:   "Claude security posture",
+			status: "WARN",
+			detail: fmt.Sprintf("cannot inspect Claude settings: %v", err),
+		}
+	}
+
+	if !hasFuseHook(settings) {
+		return checkResult{
+			name:   "Claude security posture",
+			status: "PASS",
+			detail: "fuse hook missing; secure Claude settings not evaluated",
+		}
+	}
+
+	warnings, err := claudeSecurityWarnings(settings)
+	if err != nil {
+		return checkResult{
+			name:   "Claude security posture",
+			status: "WARN",
+			detail: fmt.Sprintf("cannot validate secure Claude settings safely: %v", err),
+		}
+	}
+	if len(warnings) > 0 {
+		return checkResult{
+			name:   "Claude security posture",
+			status: "WARN",
+			detail: "missing or weaker secure settings: " + strings.Join(warnings, "; "),
+		}
+	}
+	return checkResult{
+		name:   "Claude security posture",
+		status: "PASS",
+		detail: "secure Claude settings present",
+	}
+}
+
 // hasFuseHook checks if the settings map contains a fuse hook entry.
 func hasFuseHook(settings map[string]interface{}) bool {
 	hooksObj, ok := settings["hooks"].(map[string]interface{})
@@ -407,6 +464,102 @@ func checkMCPProxyConfiguration() checkResult {
 		name:   "MCP proxy configuration",
 		status: "PASS",
 		detail: fmt.Sprintf("%d proxy command(s) available", len(cfg.MCPProxies)),
+	}
+}
+
+func checkCodexSecurityPosture() checkResult {
+	configPath := codexConfigPath()
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return checkResult{
+				name:   "Codex security posture",
+				status: "PASS",
+				detail: "Codex config not found; skipping Codex security checks",
+			}
+		}
+		return checkResult{
+			name:   "Codex security posture",
+			status: "WARN",
+			detail: fmt.Sprintf("cannot inspect Codex config: %v", err),
+		}
+	}
+
+	warnings := codexSecurityWarnings(string(data))
+	if len(warnings) > 0 {
+		return checkResult{
+			name:   "Codex security posture",
+			status: "WARN",
+			detail: strings.Join(warnings, "; "),
+		}
+	}
+	return checkResult{
+		name:   "Codex security posture",
+		status: "PASS",
+		detail: fmt.Sprintf("Codex shell mediation looks correct in %s", configPath),
+	}
+}
+
+func checkMCPMediationPosture() checkResult {
+	cfg, err := config.LoadConfig(config.ConfigPath())
+	if err != nil {
+		return checkResult{
+			name:   "MCP mediation posture",
+			status: "WARN",
+			detail: fmt.Sprintf("cannot assess MCP mediation safely: %v", err),
+		}
+	}
+
+	settings, err := readJSONFile(claudeSettingsPath())
+	if err != nil || !hasFuseHook(settings) {
+		return checkResult{
+			name:   "MCP mediation posture",
+			status: "PASS",
+			detail: "no Claude fuse hook detected; MCP mediation risk not assessed",
+		}
+	}
+
+	if cfg == nil || len(cfg.MCPProxies) == 0 {
+		return checkResult{
+			name:   "MCP mediation posture",
+			status: "WARN",
+			detail: "no MCP proxies configured while the Claude fuse hook is active; direct MCP servers may bypass fuse proxy mediation",
+		}
+	}
+
+	return checkResult{
+		name:   "MCP mediation posture",
+		status: "PASS",
+		detail: fmt.Sprintf("%d MCP proxy configuration(s) present", len(cfg.MCPProxies)),
+	}
+}
+
+func checkApprovalTerminalTrust() checkResult {
+	switch {
+	case os.Getenv("CI") == "true":
+		return checkResult{
+			name:   "Approval terminal trust",
+			status: "WARN",
+			detail: "CI environment detected; terminal-based approval trust is lower in non-interactive sessions",
+		}
+	case os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "":
+		return checkResult{
+			name:   "Approval terminal trust",
+			status: "WARN",
+			detail: "remote SSH terminal detected; verify approval prompts are trusted in this session",
+		}
+	case os.Getenv("TERM") == "dumb":
+		return checkResult{
+			name:   "Approval terminal trust",
+			status: "WARN",
+			detail: "TERM=dumb; approval prompt rendering or trust may be degraded",
+		}
+	default:
+		return checkResult{
+			name:   "Approval terminal trust",
+			status: "PASS",
+			detail: "no obvious terminal trust warnings detected",
+		}
 	}
 }
 
