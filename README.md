@@ -112,6 +112,17 @@ fuse run --timeout 5m -- "terraform destroy prod"
 - If `/dev/tty` is unavailable, approval-required actions are denied with `fuse:NON_INTERACTIVE_MODE`.
 - Approval records are stored in `~/.fuse/state/fuse.db` and signed with an HMAC backed by `~/.fuse/state/secret.key`.
 
+## Development
+
+```bash
+just setup       # install tools + configure git hooks
+just dev         # run full local quality gate
+just pre-commit  # fast checks only
+just check       # full gate including sonar
+```
+
+See `just --list` for all available recipes.
+
 ## Limitations
 
 - Hook mode still has a TOCTOU window because Claude Code executes natively after `fuse` allows the call.
