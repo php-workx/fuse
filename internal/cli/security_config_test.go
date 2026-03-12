@@ -298,13 +298,53 @@ func TestClaudeMCPServerWarnings_DistinguishesMediatedAndDirectEntries(t *testin
 		},
 	}
 
-	warnings, mediated := claudeMCPServerWarnings(settings)
+	configured := map[string]struct{}{
+		"aws-mcp": {},
+	}
+	warnings, mediated := claudeMCPServerWarnings(settings, configured)
 	if mediated != 1 {
 		t.Fatalf("mediated count = %d, want 1", mediated)
 	}
 	if len(warnings) != 1 || !strings.Contains(warnings[0], "aws-direct") {
 		t.Fatalf("expected one warning for direct MCP entry, got %v", warnings)
 	}
+}
+
+func TestClaudeMCPServerWarnings_RequiresConfiguredDownstreamName(t *testing.T) {
+	settings := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"missing-name": map[string]interface{}{
+				"command": "fuse",
+				"args":    []interface{}{"proxy", "mcp"},
+			},
+			"unknown-name": map[string]interface{}{
+				"command": "fuse",
+				"args":    []interface{}{"proxy", "mcp", "--downstream-name", "missing"},
+			},
+		},
+	}
+
+	configured := map[string]struct{}{
+		"aws-mcp": {},
+	}
+	warnings, mediated := claudeMCPServerWarnings(settings, configured)
+	if mediated != 0 {
+		t.Fatalf("mediated count = %d, want 0", mediated)
+	}
+	for _, want := range []string{"missing-name", "missing configured --downstream-name", "unknown-name", "unknown downstream"} {
+		if !containsWarning(warnings, want) {
+			t.Fatalf("expected warnings to include %q, got %v", want, warnings)
+		}
+	}
+}
+
+func containsWarning(warnings []string, want string) bool {
+	for _, warning := range warnings {
+		if strings.Contains(warning, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, expectedDefaultMode string) {
