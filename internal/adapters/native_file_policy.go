@@ -113,9 +113,9 @@ func classifyNativeFilePath(path, cwd string) (core.Decision, string) {
 		return core.DecisionBlocked, fmt.Sprintf("access to protected fuse path %s is blocked", path)
 	case info.isUnder(filepath.Join(info.homeDir, ".fuse")):
 		return core.DecisionBlocked, fmt.Sprintf("access to protected fuse path %s is blocked", path)
-	case info.matchesRelative(".claude/settings.json") || info.matchesAbsolute(filepath.Join(info.homeDir, ".claude", "settings.json")) || info.matchesAbsolute(filepath.Join(info.cwd, ".claude", "settings.json")):
+	case info.isClaudeSettingsPath():
 		return core.DecisionBlocked, fmt.Sprintf("access to Claude settings path %s is blocked", path)
-	case info.matchesRelative(".codex/config.toml") || info.matchesAbsolute(filepath.Join(info.homeDir, ".codex", "config.toml")) || info.matchesAbsolute(filepath.Join(info.cwd, ".codex", "config.toml")):
+	case info.isCodexConfigPath():
 		return core.DecisionBlocked, fmt.Sprintf("access to Codex config path %s is blocked", path)
 	case info.hasBase("fuse.db") || info.hasBase("secret.key"):
 		return core.DecisionBlocked, fmt.Sprintf("access to protected fuse state file %s is blocked", path)
@@ -188,6 +188,24 @@ func (p filePathInfo) matchesAbsolute(want string) bool {
 		return false
 	}
 	return p.slashAbs == filepath.ToSlash(filepath.Clean(want))
+}
+
+func (p filePathInfo) endsWithPathSuffix(suffix string) bool {
+	suffix = filepath.ToSlash(filepath.Clean(suffix))
+	return p.slashRaw == suffix ||
+		p.slashAbs == suffix ||
+		strings.HasSuffix(p.slashRaw, "/"+suffix) ||
+		strings.HasSuffix(p.slashAbs, "/"+suffix)
+}
+
+func (p filePathInfo) isClaudeSettingsPath() bool {
+	return p.matchesAbsolute(filepath.Join(p.homeDir, ".claude", "settings.json")) ||
+		p.endsWithPathSuffix(".claude/settings.json")
+}
+
+func (p filePathInfo) isCodexConfigPath() bool {
+	return p.matchesAbsolute(filepath.Join(p.homeDir, ".codex", "config.toml")) ||
+		p.endsWithPathSuffix(".codex/config.toml")
 }
 
 func (p filePathInfo) isUnder(base string) bool {
