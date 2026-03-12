@@ -168,6 +168,7 @@ Key details:
 - `timeout` is in **seconds** (not milliseconds). 30 seconds is the outer Claude hook timeout.
 - fuse must enforce an **internal approval timeout shorter than Claude's hook timeout**. v1 target: 25 seconds in hook mode, so fuse exits cleanly with exit 2 before Claude kills the process.
 - `fuse install claude` must merge into existing `settings.json` without overwriting other hooks or settings. Use JSON-merge logic: read existing file, add/update the fuse hook entry in the `PreToolUse` array, write back.
+- `fuse install claude --secure` may add extra `PreToolUse` matchers for Claude native file tools. In v1.1 that secure path adds `Read`, `Write`, `Edit`, and `MultiEdit` so fuse can apply narrow path-based protections alongside the existing Bash and MCP hooks.
 
 #### Stdin input
 
@@ -257,6 +258,17 @@ To mediate MCP tool calls in hook mode, add additional matchers for MCP tool pat
 ```
 
 When fuse receives an MCP tool call via hook, it classifies based on tool name and arguments per §6.6.
+
+#### Narrow native file-tool mediation (secure install only)
+
+When the secure Claude install path adds explicit `Read`, `Write`, `Edit`, and `MultiEdit` matchers, `fuse hook evaluate` also performs a narrow file-path classification pass for those tools:
+
+- Classification is based on target path only. v1.1 does not inspect file contents for native Claude file tools.
+- BLOCKED paths include fuse self-protection and critical config locations such as `~/.fuse/**`, `~/.claude/settings.json`, `.claude/settings.json`, `~/.codex/config.toml`, `.codex/config.toml`, `fuse.db`, `secret.key`, and `.git/hooks/**`.
+- APPROVAL paths include obvious secret-bearing targets such as `.env`, `.env.*`, `./secrets/**`, `~/.ssh/**`, `~/.aws/**`, `~/.config/gcloud/**`, `~/.azure/**`, `kubeconfig`, `~/.kube/config`, and common certificate/key extensions including `.pem`, `.key`, `.crt`, `.p12`, `.pfx`, `.jks`, and `.keystore`.
+- Other file paths are allowed.
+
+This native file-tool path layer is intentionally narrower than Bash/MCP mediation. It exists to catch obvious self-protection and secret-access cases in Claude’s native file tools without changing the Bash and MCP execution model.
 
 #### MCP proxy for Claude Code
 
