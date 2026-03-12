@@ -15,17 +15,27 @@ import (
 
 func withFuseHome(t *testing.T) string {
 	t.Helper()
-	fuseHome := filepath.Join(t.TempDir(), ".fuse")
+	homeDir := t.TempDir()
+	fuseHome := filepath.Join(homeDir, ".fuse")
 	oldFuseHome := os.Getenv("FUSE_HOME")
+	oldHome := os.Getenv("HOME")
 	if err := os.Setenv("FUSE_HOME", fuseHome); err != nil {
 		t.Fatalf("set FUSE_HOME: %v", err)
+	}
+	if err := os.Setenv("HOME", homeDir); err != nil {
+		t.Fatalf("set HOME: %v", err)
 	}
 	t.Cleanup(func() {
 		if oldFuseHome == "" {
 			_ = os.Unsetenv("FUSE_HOME")
-			return
+		} else {
+			_ = os.Setenv("FUSE_HOME", oldFuseHome)
 		}
-		_ = os.Setenv("FUSE_HOME", oldFuseHome)
+		if oldHome == "" {
+			_ = os.Unsetenv("HOME")
+		} else {
+			_ = os.Setenv("HOME", oldHome)
+		}
 	})
 	if err := config.EnsureDirectories(); err != nil {
 		t.Fatalf("ensure directories: %v", err)
@@ -71,8 +81,9 @@ func TestExecuteCapturedShellCommand_DoesNotInheritProcessStdin(t *testing.T) {
 }
 
 func TestExecuteCodexShellCommand_AllowsBlockedCommandWhenDisabled(t *testing.T) {
+	withFuseHome(t)
 	enabledMarker := config.EnabledMarkerPath()
-	if err := os.Remove(enabledMarker); err != nil {
+	if err := os.Remove(enabledMarker); err != nil && !os.IsNotExist(err) {
 		t.Fatalf("remove enabled marker: %v", err)
 	}
 	defer func() {
@@ -149,10 +160,11 @@ func TestExecuteCodexShellCommand_EnabledSafeCommand(t *testing.T) {
 }
 
 func TestExecuteCodexShellCommand_EnabledBlockedCommand(t *testing.T) {
-	withFuseHome(t)
+	fuseHome := withFuseHome(t)
 	enableFuseForTest(t)
 
-	stdout, stderr, exitCode, err := executeCodexShellCommand("rm -rf /", "", time.Minute)
+	command := "printf blocked > " + filepath.Join(fuseHome, "config", "policy.yaml")
+	stdout, stderr, exitCode, err := executeCodexShellCommand(command, "", time.Minute)
 	if err == nil {
 		t.Fatal("expected blocked command to return an error")
 	}
@@ -168,7 +180,7 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 
-	_, _, exitCode, err := executeCodexShellCommand("terraform destroy prod", "", time.Minute)
+	_, _, exitCode, err := executeCodexShellCommand("python nonexistent_script.py", "", time.Minute)
 	if err == nil {
 		t.Fatal("expected approval-required command without TTY to return an error")
 	}

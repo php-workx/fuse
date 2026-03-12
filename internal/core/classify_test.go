@@ -23,7 +23,9 @@ type GoldenFixtures struct {
 	Fixtures []GoldenFixture `yaml:"fixtures"`
 }
 
-func TestClassify_GoldenFixtures(t *testing.T) {
+func loadGoldenFixtures(t *testing.T) GoldenFixtures {
+	t.Helper()
+
 	data, err := os.ReadFile("../../testdata/fixtures/commands.yaml")
 	if err != nil {
 		t.Fatalf("failed to read fixtures: %v", err)
@@ -36,6 +38,12 @@ func TestClassify_GoldenFixtures(t *testing.T) {
 	if len(fixtures.Fixtures) < 100 {
 		t.Fatalf("expected at least 100 fixtures, got %d", len(fixtures.Fixtures))
 	}
+
+	return fixtures
+}
+
+func TestClassify_GoldenFixtures(t *testing.T) {
+	fixtures := loadGoldenFixtures(t)
 
 	evaluator := policy.NewEvaluator(nil) // no user policy for golden tests
 
