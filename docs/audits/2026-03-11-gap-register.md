@@ -88,6 +88,33 @@
 - **Impact:** We can now make several measured current-machine claims, but we still cannot honestly claim the written Go-version floor or full pathological-input performance target at release confidence.
 - **Recommended fix:** Keep the new release-check harness, then either lower the actual Go/dependency floor and optimize long-input classification or narrow the written compatibility/performance contract before RC1.
 
+### REL-008
+
+- **Title:** Supported minimum Go version no longer matches the spec and test plan
+- **Severity:** `must-fix-before-rc`
+- **Type:** `compatibility-gap`
+- **Status:** `open`
+- **Evidence:**
+  - `specs/technical_v1.1.md` §1.1 states minimum Go `1.21`
+  - `specs/testplan.md` `COMPAT-002` explicitly requires validating `go1.21.x`
+  - `go.mod` declares `go 1.25.0`
+  - `docs/release/2026-03-12-perf-compat-smoke.md` shows `GOTOOLCHAIN=go1.21.13 go test -count=1 ./...` fails immediately
+- **Impact:** The current repo cannot honestly claim the documented minimum Go version.
+- **Recommended fix:** Either lower the repo/toolchain floor and prove `go1.21.x` support, or update the spec, test plan, and release scope to the newer supported minimum.
+
+### REL-009
+
+- **Title:** Pathological uppercase-input performance misses the written `PERF-003` threshold
+- **Severity:** `must-fix-before-rc`
+- **Type:** `performance-gap`
+- **Status:** `open`
+- **Evidence:**
+  - `internal/releasecheck/releasecheck_test.go`
+  - `docs/release/2026-03-12-perf-compat-smoke.md`
+  - current darwin/arm64 baseline records `uppercase-32k` p95 about `103 ms` and `uppercase-64k` p95 about `205 ms`
+- **Impact:** The repo now has proof that `PERF-003` is not currently satisfied for at least one pathological input family.
+- **Recommended fix:** Reduce display/classification overhead on long inert inputs, or narrow the published `PERF-003` claim before RC1.
+
 ### REL-005
 
 - **Title:** Daily-usage friction is not yet validated by dogfooding
@@ -115,7 +142,8 @@
 
 ## Immediate Priority Order
 
-1. `REL-002` Codex release confidence
-2. `REL-003` golden fixture depth and remaining corpus alignment
-3. `REL-004` performance/compatibility proof
-4. `REL-005` dogfood friction evidence
+1. `REL-008` Go-version compatibility floor
+2. `REL-009` pathological-input performance threshold
+3. `REL-002` Codex release confidence
+4. `REL-003` golden fixture depth and remaining corpus alignment
+5. `REL-005` dogfood friction evidence

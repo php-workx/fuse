@@ -90,6 +90,6 @@ If a release had to happen today, the honest statement would be:
 
 ## Next Actions
 
-1. Expand or explicitly narrow the remaining per-rule golden-fixture contract; `182` rows is still below the written full-rule target for `225` built-in IDs.
-2. Add stronger Codex end-to-end and dogfood evidence, then decide Codex release posture from evidence.
-3. Resolve the Go-version floor mismatch and `PERF-003` long-input miss, then add the remaining prompt/sqlite/memory evidence before RC1.
+1. Resolve the Go-version floor mismatch and `PERF-003` long-input miss now that they are measured release blockers.
+2. Expand or explicitly narrow the remaining per-rule golden-fixture contract; `182` rows is still below the written full-rule target for `225` built-in IDs.
+3. Add stronger Codex end-to-end and dogfood evidence, then add the remaining prompt/sqlite/memory proof before RC1.
