@@ -121,6 +121,22 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	// Step 3: Compound command splitting.
 	subCmds, err := SplitCompoundCommand(displayNorm)
 	if err != nil {
+		if evaluator != nil {
+			classified := ClassificationNormalize(displayNorm)
+			candidates := []string{displayNorm, classified.Outer}
+			candidates = append(candidates, classified.Inner...)
+			for _, candidate := range candidates {
+				if candidate == "" {
+					continue
+				}
+				if d, reason := evaluator.EvaluateHardcoded(candidate); d != "" {
+					result.Decision = d
+					result.Reason = reason
+					result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
+					return result, nil
+				}
+			}
+		}
 		// Fail-closed: treat as APPROVAL.
 		result.Decision = DecisionApproval
 		result.Reason = fmt.Sprintf("compound split error (fail-closed): %v", err)
@@ -263,13 +279,16 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 		return DecisionApproval, "security-sensitive environment variable assignment", ""
 	}
 
-	// Step 9: Evaluate rules in order (most restrictive wins within each layer).
+	// Hardcoded rules must see the unsanitized normalized command so inline
+	// self-protection patterns are not masked by quote sanitization.
 	if evaluator != nil {
-		// Layer 1: Hardcoded rules.
-		if d, reason := evaluator.EvaluateHardcoded(sanitized); d != "" {
+		if d, reason := evaluator.EvaluateHardcoded(cmd); d != "" {
 			return d, reason, ""
 		}
+	}
 
+	// Step 9: Evaluate rules in order (most restrictive wins within each layer).
+	if evaluator != nil {
 		// Layer 2: User policy rules.
 		if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
 			return d, reason, ""

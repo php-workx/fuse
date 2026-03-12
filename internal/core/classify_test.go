@@ -216,6 +216,42 @@ func TestClassify_InlineScript(t *testing.T) {
 	}
 }
 
+func TestClassify_HardcodedRuleWinsOverInlineInterpreterApproval(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	req := core.ShellRequest{
+		RawCommand: `python -c "import shutil; shutil.rmtree('~/.fuse/config')"`,
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Fatalf("expected BLOCKED, got %s (reason: %s)", result.Decision, result.Reason)
+	}
+}
+
+func TestClassify_HardcodedRuleWinsOnHeredocParseFailure(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	req := core.ShellRequest{
+		RawCommand: "cat > ~/.fuse/config/policy.yaml << EOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Fatalf("expected BLOCKED, got %s (reason: %s)", result.Decision, result.Reason)
+	}
+}
+
 func TestClassify_SensitiveEnvVars(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
