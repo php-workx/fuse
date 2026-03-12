@@ -42,8 +42,9 @@ Fixture expansion exposed a real correctness bug in classifier precedence:
 
 - inline interpreter payloads such as `python -c ... ~/.fuse/config ...` could fall through to `APPROVAL`
 - unclosed heredoc writes into `~/.fuse/config` could also fail closed to `APPROVAL`
+- inline pipe-script payloads such as `curl ... | bash` could degrade to `SAFE` after compound splitting
 
-That behavior is now fixed on this branch by evaluating hardcoded self-protection rules before sanitized inline-script approval and also on compound parse-error paths. This closes a meaningful gap in the repo's ability to prevent unintended tampering with Fuse-managed state.
+That behavior is now fixed on this branch by evaluating hardcoded self-protection rules before sanitized inline-script approval, preserving those rules on compound parse-error paths, and preserving inline pipe-script approval across compound splitting. This closes a meaningful gap in the repo's ability to prevent unintended tampering with Fuse-managed state.
 
 ### 3. Codex should not be called GA yet, but the test baseline improved again on this branch
 

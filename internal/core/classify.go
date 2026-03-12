@@ -153,6 +153,15 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 		return result, nil
 	}
 
+	// Preserve inline pipe-script detection across compound splitting. A pipeline
+	// like "curl ... | bash" is structurally split into safe-looking sub-commands,
+	// so the compound form must still contribute its higher-risk decision.
+	compoundInlineDecision := Decision("")
+	compoundInlineReason := ""
+	if len(subCmds) > 1 && strings.Contains(displayNorm, "|") {
+		compoundInlineDecision, compoundInlineReason = detectInlineScript(displayNorm)
+	}
+
 	// Accumulate file hashes for decision key.
 	var fileHashes []string
 
@@ -186,6 +195,15 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	result.Decision = overallDecision
 	result.Reason = overallReason
 	result.RuleID = overallRuleID
+
+	if compoundInlineDecision != "" {
+		combined := MaxDecision(result.Decision, compoundInlineDecision)
+		if combined != result.Decision {
+			result.Decision = combined
+			result.Reason = compoundInlineReason
+			result.RuleID = ""
+		}
+	}
 
 	// Step 12: Compute decision key.
 	combinedHash := strings.Join(fileHashes, ":")
