@@ -12,7 +12,7 @@ Companion document: [specs/functional.md](functional.md)
 
 ### 1.1 Language: Go
 
-fuse is implemented in Go (minimum Go 1.21 for `log/slog`).
+fuse is implemented in Go (minimum Go 1.24).
 
 - Fast startup, single binary, no runtime dependencies.
 - `modernc.org/sqlite` provides pure-Go SQLite with no CGo dependency.

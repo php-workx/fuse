@@ -14,11 +14,11 @@ go test -count=1 ./...
 echo
 echo "== Go version compatibility =="
 set +e
-GOTOOLCHAIN=go1.21.13 go test -count=1 ./...
-go121_status=$?
+GOTOOLCHAIN=go1.24.0 go test -count=1 ./...
+go124_status=$?
 set -e
-if [[ "$go121_status" -ne 0 ]]; then
-  echo "go1.21.13 compatibility check failed with status $go121_status"
+if [[ "$go124_status" -ne 0 ]]; then
+  echo "go1.24.0 compatibility check failed with status $go124_status"
 fi
 
 echo

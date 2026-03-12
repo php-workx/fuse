@@ -79,28 +79,28 @@
   - `internal/releasecheck/releasecheck_test.go`
   - `scripts/run-release-checks.sh`
   - current `darwin/arm64` smoke run shows `PERF-001`, `PERF-002`, and `PERF-002A` comfortably under their stated thresholds
+  - `GOTOOLCHAIN=go1.24.0 go test -count=1 ./...` now passes
   - cross-builds now pass for `darwin/arm64`, `darwin/amd64`, `linux/amd64`, and `linux/arm64`
   - shell wrapper compatibility passes locally for `bash`, `zsh`, and `fish`
   - locale invariance passes locally for `LC_ALL=C`, `en_US.UTF-8`, and `ja_JP.UTF-8`
-  - `GOTOOLCHAIN=go1.21.13 go test ./...` fails immediately because `go.mod` requires `go >= 1.25.0`
-  - `PERF-003` currently fails on large unmatched uppercase inputs (`32 KB` p95 about `104 ms`, `64 KB` p95 about `208 ms`)
+  - `PERF-003` currently fails on large unmatched uppercase inputs (`32 KB` p95 about `102 ms`, `64 KB` p95 about `204 ms`)
   - `specs/testplan.md` defines `PERF-*` and `COMPAT-*` sections
-- **Impact:** We can now make several measured current-machine claims, but we still cannot honestly claim the written Go-version floor or full pathological-input performance target at release confidence.
-- **Recommended fix:** Keep the new release-check harness, then either lower the actual Go/dependency floor and optimize long-input classification or narrow the written compatibility/performance contract before RC1.
+- **Impact:** We can now make several measured current-machine claims, but we still cannot honestly claim full pathological-input performance or the remaining unmeasured compatibility slices at release confidence.
+- **Recommended fix:** Keep the new release-check harness, then optimize long-input classification or narrow the `PERF-003` contract and add the remaining prompt/SQLite/terminal compatibility evidence before RC1.
 
 ### REL-008
 
 - **Title:** Supported minimum Go version no longer matches the spec and test plan
 - **Severity:** `must-fix-before-rc`
 - **Type:** `compatibility-gap`
-- **Status:** `open`
+- **Status:** `fixed on release-readiness-audit branch`
 - **Evidence:**
-  - `specs/technical_v1.1.md` §1.1 states minimum Go `1.21`
-  - `specs/testplan.md` `COMPAT-002` explicitly requires validating `go1.21.x`
-  - `go.mod` declares `go 1.25.0`
-  - `docs/release/2026-03-12-perf-compat-smoke.md` shows `GOTOOLCHAIN=go1.21.13 go test -count=1 ./...` fails immediately
-- **Impact:** The current repo cannot honestly claim the documented minimum Go version.
-- **Recommended fix:** Either lower the repo/toolchain floor and prove `go1.21.x` support, or update the spec, test plan, and release scope to the newer supported minimum.
+  - `specs/technical_v1.1.md` now states minimum Go `1.24`
+  - `specs/testplan.md` `COMPAT-002` now validates `go1.24.x`
+  - `go.mod` now declares `go 1.24.0`
+  - `GOTOOLCHAIN=go1.24.0 go test -count=1 ./...` passes
+- **Impact:** The repo’s declared minimum Go version now matches the current dependency floor and verified compatibility check.
+- **Resolution:** Fixed on this branch by aligning the spec, test plan, release docs, and `go.mod` on Go `1.24`, and by downgrading `golang.org/x/sys` to a Go-`1.24` compatible version.
 
 ### REL-009
 

@@ -6,7 +6,7 @@
 
 **Architecture:** Treat release readiness as a staged risk-reduction program. First prove the implementation matches the accepted specs, then close the highest-severity correctness and test gaps, then validate real-world friction and cloud-safety behavior under dogfooding, and only then cut a release candidate with explicit go/no-go gates.
 
-**Tech Stack:** Go 1.21+, Cobra CLI, Bubble Tea/Lip Gloss, SQLite, `go test`, `go test -race`, golden YAML fixtures, Claude Code hook integration, Codex MCP shell integration, `bd` issue tracking
+**Tech Stack:** Go 1.24+, Cobra CLI, Bubble Tea/Lip Gloss, SQLite, `go test`, `go test -race`, golden YAML fixtures, Claude Code hook integration, Codex MCP shell integration, `bd` issue tracking
 
 ---
 

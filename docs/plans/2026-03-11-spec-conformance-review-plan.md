@@ -6,7 +6,7 @@
 
 **Architecture:** Run the review as a traceability audit, not an ad hoc code walk. First build a requirement matrix from the three spec documents, then audit the codebase in subsystem slices, then map every required behavior to tests and fixtures, and finally turn confirmed gaps into a prioritized issue list.
 
-**Tech Stack:** Go 1.21+, Cobra CLI, Bubble Tea/Lip Gloss TUI, SQLite, `rg`, `go test`, `go test -race`, YAML golden fixtures in `testdata/fixtures/commands.yaml`, script fixtures in `testdata/scripts/`
+**Tech Stack:** Go 1.24+, Cobra CLI, Bubble Tea/Lip Gloss TUI, SQLite, `rg`, `go test`, `go test -race`, YAML golden fixtures in `testdata/fixtures/commands.yaml`, script fixtures in `testdata/scripts/`
 
 ---
 

@@ -90,7 +90,7 @@ Status meanings:
 | `PERF-004` | no harness found | `missing` | No explicit performance test evidence found. |
 | `PERF-005` | no harness found | `missing` | No explicit performance test evidence found. |
 | `COMPAT-001` | `scripts/run-release-checks.sh` | `partial` | Cross-builds now pass for the four declared `GOOS/GOARCH` targets, but runtime validation still exists only on the current host. |
-| `COMPAT-002` | `scripts/run-release-checks.sh` | `partial` | The Go-version matrix is now exercised, and it currently proves a mismatch: the repo requires Go `1.25+`, not the written `1.21.x` floor. |
+| `COMPAT-002` | `scripts/run-release-checks.sh`, `go.mod` | `covered` | The minimum Go-version check is now aligned to `go1.24.0`, and that compatibility check passes. |
 | `COMPAT-003` | `internal/releasecheck/releasecheck_test.go`, `scripts/run-release-checks.sh` | `covered` | `fuse run` shell-wrapper behavior passes locally under `bash`, `zsh`, and `fish`. |
 | `COMPAT-004` | `internal/releasecheck/releasecheck_test.go`, `scripts/run-release-checks.sh` | `covered` | Locale-invariance is now checked directly and passes on the baseline machine. |
 | `COMPAT-005` | no compatibility harness found | `missing` | No explicit compatibility matrix found. |
@@ -105,5 +105,5 @@ Status meanings:
 
 1. `GOLD-CMD-002` - fixture depth is below the written target
 2. `GOLD-MCP-001` - no dedicated MCP golden fixture corpus found
-3. `COMPAT-002` - the current repo requires Go `1.25+`, contradicting the written `go1.21.x` floor
-4. `PERF-003` / `PERF-002B` / `PERF-004` / `PERF-005` - the harness exists now, but pathological-input, prompt, SQLite, and memory proof are still incomplete
+3. `PERF-003` / `PERF-002B` / `PERF-004` / `PERF-005` - the harness exists now, but pathological-input, prompt, SQLite, and memory proof are still incomplete
+4. `COMPAT-005` / `COMPAT-006` / `COMPAT-007` - terminal, SQLite runtime, and Claude-version matrix proof are still incomplete

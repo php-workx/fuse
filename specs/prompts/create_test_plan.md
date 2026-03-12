@@ -126,7 +126,7 @@ This is the most critical section. Design attacks that a malicious or compromise
 
 ### 7. Compatibility test plan
 - `macOS` (arm64, `x86_64`) and Linux (`x86_64`, arm64)
-- Go 1.21+ (minimum) through latest
+- Go 1.24+ (minimum) through latest
 - Shell variations: bash, zsh, fish (for hook invocation context)
 - Claude Code versions (hook protocol compatibility)
 - `SQLite` version compatibility (`modernc.org/sqlite`)

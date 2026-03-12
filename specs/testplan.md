@@ -1443,7 +1443,7 @@ These probes intentionally go beyond the current v1 product boundary. They are r
 - **Component**: Go version matrix
 - **Description**: Confirm the minimum Go version and the repo-pinned latest CI Go version both work.
 - **Input**:
-  - `go1.21.x`
+  - `go1.24.x`
   - current repo-pinned latest Go release in CI (record exact version in the matrix, e.g. `go1.24.x`)
 - **Expected result**:
   - Test suite passes on both versions without replacing stdlib features such as `log/slog`.

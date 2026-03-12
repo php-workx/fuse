@@ -74,8 +74,14 @@ Current measured results on this `darwin/arm64` machine are strong for the hot p
 
 But the same harness also found two hard mismatches:
 
-- the repo currently does not support the written `go1.21.x` floor because `go.mod` and current dependencies require newer Go versions
+- the repo’s declared minimum Go version had drifted and needed to be aligned to the real `1.24` dependency floor
 - pathological long unmatched inputs currently miss the `PERF-003` `<100 ms` target on this machine
+
+The Go-floor mismatch is now fixed on this branch:
+
+- `go.mod` now requires Go `1.24.0`
+- the current spec and test plan now name Go `1.24`
+- `GOTOOLCHAIN=go1.24.0 go test -count=1 ./...` passes
 
 Recommended current posture:
 
@@ -90,6 +96,6 @@ If a release had to happen today, the honest statement would be:
 
 ## Next Actions
 
-1. Resolve the Go-version floor mismatch and `PERF-003` long-input miss now that they are measured release blockers.
+1. Resolve the remaining `PERF-003` long-input miss now that it is a measured release blocker.
 2. Expand or explicitly narrow the remaining per-rule golden-fixture contract; `182` rows is still below the written full-rule target for `225` built-in IDs.
 3. Add stronger Codex end-to-end and dogfood evidence, then add the remaining prompt/sqlite/memory proof before RC1.
