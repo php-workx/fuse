@@ -17,6 +17,9 @@ var installCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]
+		if installClaudeSecure && target != "claude" {
+			return fmt.Errorf("--secure is only supported for the 'claude' target")
+		}
 		switch target {
 		case "claude":
 			return installClaude(installClaudeSecure)
@@ -57,9 +60,28 @@ func claudeSettingsPath() string {
 	return filepath.Join(home, ".claude", "settings.json")
 }
 
+func rejectSymlinkedClaudeSettingsPath(settingsPath string) error {
+	for _, candidate := range []string{filepath.Dir(settingsPath), settingsPath} {
+		info, err := os.Lstat(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("inspect %s: %w", candidate, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to use symlinked Claude settings path %s", candidate)
+		}
+	}
+	return nil
+}
+
 // installClaude installs fuse as a Claude Code PreToolUse hook.
 func installClaude(secure bool) error {
 	settingsPath := claudeSettingsPath()
+	if err := rejectSymlinkedClaudeSettingsPath(settingsPath); err != nil {
+		return err
+	}
 
 	// Read existing settings or start with empty object.
 	settings, err := readJSONFile(settingsPath)

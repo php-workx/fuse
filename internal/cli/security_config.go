@@ -514,6 +514,8 @@ func hasBalancedTOMLBrackets(value string) bool {
 			if depth == 0 {
 				return true
 			}
+		default:
+			// Other characters: no action needed.
 		}
 	}
 

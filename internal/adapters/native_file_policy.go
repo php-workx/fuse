@@ -46,10 +46,10 @@ func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config)
 		return 0
 	case core.DecisionBlocked:
 		fmt.Fprintf(stderr, "fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.\n", result.Reason)
-		logHookEvent(req.SessionID, extractCommandFromResult(result), result)
+		logHookEvent(req.SessionID, extractCommandFromResult(result), req.Cwd, result)
 		return 2
 	case core.DecisionApproval:
-		return handleApproval(req, result, stderr, cfg)
+		return handleApproval(req, result, stderr, cfg, false)
 	default:
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Unknown classification result. Do not retry this exact command. Ask the user for guidance.")
 		return 2
@@ -78,6 +78,8 @@ func nativeTargetFilePath(toolName string, payload map[string]interface{}) strin
 		if path, ok := payload["path"].(string); ok && strings.TrimSpace(path) != "" {
 			return path
 		}
+	default:
+		return ""
 	}
 	return ""
 }

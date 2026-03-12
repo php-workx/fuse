@@ -254,7 +254,10 @@ func TestRunHook_NativeFileReadSecretRequiresApproval(t *testing.T) {
 		t.Fatalf("expected exit code 2 for approval-required file read without interactive tty, got %d", exitCode)
 	}
 	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") && !strings.Contains(stderrStr, "USER_DENIED") && !strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
+	if strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
+		t.Fatalf("expected immediate approval denial, got timeout directive %q", stderrStr)
+	}
+	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") && !strings.Contains(stderrStr, "USER_DENIED") {
 		t.Fatalf("expected approval denial directive, got %q", stderrStr)
 	}
 }

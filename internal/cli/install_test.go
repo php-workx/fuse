@@ -177,6 +177,57 @@ func TestInstallClaudePreservesCurrentBehaviorByDefault(t *testing.T) {
 	}
 }
 
+func TestInstallClaude_RejectsSymlinkedSettingsPath(t *testing.T) {
+	tmpHome := t.TempDir()
+	targetPath := filepath.Join(t.TempDir(), "target.json")
+	if err := os.WriteFile(targetPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	claudeDir := filepath.Join(tmpHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.Symlink(targetPath, settingsPath); err != nil {
+		t.Fatalf("symlink settings: %v", err)
+	}
+
+	err := installClaude(false)
+	if err == nil {
+		t.Fatal("expected installClaude to reject symlinked settings path")
+	}
+	if !strings.Contains(err.Error(), "symlinked") {
+		t.Fatalf("expected symlink rejection error, got %v", err)
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "{}\n" {
+		t.Fatalf("expected symlink target unchanged, got %q", string(data))
+	}
+}
+
+func TestInstallCommand_RejectsSecureFlagForCodex(t *testing.T) {
+	prevSecure := installClaudeSecure
+	installClaudeSecure = true
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Cleanup(func() {
+		installClaudeSecure = prevSecure
+	})
+
+	err := installCmd.RunE(installCmd, []string{"codex"})
+	if err == nil {
+		t.Fatal("expected install command to reject codex --secure")
+	}
+	if !strings.Contains(err.Error(), "--secure") || !strings.Contains(err.Error(), "claude") {
+		t.Fatalf("expected secure-flag rejection, got %v", err)
+	}
+}
+
 func TestInstallClaudeSecureMergesHooksAndSecureSettingsOnDisk(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
