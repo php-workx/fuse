@@ -526,7 +526,23 @@ func checkMCPMediationPosture() checkResult {
 		}
 	}
 
-	if !hasFuseHook(settings) {
+	hookInstalled := hasFuseHook(settings)
+	claudeMCPWarnings, mediatedServers := claudeMCPServerWarnings(settings)
+	var warnings []string
+	warnings = append(warnings, claudeMCPWarnings...)
+
+	if (hookInstalled || mediatedServers > 0) && (cfg == nil || len(cfg.MCPProxies) == 0) {
+		warnings = append(warnings, "no MCP proxies configured while fuse-mediated Claude MCP paths are active; direct MCP servers may bypass fuse proxy mediation")
+	}
+	if len(warnings) > 0 {
+		return checkResult{
+			name:   "MCP mediation posture",
+			status: "WARN",
+			detail: strings.Join(warnings, "; "),
+		}
+	}
+
+	if !hookInstalled && mediatedServers == 0 {
 		return checkResult{
 			name:   "MCP mediation posture",
 			status: "PASS",
@@ -534,14 +550,13 @@ func checkMCPMediationPosture() checkResult {
 		}
 	}
 
-	if cfg == nil || len(cfg.MCPProxies) == 0 {
+	if mediatedServers > 0 {
 		return checkResult{
 			name:   "MCP mediation posture",
-			status: "WARN",
-			detail: "no MCP proxies configured while the Claude fuse hook is active; direct MCP servers may bypass fuse proxy mediation",
+			status: "PASS",
+			detail: fmt.Sprintf("%d Claude MCP server(s) looks mediated through fuse; %d MCP proxy configuration(s) present", mediatedServers, len(cfg.MCPProxies)),
 		}
 	}
-
 	return checkResult{
 		name:   "MCP mediation posture",
 		status: "PASS",

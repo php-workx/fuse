@@ -278,6 +278,127 @@ func TestRunDoctorSecurity_WarnsWhenClaudeSettingsCannotBeReadForMCPAssessment(t
 	}
 }
 
+func TestRunDoctorSecurity_WarnsOnUnmediatedClaudeMCPServers(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), ".codex"))
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	settings := mustClaudeSettings(t, []map[string]interface{}{
+		{
+			"matcher": "Bash",
+			"hooks": []map[string]interface{}{
+				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
+			},
+		},
+		{
+			"matcher": "mcp__.*",
+			"hooks": []map[string]interface{}{
+				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
+			},
+		},
+	})
+	settings["mcpServers"] = map[string]interface{}{
+		"aws-direct": map[string]interface{}{
+			"command": "npx",
+			"args":    []interface{}{"-y", "@aws/mcp-server"},
+		},
+	}
+	if err := mergeClaudeSecureSettings(settings); err != nil {
+		t.Fatalf("mergeClaudeSecureSettings: %v", err)
+	}
+	writeJSONForTest(t, settingsPath, settings)
+
+	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configYAML := "mcp_proxies:\n  - name: aws-mcp\n    command: npx\n    args: [\"-y\", \"@aws/mcp-server\"]\n    env: {}\n"
+	if err := os.WriteFile(configPathForTest(t), []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	stdout, stderr, err := captureDoctorOutput(t, func() error {
+		return runDoctor(false, true)
+	})
+	if err != nil {
+		t.Fatalf("unexpected doctor --security error: %v\nstdout:\n%s", err, stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no stderr, got %q", stderr)
+	}
+	for _, want := range []string{"MCP mediation posture", "aws-direct", "not mediated through fuse"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected doctor --security output to include %q, got:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunDoctorSecurity_PassesForMediatedClaudeMCPServers(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), ".codex"))
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	settings := mustClaudeSettings(t, []map[string]interface{}{
+		{
+			"matcher": "Bash",
+			"hooks": []map[string]interface{}{
+				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
+			},
+		},
+		{
+			"matcher": "mcp__.*",
+			"hooks": []map[string]interface{}{
+				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
+			},
+		},
+	})
+	settings["mcpServers"] = map[string]interface{}{
+		"aws-mcp": map[string]interface{}{
+			"command": "fuse",
+			"args":    []interface{}{"proxy", "mcp", "--downstream-name", "aws-mcp"},
+		},
+	}
+	if err := mergeClaudeSecureSettings(settings); err != nil {
+		t.Fatalf("mergeClaudeSecureSettings: %v", err)
+	}
+	writeJSONForTest(t, settingsPath, settings)
+
+	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	configYAML := "mcp_proxies:\n  - name: aws-mcp\n    command: npx\n    args: [\"-y\", \"@aws/mcp-server\"]\n    env: {}\n"
+	if err := os.WriteFile(configPathForTest(t), []byte(configYAML), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	stdout, stderr, err := captureDoctorOutput(t, func() error {
+		return runDoctor(false, true)
+	})
+	if err != nil {
+		t.Fatalf("unexpected doctor --security error: %v\nstdout:\n%s", err, stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no stderr, got %q", stderr)
+	}
+	if !strings.Contains(stdout, "MCP mediation posture") || !strings.Contains(stdout, "looks mediated") {
+		t.Fatalf("expected mediated MCP posture PASS output, got:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "not mediated through fuse") {
+		t.Fatalf("expected no unmediated MCP warning, got:\n%s", stdout)
+	}
+}
+
 func TestRunDoctorLive_ReportsTerminalCapabilityChecks(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("FUSE_HOME", tmpDir)

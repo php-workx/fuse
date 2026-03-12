@@ -284,6 +284,29 @@ args = [
 	}
 }
 
+func TestClaudeMCPServerWarnings_DistinguishesMediatedAndDirectEntries(t *testing.T) {
+	settings := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"aws-direct": map[string]interface{}{
+				"command": "npx",
+				"args":    []interface{}{"-y", "@aws/mcp-server"},
+			},
+			"aws-fuse": map[string]interface{}{
+				"command": "/usr/local/bin/fuse",
+				"args":    []interface{}{"proxy", "mcp", "--downstream-name", "aws-mcp"},
+			},
+		},
+	}
+
+	warnings, mediated := claudeMCPServerWarnings(settings)
+	if mediated != 1 {
+		t.Fatalf("mediated count = %d, want 1", mediated)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "aws-direct") {
+		t.Fatalf("expected one warning for direct MCP entry, got %v", warnings)
+	}
+}
+
 func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, expectedDefaultMode string) {
 	t.Helper()
 
