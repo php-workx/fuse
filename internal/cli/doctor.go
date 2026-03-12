@@ -511,7 +511,22 @@ func checkMCPMediationPosture() checkResult {
 	}
 
 	settings, err := readJSONFile(claudeSettingsPath())
-	if err != nil || !hasFuseHook(settings) {
+	if err != nil {
+		if os.IsNotExist(err) {
+			return checkResult{
+				name:   "MCP mediation posture",
+				status: "PASS",
+				detail: "no Claude fuse hook detected; MCP mediation risk not assessed",
+			}
+		}
+		return checkResult{
+			name:   "MCP mediation posture",
+			status: "WARN",
+			detail: fmt.Sprintf("cannot assess MCP mediation posture safely because Claude settings could not be read: %v", err),
+		}
+	}
+
+	if !hasFuseHook(settings) {
 		return checkResult{
 			name:   "MCP mediation posture",
 			status: "PASS",
