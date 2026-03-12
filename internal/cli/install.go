@@ -19,7 +19,7 @@ var installCmd = &cobra.Command{
 		target := args[0]
 		switch target {
 		case "claude":
-			return installClaude()
+			return installClaude(installClaudeSecure)
 		case "codex":
 			return installCodex()
 		default:
@@ -28,7 +28,10 @@ var installCmd = &cobra.Command{
 	},
 }
 
+var installClaudeSecure bool
+
 func init() {
+	installCmd.Flags().BoolVar(&installClaudeSecure, "secure", false, "merge recommended secure Claude settings during install")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -55,7 +58,7 @@ func claudeSettingsPath() string {
 }
 
 // installClaude installs fuse as a Claude Code PreToolUse hook.
-func installClaude() error {
+func installClaude(secure bool) error {
 	settingsPath := claudeSettingsPath()
 
 	// Read existing settings or start with empty object.
@@ -65,6 +68,12 @@ func installClaude() error {
 	}
 	if settings == nil {
 		settings = make(map[string]interface{})
+	}
+
+	if secure {
+		if err := mergeClaudeSecureSettings(settings); err != nil {
+			return fmt.Errorf("merge secure Claude settings: %w", err)
+		}
 	}
 
 	// Merge the fuse hook into settings.
