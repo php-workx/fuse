@@ -44,13 +44,14 @@
 - **Title:** Golden fixture depth is materially below the written test-plan target
 - **Severity:** `must-fix-before-rc`
 - **Type:** `test-gap`
-- **Status:** `open`
+- **Status:** `partially addressed on release-readiness-audit branch`
 - **Evidence:**
   - `testdata/fixtures/commands.yaml` has `162` fixture rows
   - current code contains `225` built-in IDs and `22` hardcoded blocked rules
   - `specs/testplan.md` expects positive + near-miss coverage per hardcoded/built-in rule family
 - **Impact:** Current golden tests do not yet justify strong claims about full rule-corpus regression protection.
 - **Recommended fix:** Expand fixtures for highest-risk families immediately and either complete the full target or narrow the release claim.
+- **Progress:** Commit `65e5038` adds high-risk fixture coverage guards and expands `testdata/fixtures/commands.yaml`. This branch also fixes a classifier regression exposed by the fixture work: hardcoded self-protection rules now still win for inline interpreter payloads and unclosed heredoc writes targeting `~/.fuse`, rather than silently downgrading to `APPROVAL`. Remaining work is broader corpus depth and final contract alignment.
 
 ### REL-004
 
@@ -92,7 +93,7 @@
 ## Immediate Priority Order
 
 1. `REL-002` Codex release confidence
-2. `REL-003` golden fixture depth
+2. `REL-003` golden fixture depth and remaining corpus alignment
 3. `REL-004` performance/compatibility proof
 4. `REL-005` dogfood friction evidence
 5. carry `REL-001` through normal integration and verify it remains fixed outside this branch

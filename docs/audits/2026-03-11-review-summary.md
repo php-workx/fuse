@@ -36,7 +36,16 @@ The biggest initial finding was not a classifier edge case. It was build reprodu
 
 This blocker is resolved on `release-readiness-audit`; it still needs to be carried through normal integration.
 
-### 2. Codex should not be called GA yet, but the test baseline improved on this branch
+### 2. Self-protection classification is materially stronger on this branch
+
+Fixture expansion exposed a real correctness bug in classifier precedence:
+
+- inline interpreter payloads such as `python -c ... ~/.fuse/config ...` could fall through to `APPROVAL`
+- unclosed heredoc writes into `~/.fuse/config` could also fail closed to `APPROVAL`
+
+That behavior is now fixed on this branch by evaluating hardcoded self-protection rules before sanitized inline-script approval and also on compound parse-error paths. This closes a meaningful gap in the repo's ability to prevent unintended tampering with Fuse-managed state.
+
+### 3. Codex should not be called GA yet, but the test baseline improved on this branch
 
 Codex support exists in code and docs. This branch now includes explicit enabled-mode SAFE, BLOCKED, and approval-without-TTY tests, but that still falls short of a full GA claim without dogfood evidence.
 
