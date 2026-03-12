@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -176,6 +177,49 @@ func codexSecurityWarnings(configText string) []string {
 	}
 
 	return warnings
+}
+
+func claudeMCPServerWarnings(settings map[string]interface{}) ([]string, int) {
+	raw, ok := settings["mcpServers"]
+	if !ok || raw == nil {
+		return nil, 0
+	}
+
+	servers, ok := raw.(map[string]interface{})
+	if !ok {
+		return []string{"mcpServers must be an object"}, 0
+	}
+
+	var warnings []string
+	mediated := 0
+	for name, entryRaw := range servers {
+		entry, ok := entryRaw.(map[string]interface{})
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("mcpServers.%s must be an object", name))
+			continue
+		}
+
+		command, _ := entry["command"].(string)
+		args, err := toStringSetInOrder("mcpServers."+name+".args", entry["args"])
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("mcpServers.%s has invalid args: %v", name, err))
+			continue
+		}
+		if isMediatedClaudeMCPServer(command, args) {
+			mediated++
+			continue
+		}
+		warnings = append(warnings, fmt.Sprintf("mcpServers.%s is not mediated through fuse", name))
+	}
+
+	return warnings, mediated
+}
+
+func isMediatedClaudeMCPServer(command string, args []string) bool {
+	if filepath.Base(command) != "fuse" {
+		return false
+	}
+	return len(args) >= 2 && args[0] == "proxy" && args[1] == "mcp"
 }
 
 func ensureOptionalObject(parent map[string]interface{}, key string) (map[string]interface{}, error) {
