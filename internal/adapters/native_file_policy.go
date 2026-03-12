@@ -30,7 +30,7 @@ func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config)
 		return 2
 	}
 
-	paths, err := extractNativeFilePaths(req.ToolInput)
+	paths, err := extractNativeFilePaths(req.ToolName, req.ToolInput)
 	if err != nil {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Invalid native file tool_input JSON. Do not retry this exact command. Ask the user for guidance.")
 		return 2
@@ -56,41 +56,30 @@ func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config)
 	}
 }
 
-func extractNativeFilePaths(raw json.RawMessage) ([]string, error) {
-	var payload interface{}
+func extractNativeFilePaths(toolName string, raw json.RawMessage) ([]string, error) {
+	var payload map[string]interface{}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		return nil, err
 	}
 
-	var paths []string
-	seen := make(map[string]struct{})
-	collectNativeFilePaths(payload, seen, &paths)
-	return paths, nil
+	path := nativeTargetFilePath(toolName, payload)
+	if path == "" {
+		return nil, nil
+	}
+	return []string{path}, nil
 }
 
-func collectNativeFilePaths(value interface{}, seen map[string]struct{}, out *[]string) {
-	switch typed := value.(type) {
-	case map[string]interface{}:
-		for key, nested := range typed {
-			if (key == "file_path" || key == "path") && isUsableFilePath(nested) {
-				path := nested.(string)
-				if _, ok := seen[path]; !ok {
-					seen[path] = struct{}{}
-					*out = append(*out, path)
-				}
-			}
-			collectNativeFilePaths(nested, seen, out)
+func nativeTargetFilePath(toolName string, payload map[string]interface{}) string {
+	switch toolName {
+	case "Read", "Write", "Edit", "MultiEdit":
+		if path, ok := payload["file_path"].(string); ok && strings.TrimSpace(path) != "" {
+			return path
 		}
-	case []interface{}:
-		for _, item := range typed {
-			collectNativeFilePaths(item, seen, out)
+		if path, ok := payload["path"].(string); ok && strings.TrimSpace(path) != "" {
+			return path
 		}
 	}
-}
-
-func isUsableFilePath(value interface{}) bool {
-	path, ok := value.(string)
-	return ok && strings.TrimSpace(path) != ""
+	return ""
 }
 
 func classifyNativeFilePaths(toolName string, paths []string, cwd string) *core.ClassifyResult {
@@ -124,9 +113,9 @@ func classifyNativeFilePath(path, cwd string) (core.Decision, string) {
 		return core.DecisionBlocked, fmt.Sprintf("access to protected fuse path %s is blocked", path)
 	case info.isUnder(filepath.Join(info.homeDir, ".fuse")):
 		return core.DecisionBlocked, fmt.Sprintf("access to protected fuse path %s is blocked", path)
-	case info.matchesRelative(".claude/settings.json") || info.matchesAbsolute(filepath.Join(info.homeDir, ".claude", "settings.json")):
+	case info.matchesRelative(".claude/settings.json") || info.matchesAbsolute(filepath.Join(info.homeDir, ".claude", "settings.json")) || info.matchesAbsolute(filepath.Join(info.cwd, ".claude", "settings.json")):
 		return core.DecisionBlocked, fmt.Sprintf("access to Claude settings path %s is blocked", path)
-	case info.matchesRelative(".codex/config.toml") || info.matchesAbsolute(filepath.Join(info.homeDir, ".codex", "config.toml")):
+	case info.matchesRelative(".codex/config.toml") || info.matchesAbsolute(filepath.Join(info.homeDir, ".codex", "config.toml")) || info.matchesAbsolute(filepath.Join(info.cwd, ".codex", "config.toml")):
 		return core.DecisionBlocked, fmt.Sprintf("access to Codex config path %s is blocked", path)
 	case info.hasBase("fuse.db") || info.hasBase("secret.key"):
 		return core.DecisionBlocked, fmt.Sprintf("access to protected fuse state file %s is blocked", path)
@@ -164,17 +153,19 @@ type filePathInfo struct {
 	slashRaw string
 	slashAbs string
 	homeDir  string
+	cwd      string
 }
 
 func nativeFilePathInfo(path, cwd string) filePathInfo {
 	homeDir, _ := os.UserHomeDir()
+	cleanCwd := filepath.Clean(cwd)
 	cleanRaw := filepath.Clean(path)
 	resolved := cleanRaw
 	if strings.HasPrefix(path, "~/") && homeDir != "" {
 		resolved = filepath.Join(homeDir, strings.TrimPrefix(path, "~/"))
 	}
-	if !filepath.IsAbs(resolved) && cwd != "" {
-		resolved = filepath.Join(cwd, resolved)
+	if !filepath.IsAbs(resolved) && cleanCwd != "" {
+		resolved = filepath.Join(cleanCwd, resolved)
 	}
 	return filePathInfo{
 		raw:      path,
@@ -183,6 +174,7 @@ func nativeFilePathInfo(path, cwd string) filePathInfo {
 		slashRaw: filepath.ToSlash(cleanRaw),
 		slashAbs: filepath.ToSlash(filepath.Clean(resolved)),
 		homeDir:  filepath.Clean(homeDir),
+		cwd:      cleanCwd,
 	}
 }
 
