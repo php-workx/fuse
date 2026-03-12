@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -165,6 +166,15 @@ func TestInstallClaudePreservesCurrentBehaviorByDefault(t *testing.T) {
 	if _, ok := hooksObj["PreToolUse"]; !ok {
 		t.Fatalf("expected PreToolUse hook configuration, got %#v", hooksObj)
 	}
+	preToolUse, ok := hooksObj["PreToolUse"].([]interface{})
+	if !ok {
+		t.Fatalf("expected PreToolUse array, got %#v", hooksObj["PreToolUse"])
+	}
+	matchers := claudeMatchersFromHooks(t, preToolUse)
+	want := []string{"Bash", "mcp__.*"}
+	if strings.Join(matchers, ",") != strings.Join(want, ",") {
+		t.Fatalf("plain install matchers = %v, want %v", matchers, want)
+	}
 }
 
 func TestInstallClaudeSecureMergesHooksAndSecureSettingsOnDisk(t *testing.T) {
@@ -228,4 +238,28 @@ func TestInstallClaudeSecureMergesHooksAndSecureSettingsOnDisk(t *testing.T) {
 	if !ok || len(preToolUse) == 0 {
 		t.Fatalf("expected PreToolUse hooks after secure install, got %#v", hooksObj["PreToolUse"])
 	}
+	matchers := claudeMatchersFromHooks(t, preToolUse)
+	want := []string{"Bash", "Edit", "MultiEdit", "Read", "Write", "mcp__.*"}
+	if strings.Join(matchers, ",") != strings.Join(want, ",") {
+		t.Fatalf("secure install matchers = %v, want %v", matchers, want)
+	}
+}
+
+func claudeMatchersFromHooks(t *testing.T, preToolUse []interface{}) []string {
+	t.Helper()
+
+	matchers := make([]string, 0, len(preToolUse))
+	for _, raw := range preToolUse {
+		entry, ok := raw.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected matcher entry object, got %#v", raw)
+		}
+		matcher, ok := entry["matcher"].(string)
+		if !ok {
+			t.Fatalf("expected matcher string, got %#v", entry["matcher"])
+		}
+		matchers = append(matchers, matcher)
+	}
+	sort.Strings(matchers)
+	return matchers
 }

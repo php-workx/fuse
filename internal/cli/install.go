@@ -78,6 +78,9 @@ func installClaude(secure bool) error {
 
 	// Merge the fuse hook into settings.
 	mergeFuseHook(settings)
+	if secure {
+		mergeFuseSecureNativeFileHooks(settings)
+	}
 
 	// Ensure the directory exists.
 	dir := filepath.Dir(settingsPath)
@@ -98,6 +101,14 @@ func installClaude(secure bool) error {
 // mergeFuseHook adds or updates the fuse hook entries in the settings map.
 // It preserves all existing settings and non-fuse hooks.
 func mergeFuseHook(settings map[string]interface{}) {
+	mergeFuseHookMatchers(settings, []string{"Bash", "mcp__.*"})
+}
+
+func mergeFuseSecureNativeFileHooks(settings map[string]interface{}) {
+	mergeFuseHookMatchers(settings, []string{"Read", "Write", "Edit", "MultiEdit"})
+}
+
+func mergeFuseHookMatchers(settings map[string]interface{}, matchers []string) {
 	// Ensure hooks object exists.
 	hooksObj, _ := settings["hooks"].(map[string]interface{})
 	if hooksObj == nil {
@@ -113,20 +124,14 @@ func mergeFuseHook(settings map[string]interface{}) {
 		}
 	}
 
-	// The matchers we want to install.
-	wantedMatchers := []fuseMatcherEntry{
-		{
-			Matcher: "Bash",
+	wantedMatchers := make([]fuseMatcherEntry, 0, len(matchers))
+	for _, matcher := range matchers {
+		wantedMatchers = append(wantedMatchers, fuseMatcherEntry{
+			Matcher: matcher,
 			Hooks: []fuseHookEntry{
 				{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
 			},
-		},
-		{
-			Matcher: "mcp__.*",
-			Hooks: []fuseHookEntry{
-				{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
-			},
-		},
+		})
 	}
 
 	for _, wanted := range wantedMatchers {
