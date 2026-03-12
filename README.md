@@ -84,6 +84,27 @@ fuse doctor --live
 
 `--live` checks command classification plus terminal/TTY capabilities needed for approval prompts and foreground execution.
 
+## Development
+
+Install local tooling:
+
+```bash
+make install-dev
+make install-hooks
+```
+
+This repo uses explicit fast and slow verification layers:
+
+- `make check-fast`: formatting, workflow lint, unit tests, and `golangci-lint`
+- `make check-pre-push`: `check-fast` plus race tests, `govulncheck`, release compatibility checks, and cross-builds
+
+The repo-managed git hooks live under `.githooks/`:
+
+- `pre-commit` runs the fast checks for early feedback
+- `pre-push` runs the slower last-resort safety net before CI
+
+If you already use the Python `pre-commit` tool, this repo also ships [.pre-commit-config.yaml](/Users/runger/.config/superpowers/worktrees/fuse/security-hardening/.pre-commit-config.yaml). Install it separately with `pipx install pre-commit` or your preferred Python toolchain, then the repo hooks will delegate to it automatically.
+
 ## Limitations
 
 - Hook mode still has a TOCTOU window because Claude Code executes natively after `fuse` allows the call.

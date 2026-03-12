@@ -1,4 +1,4 @@
-name: CI
+name: Pull Request Checks
 
 on:
   push:
@@ -21,8 +21,72 @@ env:
   GO_VERSION: "1.24.12"
 
 jobs:
+  format:
+    name: Format
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install goimports
+        run: go install golang.org/x/tools/cmd/goimports@v0.38.0
+
+      - name: Check formatting
+        run: bash ./scripts/check-format.sh
+
+  module-hygiene:
+    name: Module Hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Verify go.mod and go.sum are tidy
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  workflow-lint:
+    name: Workflow Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.8
+
+      - name: Lint GitHub Actions workflows
+        run: bash ./scripts/check-workflows.sh
+
   test:
-    name: Test
+    name: Unit Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -63,6 +127,13 @@ jobs:
           name: gotest-log
           path: /tmp/gotest.log
           if-no-files-found: ignore
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.out
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
     name: Lint
@@ -175,6 +246,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs:
+      - format
+      - module-hygiene
+      - workflow-lint
       - test
       - lint
       - vuln

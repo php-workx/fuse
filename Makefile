@@ -6,7 +6,7 @@ GIT_COMMIT?=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE?=$(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 LDFLAGS=-ldflags "-X github.com/runger/fuse/internal/cli.Version=$(VERSION) -X github.com/runger/fuse/internal/cli.GitCommit=$(GIT_COMMIT) -X github.com/runger/fuse/internal/cli.BuildDate=$(BUILD_DATE)"
 
-.PHONY: all build install install-dev clean test cover fmt lint vuln dev deps run help build-all build-linux build-darwin
+.PHONY: all build install install-dev install-hooks clean test cover fmt format-check workflow-lint lint vuln check-fast check-pre-push dev deps run help build-all build-linux build-darwin
 
 all: build
 
@@ -25,8 +25,13 @@ install-dev:
 	go install golang.org/x/vuln/cmd/govulncheck@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install golang.org/x/tools/cmd/deadcode@latest
+	go install github.com/rhysd/actionlint/cmd/actionlint@latest
 	go install gotest.tools/gotestsum@v1.12.1
 	@echo "Done! Development environment ready."
+
+## install-hooks: Configure repository-managed git hooks
+install-hooks:
+	bash ./scripts/install-git-hooks.sh
 
 ## clean: Remove build artifacts
 clean:
@@ -51,6 +56,14 @@ cover:
 fmt:
 	go fmt ./...
 
+## format-check: Verify gofmt/goimports formatting
+format-check:
+	bash ./scripts/check-format.sh
+
+## workflow-lint: Validate GitHub Actions workflows
+workflow-lint:
+	bash ./scripts/check-workflows.sh
+
 ## lint: Run linter
 lint:
 	@if command -v golangci-lint >/dev/null 2>&1; then \
@@ -73,8 +86,16 @@ vuln:
 		exit 1; \
 	fi
 
+## check-fast: Run fast local hygiene checks
+check-fast:
+	bash ./scripts/check-fast.sh
+
+## check-pre-push: Run the slow pre-push verification suite
+check-pre-push:
+	bash ./scripts/check-pre-push.sh
+
 ## dev: Run all checks (fmt, lint, test, vuln)
-dev: fmt lint test vuln
+dev: check-pre-push
 	@echo "All checks passed!"
 
 ## deps: Download dependencies
