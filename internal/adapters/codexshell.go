@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -14,10 +15,26 @@ import (
 	"github.com/runger/fuse/internal/policy"
 )
 
+type codexShellTransport int
+
+const (
+	codexShellTransportFramed codexShellTransport = iota
+	codexShellTransportLineDelimited
+)
+
 func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 	reader := bufio.NewReader(stdin)
+	writer := bufio.NewWriter(stdout)
+	transport, err := detectCodexShellTransport(reader)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		return err
+	}
+
 	for {
-		payload, err := readMCPFrame(reader)
+		payload, err := readCodexShellPayload(reader, transport)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
@@ -42,8 +59,63 @@ func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 		if err != nil {
 			return err
 		}
-		if err := writeMCPFrame(stdout, data); err != nil {
+		if err := writeCodexShellPayload(writer, data, transport); err != nil {
 			return err
+		}
+	}
+}
+
+func detectCodexShellTransport(reader *bufio.Reader) (codexShellTransport, error) {
+	for {
+		b, err := reader.Peek(1)
+		if err != nil {
+			return codexShellTransportFramed, err
+		}
+		switch b[0] {
+		case ' ', '\t', '\r', '\n':
+			if _, err := reader.ReadByte(); err != nil {
+				return codexShellTransportFramed, err
+			}
+		case '{', '[':
+			return codexShellTransportLineDelimited, nil
+		default:
+			return codexShellTransportFramed, nil
+		}
+	}
+}
+
+func readCodexShellPayload(reader *bufio.Reader, transport codexShellTransport) ([]byte, error) {
+	if transport == codexShellTransportLineDelimited {
+		return readJSONRPCLine(reader)
+	}
+	return readMCPFrame(reader)
+}
+
+func writeCodexShellPayload(writer *bufio.Writer, payload []byte, transport codexShellTransport) error {
+	if transport == codexShellTransportLineDelimited {
+		if _, err := writer.Write(payload); err != nil {
+			return err
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return err
+		}
+		return writer.Flush()
+	}
+	if err := writeMCPFrame(writer, payload); err != nil {
+		return err
+	}
+	return writer.Flush()
+}
+
+func readJSONRPCLine(reader *bufio.Reader) ([]byte, error) {
+	for {
+		line, err := reader.ReadBytes('\n')
+		line = bytes.TrimSpace(line)
+		if len(line) > 0 {
+			return line, nil
+		}
+		if err != nil {
+			return nil, err
 		}
 	}
 }

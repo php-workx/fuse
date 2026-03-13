@@ -93,6 +93,45 @@ func runCodexShellServerRequests(t *testing.T, requests ...jsonRPCMessage) []jso
 	return responses
 }
 
+func runCodexShellServerLineRequests(t *testing.T, requests ...jsonRPCMessage) []jsonRPCMessage {
+	t.Helper()
+
+	var input bytes.Buffer
+	for _, request := range requests {
+		payload, err := encodeJSONRPC(request)
+		if err != nil {
+			t.Fatalf("encode JSON-RPC request: %v", err)
+		}
+		if _, err := input.Write(payload); err != nil {
+			t.Fatalf("write line request payload: %v", err)
+		}
+		if err := input.WriteByte('\n'); err != nil {
+			t.Fatalf("write line request newline: %v", err)
+		}
+	}
+
+	var output bytes.Buffer
+	if err := RunCodexShellServer(&input, &output); err != nil {
+		t.Fatalf("RunCodexShellServer: %v", err)
+	}
+
+	scanner := bufio.NewScanner(&output)
+	scanner.Buffer(make([]byte, 0, 1024), maxMCPFrameBytes)
+	var responses []jsonRPCMessage
+	for scanner.Scan() {
+		msg, err := decodeJSONRPC(scanner.Bytes())
+		if err != nil {
+			t.Fatalf("decodeJSONRPC(line response): %v", err)
+		}
+		responses = append(responses, msg)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan line responses: %v", err)
+	}
+
+	return responses
+}
+
 func TestExecuteCapturedShellCommand_DoesNotInheritProcessStdin(t *testing.T) {
 	origStdin := os.Stdin
 	r, w, err := os.Pipe()
@@ -280,11 +319,93 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 	}
 }
 
+func TestRunCodexShellServer_InitializeAndToolsList_LineDelimited(t *testing.T) {
+	responses := runCodexShellServerLineRequests(t,
+		jsonRPCMessage{
+			"jsonrpc": "2.0",
+			"id":      0,
+			"method":  "initialize",
+			"params": map[string]interface{}{
+				"protocolVersion": "2025-06-18",
+				"capabilities":    map[string]interface{}{},
+				"clientInfo": map[string]interface{}{
+					"name":    "codex-mcp-client",
+					"title":   "Codex",
+					"version": "0.114.0",
+				},
+			},
+		},
+		jsonRPCMessage{
+			"jsonrpc": "2.0",
+			"method":  "notifications/initialized",
+		},
+		jsonRPCMessage{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "tools/list",
+		},
+	)
+
+	if len(responses) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(responses))
+	}
+
+	initResult, _ := responses[0]["result"].(map[string]interface{})
+	if initResult == nil {
+		t.Fatalf("expected initialize result, got %#v", responses[0])
+	}
+	if protocolVersion, _ := initResult["protocolVersion"].(string); protocolVersion == "" {
+		t.Fatalf("expected protocolVersion in initialize result, got %#v", initResult)
+	}
+
+	listResult, _ := responses[1]["result"].(map[string]interface{})
+	tools, _ := listResult["tools"].([]interface{})
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	tool, _ := tools[0].(map[string]interface{})
+	if name, _ := tool["name"].(string); name != "run_command" {
+		t.Fatalf("tool name = %q, want %q", name, "run_command")
+	}
+}
+
 func TestRunCodexShellServer_ToolCallSafe(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 
 	responses := runCodexShellServerRequests(t, jsonRPCMessage{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name": "run_command",
+			"arguments": map[string]interface{}{
+				"command": "printf safe",
+			},
+		},
+	})
+
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+
+	result, _ := responses[0]["result"].(map[string]interface{})
+	if result == nil {
+		t.Fatalf("expected success result, got %#v", responses[0])
+	}
+	if stdout, _ := result["stdout"].(string); stdout != "safe" {
+		t.Fatalf("stdout = %q, want %q", stdout, "safe")
+	}
+	if exitCode, _ := result["exit_code"].(float64); exitCode != 0 {
+		t.Fatalf("exit_code = %v, want 0", exitCode)
+	}
+}
+
+func TestRunCodexShellServer_ToolCallSafe_LineDelimited(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	responses := runCodexShellServerLineRequests(t, jsonRPCMessage{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "tools/call",
