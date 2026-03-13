@@ -1,9 +1,12 @@
 package releasecheck
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +24,8 @@ import (
 )
 
 const releaseCheckEnv = "FUSE_RELEASE_CHECK"
+
+type releaseJSONRPCMessage map[string]interface{}
 
 type latencyStats struct {
 	P50 time.Duration
@@ -109,6 +114,65 @@ func buildFuseBinary(t *testing.T) string {
 	return binaryPath
 }
 
+func runCodexShellBinaryRequests(t *testing.T, binaryPath, fuseHome string, requests ...releaseJSONRPCMessage) []releaseJSONRPCMessage {
+	t.Helper()
+
+	homeDir := filepath.Dir(fuseHome)
+	cmd := exec.Command(binaryPath, "proxy", "codex-shell")
+	cmd.Env = append(os.Environ(),
+		"HOME="+homeDir,
+		"FUSE_HOME="+fuseHome,
+	)
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("stdin pipe: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start codex-shell binary: %v", err)
+	}
+
+	for _, request := range requests {
+		payload, err := json.Marshal(request)
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		if _, err := stdin.Write(append(payload, '\n')); err != nil {
+			t.Fatalf("write request: %v", err)
+		}
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatalf("close stdin: %v", err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 1024), 1<<20)
+	var responses []releaseJSONRPCMessage
+	for scanner.Scan() {
+		var msg releaseJSONRPCMessage
+		if err := json.Unmarshal(scanner.Bytes(), &msg); err != nil {
+			t.Fatalf("unmarshal response: %v", err)
+		}
+		responses = append(responses, msg)
+	}
+	if err := scanner.Err(); err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("scan responses: %v", err)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("wait codex-shell binary: %v, stderr=%q", err, stderr.String())
+	}
+
+	return responses
+}
+
 func TestReleaseCheckShellWarmPathPerf(t *testing.T) {
 	requireReleaseCheck(t)
 	enableIsolatedFuseHome(t)
@@ -128,6 +192,103 @@ func TestReleaseCheckShellWarmPathPerf(t *testing.T) {
 	logLatencyStats(t, "PERF-001", stats)
 	if stats.P95 >= 50*time.Millisecond {
 		t.Fatalf("PERF-001 p95 = %s, want < 50ms", stats.P95)
+	}
+}
+
+func TestReleaseCheckCodexShellCompatibility(t *testing.T) {
+	requireReleaseCheck(t)
+	fuseHome := enableIsolatedFuseHome(t)
+	binaryPath := buildFuseBinary(t)
+
+	blockedTarget := filepath.Join(fuseHome, "config", "policy.yaml")
+	responses := runCodexShellBinaryRequests(t, binaryPath, fuseHome,
+		releaseJSONRPCMessage{
+			"jsonrpc": "2.0",
+			"id":      0,
+			"method":  "initialize",
+			"params": map[string]interface{}{
+				"protocolVersion": "2025-06-18",
+				"capabilities":    map[string]interface{}{},
+				"clientInfo": map[string]interface{}{
+					"name":    "codex-mcp-client",
+					"title":   "Codex",
+					"version": "releasecheck",
+				},
+			},
+		},
+		releaseJSONRPCMessage{
+			"jsonrpc": "2.0",
+			"method":  "notifications/initialized",
+		},
+		releaseJSONRPCMessage{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "tools/list",
+		},
+		releaseJSONRPCMessage{
+			"jsonrpc": "2.0",
+			"id":      2,
+			"method":  "tools/call",
+			"params": map[string]interface{}{
+				"name": "run_command",
+				"arguments": map[string]interface{}{
+					"command": "printf release-ok",
+				},
+			},
+		},
+		releaseJSONRPCMessage{
+			"jsonrpc": "2.0",
+			"id":      3,
+			"method":  "tools/call",
+			"params": map[string]interface{}{
+				"name": "run_command",
+				"arguments": map[string]interface{}{
+					"command": "printf blocked > " + blockedTarget,
+				},
+			},
+		},
+	)
+
+	if len(responses) != 4 {
+		t.Fatalf("expected 4 responses, got %d", len(responses))
+	}
+
+	initResult, _ := responses[0]["result"].(map[string]interface{})
+	if initResult == nil {
+		t.Fatalf("expected initialize result, got %#v", responses[0])
+	}
+	serverInfo, _ := initResult["serverInfo"].(map[string]interface{})
+	if name, _ := serverInfo["name"].(string); name != "fuse-shell" {
+		t.Fatalf("serverInfo.name = %q, want %q", name, "fuse-shell")
+	}
+
+	listResult, _ := responses[1]["result"].(map[string]interface{})
+	tools, _ := listResult["tools"].([]interface{})
+	if len(tools) != 1 {
+		t.Fatalf("expected 1 tool, got %d", len(tools))
+	}
+	tool, _ := tools[0].(map[string]interface{})
+	if name, _ := tool["name"].(string); name != "run_command" {
+		t.Fatalf("tool name = %q, want %q", name, "run_command")
+	}
+
+	safeResult, _ := responses[2]["result"].(map[string]interface{})
+	if safeResult == nil {
+		t.Fatalf("expected safe tool result, got %#v", responses[2])
+	}
+	if stdout, _ := safeResult["stdout"].(string); stdout != "release-ok" {
+		t.Fatalf("stdout = %q, want %q", stdout, "release-ok")
+	}
+
+	blockedErr, _ := responses[3]["error"].(map[string]interface{})
+	if blockedErr == nil {
+		t.Fatalf("expected blocked tool error, got %#v", responses[3])
+	}
+	if code, _ := blockedErr["code"].(float64); code != -32000 {
+		t.Fatalf("blocked error code = %v, want -32000", code)
+	}
+	if message, _ := blockedErr["message"].(string); !strings.Contains(message, "fuse blocked command") {
+		t.Fatalf("blocked error message = %q, want fuse blocked command", message)
 	}
 }
 

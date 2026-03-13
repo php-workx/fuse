@@ -32,5 +32,5 @@ for target in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
 done
 
 echo
-echo "== Release-check perf and compatibility harness =="
+echo "== Release-check perf and compatibility harness (includes Codex shell smoke) =="
 FUSE_RELEASE_CHECK=1 go test ./internal/releasecheck -count=1 -v
