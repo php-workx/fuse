@@ -261,6 +261,7 @@ func TestExecuteCodexShellCommand_EnabledBlockedCommand(t *testing.T) {
 func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
 	_, _, exitCode, err := executeCodexShellCommand("python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
@@ -468,6 +469,7 @@ func TestRunCodexShellServer_ToolCallBlocked(t *testing.T) {
 func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
 	responses := runCodexShellServerRequests(t, jsonRPCMessage{
 		"jsonrpc": "2.0",
