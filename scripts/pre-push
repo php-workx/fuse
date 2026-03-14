@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# pre-push hook: run tests, vet, and vulnerability scan before pushing.
+set -euo pipefail
+
+echo "pre-push: running go vet..."
+go vet ./...
+
+echo "pre-push: running tests with race detector..."
+go test -race -count=1 ./...
+
+if command -v govulncheck >/dev/null 2>&1; then
+    echo "pre-push: running vulnerability scan..."
+    govulncheck ./...
+else
+    echo "pre-push: govulncheck not installed — skipping vulnerability scan."
+    echo "  Install with: go install golang.org/x/vuln/cmd/govulncheck@latest"
+fi
+
+echo "pre-push: all checks passed."

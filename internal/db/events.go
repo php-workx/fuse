@@ -37,6 +37,7 @@ type EventFilter struct {
 	Source        string
 	Agent         string
 	Decision      string
+	Session       string
 	WorkspaceRoot string
 }
 
@@ -149,6 +150,10 @@ func (d *DB) ListEvents(filter EventFilter) ([]EventRecord, error) {
 		clauses = append(clauses, "decision = ?")
 		args = append(args, filter.Decision)
 	}
+	if filter.Session != "" {
+		clauses = append(clauses, "session_id = ?")
+		args = append(args, filter.Session)
+	}
 	if filter.WorkspaceRoot != "" {
 		clauses = append(clauses, "workspace_root = ?")
 		args = append(args, normalizeEventPath(filter.WorkspaceRoot))
@@ -212,7 +217,7 @@ func (d *DB) ListEvents(filter EventFilter) ([]EventRecord, error) {
 
 // SummarizeEvents aggregates counts across the full local event table.
 func (d *DB) SummarizeEvents() (EventSummary, error) {
-	events, err := d.ListEvents(EventFilter{Limit: 10000})
+	events, err := d.ListEvents(EventFilter{Limit: 1<<31 - 1})
 	if err != nil {
 		return EventSummary{}, err
 	}

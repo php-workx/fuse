@@ -179,7 +179,7 @@ func TestExecuteCodexShellCommand_AllowsBlockedCommandWhenDisabled(t *testing.T)
 		t.Fatalf("mkdir target: %v", err)
 	}
 
-	_, _, exitCode, err := executeCodexShellCommand("rm -rf "+targetDir, "", time.Minute)
+	_, _, exitCode, err := executeCodexShellCommand("rm -rf "+targetDir, "", "test-session", time.Minute)
 	if err != nil {
 		t.Fatalf("expected disabled mode to bypass classification, got error: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestExecuteCodexShellCommand_LogsAndPrunesEvents(t *testing.T) {
 	}
 
 	for _, command := range []string{"printf one", "printf two"} {
-		if _, _, exitCode, err := executeCodexShellCommand(command, "", time.Minute); err != nil {
+		if _, _, exitCode, err := executeCodexShellCommand(command, "", "test-session", time.Minute); err != nil {
 			t.Fatalf("executeCodexShellCommand(%q): %v", command, err)
 		} else if exitCode != 0 {
 			t.Fatalf("executeCodexShellCommand(%q) exit code = %d", command, exitCode)
@@ -226,7 +226,7 @@ func TestExecuteCodexShellCommand_EnabledSafeCommand(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 
-	stdout, stderr, exitCode, err := executeCodexShellCommand("printf safe", "", time.Minute)
+	stdout, stderr, exitCode, err := executeCodexShellCommand("printf safe", "", "test-session", time.Minute)
 	if err != nil {
 		t.Fatalf("executeCodexShellCommand: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestExecuteCodexShellCommand_EnabledBlockedCommand(t *testing.T) {
 	enableFuseForTest(t)
 
 	command := "printf blocked > " + filepath.Join(fuseHome, "config", "policy.yaml")
-	stdout, stderr, exitCode, err := executeCodexShellCommand(command, "", time.Minute)
+	stdout, stderr, exitCode, err := executeCodexShellCommand(command, "", "test-session", time.Minute)
 	if err == nil {
 		t.Fatal("expected blocked command to return an error")
 	}
@@ -262,7 +262,7 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 
-	_, _, exitCode, err := executeCodexShellCommand("python nonexistent_script.py", "", time.Minute)
+	_, _, exitCode, err := executeCodexShellCommand("python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
 		t.Fatal("expected approval-required command without TTY to return an error")
 	}
@@ -494,5 +494,115 @@ func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
 	}
 	if message, _ := errObj["message"].(string); !strings.Contains(message, "NON_INTERACTIVE_MODE") {
 		t.Fatalf("error message = %q, want NON_INTERACTIVE_MODE", message)
+	}
+}
+
+// --- fu-8fj: Test session_id attribution end-to-end ---
+
+func TestExecuteCodexShellCommand_SessionIDAttribution(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	sessionID := "codex-test-attribution"
+	_, _, exitCode, err := executeCodexShellCommand("printf hello", "", sessionID, time.Minute)
+	if err != nil {
+		t.Fatalf("executeCodexShellCommand: %v", err)
+	}
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d, want 0", exitCode)
+	}
+
+	// Query the events table to verify session_id was stored correctly.
+	sqlDB, err := sql.Open("sqlite", config.DBPath())
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = sqlDB.Close() }()
+
+	var storedSessionID, storedDecision, storedSource string
+	err = sqlDB.QueryRow(`
+		SELECT session_id, decision, source FROM events
+		ORDER BY id DESC LIMIT 1
+	`).Scan(&storedSessionID, &storedDecision, &storedSource)
+	if err != nil {
+		t.Fatalf("query event: %v", err)
+	}
+	if storedSessionID != sessionID {
+		t.Errorf("session_id = %q, want %q", storedSessionID, sessionID)
+	}
+	if storedDecision != "SAFE" {
+		t.Errorf("decision = %q, want %q", storedDecision, "SAFE")
+	}
+	if storedSource != "codex-shell" {
+		t.Errorf("source = %q, want %q", storedSource, "codex-shell")
+	}
+}
+
+func TestExecuteCodexShellCommand_DistinctSessionIDs(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	// Run commands from two different sessions.
+	for _, sess := range []string{"codex-sess-1", "codex-sess-2"} {
+		_, _, _, err := executeCodexShellCommand("printf "+sess, "", sess, time.Minute)
+		if err != nil {
+			t.Fatalf("session %s: %v", sess, err)
+		}
+	}
+
+	// Query events and verify each has the correct session_id.
+	sqlDB, err := sql.Open("sqlite", config.DBPath())
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer func() { _ = sqlDB.Close() }()
+
+	rows, err := sqlDB.Query("SELECT session_id, command FROM events ORDER BY id")
+	if err != nil {
+		t.Fatalf("query events: %v", err)
+	}
+	defer rows.Close()
+
+	type eventRow struct {
+		sessionID string
+		command   string
+	}
+	var events []eventRow
+	for rows.Next() {
+		var e eventRow
+		if err := rows.Scan(&e.sessionID, &e.command); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		events = append(events, e)
+	}
+
+	if len(events) < 2 {
+		t.Fatalf("expected at least 2 events, got %d", len(events))
+	}
+
+	// Verify distinct session IDs in the events.
+	sessions := map[string]bool{}
+	for _, e := range events {
+		sessions[e.sessionID] = true
+	}
+	if !sessions["codex-sess-1"] {
+		t.Error("missing event for codex-sess-1")
+	}
+	if !sessions["codex-sess-2"] {
+		t.Error("missing event for codex-sess-2")
+	}
+}
+
+func TestGenerateSessionID_Unique(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 1000; i++ {
+		id := generateSessionID()
+		if !strings.HasPrefix(id, "codex-") {
+			t.Fatalf("session ID %q missing codex- prefix", id)
+		}
+		if seen[id] {
+			t.Fatalf("duplicate session ID %q after %d iterations", id, i)
+		}
+		seen[id] = true
 	}
 }

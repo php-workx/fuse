@@ -18,7 +18,7 @@ build:
 install:
 	go install $(LDFLAGS) ./cmd/fuse
 
-## install-dev: Install development dependencies
+## install-dev: Install development dependencies and git hooks
 install-dev:
 	@echo "Installing Go tools..."
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
@@ -26,6 +26,8 @@ install-dev:
 	go install golang.org/x/tools/cmd/goimports@latest
 	go install golang.org/x/tools/cmd/deadcode@latest
 	go install gotest.tools/gotestsum@v1.12.1
+	@echo "Installing git hooks..."
+	@bash scripts/install-hooks.sh
 	@echo "Done! Development environment ready."
 
 ## clean: Remove build artifacts
