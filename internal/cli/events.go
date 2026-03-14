@@ -19,19 +19,19 @@ type eventsOptions struct {
 	source    string
 	agent     string
 	decision  string
+	session   string
 	workspace string
 }
 
-var (
-	eventsOpts eventsOptions
-	statsJSON  bool
-)
+var eventsOpts eventsOptions
+
+var statsJSON bool
 
 var eventsCmd = &cobra.Command{
 	Use:   "events",
 	Short: "Show recent local fuse events",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runEvents(eventsOpts)
+		return runEvents(&eventsOpts)
 	},
 }
 
@@ -49,6 +49,7 @@ func init() {
 	eventsCmd.Flags().StringVar(&eventsOpts.source, "source", "", "Filter by source (hook, run, codex-shell)")
 	eventsCmd.Flags().StringVar(&eventsOpts.agent, "agent", "", "Filter by agent (claude, codex, manual)")
 	eventsCmd.Flags().StringVar(&eventsOpts.decision, "decision", "", "Filter by decision")
+	eventsCmd.Flags().StringVar(&eventsOpts.session, "session", "", "Filter by session ID")
 	eventsCmd.Flags().StringVar(&eventsOpts.workspace, "workspace", "", "Filter by workspace root")
 
 	statsCmd.Flags().BoolVar(&statsJSON, "json", false, "Emit JSON")
@@ -57,7 +58,7 @@ func init() {
 	rootCmd.AddCommand(statsCmd)
 }
 
-func runEvents(opts eventsOptions) error {
+func runEvents(opts *eventsOptions) error {
 	database, exists, err := openEventsDB()
 	if err != nil {
 		return err
@@ -73,6 +74,7 @@ func runEvents(opts eventsOptions) error {
 		Source:        opts.source,
 		Agent:         opts.agent,
 		Decision:      strings.ToUpper(opts.decision),
+		Session:       opts.session,
 		WorkspaceRoot: opts.workspace,
 	})
 	if err != nil {
@@ -166,12 +168,12 @@ func fallbackValue(value string) string {
 	return value
 }
 
-func shorten(value string, max int) string {
-	if len(value) <= max {
+func shorten(value string, maxLen int) string {
+	if len(value) <= maxLen {
 		return value
 	}
-	if max <= 3 {
-		return value[:max]
+	if maxLen <= 3 {
+		return value[:maxLen]
 	}
-	return value[:max-3] + "..."
+	return value[:maxLen-3] + "..."
 }

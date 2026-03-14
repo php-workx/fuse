@@ -37,7 +37,7 @@ func TestRunEvents_PrintsRecentActivity(t *testing.T) {
 	}
 
 	stdout, stderr, err := captureCLIOutput(t, func() error {
-		return runEvents(eventsOptions{limit: 10})
+		return runEvents(&eventsOptions{limit: 10})
 	})
 	if err != nil {
 		t.Fatalf("runEvents: %v", err)
@@ -53,6 +53,10 @@ func TestRunEvents_PrintsRecentActivity(t *testing.T) {
 }
 
 func TestRunStats_SummarizesActivity(t *testing.T) {
+	origStatsJSON := statsJSON
+	statsJSON = false
+	defer func() { statsJSON = origStatsJSON }()
+
 	fuseHome := t.TempDir()
 	t.Setenv("FUSE_HOME", fuseHome)
 	if err := config.EnsureDirectories(); err != nil {
