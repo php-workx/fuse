@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# pre-commit hook: run gitleaks on staged changes to prevent secret leaks.
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "pre-commit: gitleaks not installed — skipping secret scan."
+    echo "  Install with: brew install gitleaks  (or see https://github.com/gitleaks/gitleaks)"
+    exit 0
+fi
+
+echo "pre-commit: scanning staged changes for secrets..."
+gitleaks protect --staged --verbose

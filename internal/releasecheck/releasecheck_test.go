@@ -53,6 +53,11 @@ func repoRoot(t *testing.T) string {
 
 func enableIsolatedFuseHome(t *testing.T) string {
 	t.Helper()
+	// Pin GOPATH before changing HOME so go build doesn't create a
+	// read-only module cache inside the temp HOME directory.
+	if os.Getenv("GOPATH") == "" {
+		t.Setenv("GOPATH", filepath.Join(os.Getenv("HOME"), "go"))
+	}
 	homeDir := t.TempDir()
 	fuseHome := filepath.Join(homeDir, ".fuse")
 	t.Setenv("HOME", homeDir)
@@ -104,7 +109,8 @@ func logLatencyStats(t *testing.T, id string, stats latencyStats) {
 
 func buildFuseBinary(t *testing.T) string {
 	t.Helper()
-	binaryPath := filepath.Join(t.TempDir(), "fuse")
+	buildDir := t.TempDir()
+	binaryPath := filepath.Join(buildDir, "fuse")
 	cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/fuse")
 	cmd.Dir = repoRoot(t)
 	output, err := cmd.CombinedOutput()

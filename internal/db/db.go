@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"sync/atomic"
 
 	_ "modernc.org/sqlite"
@@ -39,27 +40,34 @@ func OpenDB(path string) (*DB, error) {
 	}
 	_ = f.Close()
 
-	db, err := sql.Open("sqlite", path)
+	// Use DSN pragmas so every pooled connection inherits them,
+	// then pin to a single connection for SQLite safety.
+	dsn := path + "?_pragma=busy_timeout(10000)&_pragma=foreign_keys(1)"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
-	// Enable WAL mode for better concurrency.
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	// Enable WAL mode. Check first to avoid contention when multiple
+	// instances open the same database. Read back the result because
+	// SQLite returns the previous mode silently on failure.
+	var currentMode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&currentMode); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("enable WAL mode: %w", err)
+		return nil, fmt.Errorf("query journal mode: %w", err)
 	}
-
-	// Set busy timeout so concurrent writers wait instead of failing.
-	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("set busy timeout: %w", err)
-	}
-
-	// Enable foreign key enforcement.
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
+	if !strings.EqualFold(currentMode, "wal") {
+		var enabledMode string
+		if err := db.QueryRow("PRAGMA journal_mode=WAL").Scan(&enabledMode); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("enable WAL mode: %w", err)
+		}
+		if !strings.EqualFold(enabledMode, "wal") {
+			_ = db.Close()
+			return nil, fmt.Errorf("enable WAL mode: sqlite kept journal_mode=%s", enabledMode)
+		}
 	}
 
 	// Run schema migrations.

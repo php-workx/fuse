@@ -51,12 +51,15 @@ func (d *DB) ConsumeApproval(decisionKey, sessionID string) (*Approval, error) {
 
 	// First try to find a matching unconsumed, non-expired approval.
 	// Order by scope priority: forever > session > command > once.
+	// Session-scoped approvals are filtered by session_id in the query
+	// to avoid returning a wrong-session row and masking valid matches.
 	row := d.db.QueryRow(`
 		SELECT id, decision_key, decision, scope, session_id, hmac, created_at, consumed_at, expires_at
 		FROM approvals
 		WHERE decision_key = ?
 		  AND consumed_at IS NULL
 		  AND (expires_at IS NULL OR expires_at > ?)
+		  AND (scope != 'session' OR session_id = ?)
 		ORDER BY
 			CASE scope
 				WHEN 'forever' THEN 0
@@ -65,7 +68,7 @@ func (d *DB) ConsumeApproval(decisionKey, sessionID string) (*Approval, error) {
 				WHEN 'once' THEN 3
 			END
 		LIMIT 1
-	`, decisionKey, now)
+	`, decisionKey, now, sessionID)
 
 	var a Approval
 	err := row.Scan(&a.ID, &a.DecisionKey, &a.Decision, &a.Scope,
@@ -75,11 +78,6 @@ func (d *DB) ConsumeApproval(decisionKey, sessionID string) (*Approval, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("query approval: %w", err)
-	}
-
-	// Check session scope: must match session ID.
-	if a.Scope == "session" && a.SessionID != sessionID {
-		return nil, nil
 	}
 
 	// Consume "once" scope approvals atomically.

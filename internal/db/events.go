@@ -41,13 +41,13 @@ func ScrubCredentials(command string) string {
 }
 
 // LogEvent inserts an event record with credential scrubbing applied to command.
-func (d *DB) LogEvent(sessionID, command, decision, ruleID, reason string, durationMs int64, metadata string) error {
+func (d *DB) LogEvent(sessionID, command, decision, ruleID, reason string, durationMs int64, source string) error {
 	scrubbed := ScrubCredentials(command)
 
 	_, err := d.db.Exec(`
-		INSERT INTO events (session_id, command, decision, rule_id, reason, duration_ms, metadata)
+		INSERT INTO events (session_id, command, decision, rule_id, reason, duration_ms, source)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, sessionID, scrubbed, decision, ruleID, reason, durationMs, metadata)
+	`, sessionID, scrubbed, decision, ruleID, reason, durationMs, source)
 	if err != nil {
 		return fmt.Errorf("log event: %w", err)
 	}

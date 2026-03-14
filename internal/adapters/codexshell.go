@@ -3,6 +3,7 @@ package adapters
 import (
 	"bufio"
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -22,9 +23,16 @@ const (
 	codexShellTransportLineDelimited
 )
 
+func generateSessionID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("codex-%x", b)
+}
+
 func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 	reader := bufio.NewReader(stdin)
 	writer := bufio.NewWriter(stdout)
+	sessionID := generateSessionID()
 	transport, err := detectCodexShellTransport(reader)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
@@ -47,7 +55,7 @@ func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 			return err
 		}
 
-		response, respond, err := handleCodexShellMessage(msg)
+		response, respond, err := handleCodexShellMessage(msg, sessionID)
 		if err != nil {
 			return err
 		}
@@ -120,7 +128,7 @@ func readJSONRPCLine(reader *bufio.Reader) ([]byte, error) {
 	}
 }
 
-func handleCodexShellMessage(msg jsonRPCMessage) (jsonRPCMessage, bool, error) {
+func handleCodexShellMessage(msg jsonRPCMessage, sessionID string) (jsonRPCMessage, bool, error) {
 	method, _ := msg["method"].(string)
 	switch method {
 	case "initialize":
@@ -168,7 +176,7 @@ func handleCodexShellMessage(msg jsonRPCMessage) (jsonRPCMessage, bool, error) {
 			},
 		}, true, nil
 	case "tools/call":
-		return handleCodexShellToolCall(msg)
+		return handleCodexShellToolCall(msg, sessionID)
 	default:
 		if _, ok := msg["id"]; ok {
 			return jsonRPCErrorResponse(msg["id"], -32601, fmt.Sprintf("method %s not found", method)), true, nil
@@ -177,7 +185,7 @@ func handleCodexShellMessage(msg jsonRPCMessage) (jsonRPCMessage, bool, error) {
 	}
 }
 
-func handleCodexShellToolCall(msg jsonRPCMessage) (jsonRPCMessage, bool, error) {
+func handleCodexShellToolCall(msg jsonRPCMessage, sessionID string) (jsonRPCMessage, bool, error) {
 	params, _ := msg["params"].(map[string]interface{})
 	name, _ := params["name"].(string)
 	if name != "run_command" {
@@ -191,7 +199,7 @@ func handleCodexShellToolCall(msg jsonRPCMessage) (jsonRPCMessage, bool, error) 
 		return jsonRPCErrorResponse(msg["id"], -32602, "missing command"), true, nil
 	}
 
-	out, errOut, exitCode, err := executeCodexShellCommand(command, cwd, 30*time.Minute)
+	out, errOut, exitCode, err := executeCodexShellCommand(command, cwd, sessionID, 30*time.Minute)
 	if err != nil {
 		return jsonRPCErrorResponse(msg["id"], -32000, err.Error()), true, nil
 	}
@@ -213,7 +221,7 @@ func handleCodexShellToolCall(msg jsonRPCMessage) (jsonRPCMessage, bool, error) 
 	}, true, nil
 }
 
-func executeCodexShellCommand(command, cwd string, timeout time.Duration) (string, string, int, error) {
+func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Duration) (string, string, int, error) {
 	cfg := loadRuntimeConfig()
 	if config.IsDisabled() {
 		execResult, err := executeCapturedShellCommand(command, cwd, timeout)
@@ -226,6 +234,7 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 		RawCommand: command,
 		Cwd:        cwd,
 		Source:     "codex",
+		SessionID:  sessionID,
 	}
 
 	result, err := core.Classify(req, evaluator)
@@ -243,7 +252,7 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 
 	switch result.Decision {
 	case core.DecisionBlocked:
-		logEvent(database, command, result, "blocked")
+		logEvent(database, sessionID, command, result, "codex")
 		cleanupExecutionState(database, cfg)
 		return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
 	case core.DecisionSafe, core.DecisionCaution:
@@ -261,12 +270,12 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 		if mgrErr != nil {
 			return "", "", 0, mgrErr
 		}
-		decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, "", false)
+		decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, sessionID, false)
 		if promptErr != nil {
 			return "", "", 0, promptErr
 		}
 		if decision == core.DecisionBlocked {
-			logEvent(database, command, result, "denied")
+			logEvent(database, sessionID, command, result, "codex")
 			cleanupExecutionState(database, cfg)
 			return "", "", 0, errApprovalDenied
 		}
@@ -280,11 +289,7 @@ func executeCodexShellCommand(command, cwd string, timeout time.Duration) (strin
 	}
 
 	execResult, err := executeCapturedShellCommand(command, cwd, timeout)
-	outcome := "executed"
-	if err != nil {
-		outcome = "error"
-	}
-	logEvent(database, command, result, outcome)
+	logEvent(database, sessionID, command, result, "codex")
 	cleanupExecutionState(database, cfg)
 	return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
 }

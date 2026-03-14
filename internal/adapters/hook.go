@@ -117,13 +117,16 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 	// Strip the "mcp__<server>__" prefix to get the action name for classification.
 	toolAction := extractMCPAction(req.ToolName)
 	decision := core.ClassifyMCPTool(toolAction, args)
+	mcpCommand := formatMCPCommand(req.ToolName, args)
 
 	switch decision {
 	case core.DecisionBlocked:
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. MCP tool call blocked by policy. Do not retry this exact command. Ask the user for guidance.")
+		logHookEventFields(req.SessionID, mcpCommand, string(core.DecisionBlocked), "", "MCP tool blocked by policy")
 		return 2
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s classified as CAUTION\n", req.ToolName)
+		logHookEventFields(req.SessionID, mcpCommand, string(core.DecisionCaution), "", fmt.Sprintf("MCP tool %s classified as CAUTION", req.ToolName))
 		return 0
 	case core.DecisionApproval:
 		result := &core.ClassifyResult{
@@ -141,6 +144,7 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 		return handleApproval(req, result, stderr, cfg)
 	default:
 		// SAFE
+		logHookEventFields(req.SessionID, mcpCommand, string(core.DecisionSafe), "", "")
 		return 0
 	}
 }
@@ -205,6 +209,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 
 	switch result.Decision {
 	case core.DecisionSafe:
+		logHookEvent(req.SessionID, input.Command, result)
 		return 0
 
 	case core.DecisionBlocked:
@@ -259,24 +264,31 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 
 	cleanupExecutionState(database, cfg)
 
+	cmd := extractCommandFromResult(result)
 	switch decision {
 	case core.DecisionApproval, core.DecisionSafe, core.DecisionCaution:
+		_ = database.LogEvent(req.SessionID, cmd, string(decision), result.RuleID, result.Reason, 0, "hook")
 		return 0
 	default:
+		_ = database.LogEvent(req.SessionID, cmd, "BLOCKED", result.RuleID, "user denied", 0, "hook")
 		fmt.Fprintln(stderr, "fuse:USER_DENIED STOP. Do not retry this exact command without new user input.")
 		return 2
 	}
 }
 
 // logHookEvent logs a classification event best-effort (non-blocking).
-// Only called for non-SAFE decisions where audit trail matters.
 func logHookEvent(sessionID, command string, result *core.ClassifyResult) {
+	logHookEventFields(sessionID, command, string(result.Decision), result.RuleID, result.Reason)
+}
+
+// logHookEventFields logs a hook event with individual fields. Best-effort.
+func logHookEventFields(sessionID, command, decision, ruleID, reason string) {
 	database, err := db.OpenDB(config.DBPath())
 	if err != nil {
 		return // best-effort: skip if DB unavailable
 	}
 	defer func() { _ = database.Close() }()
-	_ = database.LogEvent(sessionID, command, string(result.Decision), result.RuleID, result.Reason, 0, "hook")
+	_ = database.LogEvent(sessionID, command, decision, ruleID, reason, 0, "hook")
 	cleanupExecutionState(database, loadRuntimeConfig())
 }
 
