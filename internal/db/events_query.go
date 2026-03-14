@@ -58,16 +58,19 @@ func (d *DB) ListEvents(f EventFilter) ([]EventRecord, error) {
 		args = append(args, f.Session)
 	}
 
-	query := "SELECT id, timestamp, session_id, command, decision, rule_id, reason, duration_ms, metadata, source, agent FROM events"
+	var qb strings.Builder
+	qb.WriteString("SELECT id, timestamp, session_id, command, decision, rule_id, reason, duration_ms, metadata, source, agent FROM events")
 	if len(clauses) > 0 {
-		query += " WHERE " + strings.Join(clauses, " AND ")
+		qb.WriteString(" WHERE ")
+		qb.WriteString(strings.Join(clauses, " AND "))
 	}
-	query += " ORDER BY id DESC"
+	qb.WriteString(" ORDER BY id DESC")
 	if f.Limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", f.Limit)
+		qb.WriteString(" LIMIT ?")
+		args = append(args, f.Limit)
 	}
 
-	rows, err := d.db.Query(query, args...)
+	rows, err := d.db.Query(qb.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}
@@ -142,7 +145,8 @@ func (d *DB) SummarizeEvents(f EventFilter) ([]EventSummary, int64, error) {
 	}
 
 	// Get grouped summary.
-	summaryQuery := "SELECT decision, COALESCE(source, 'shell'), COUNT(*) FROM events" + where + " GROUP BY decision, COALESCE(source, 'shell') ORDER BY COUNT(*) DESC"
+	summaryQuery := "SELECT decision, COALESCE(source, 'shell'), COUNT(*) FROM events" +
+		where + " GROUP BY decision, COALESCE(source, 'shell') ORDER BY COUNT(*) DESC"
 	rows, err := d.db.Query(summaryQuery, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("summarize events: %w", err)
