@@ -104,7 +104,23 @@ func logLatencyStats(t *testing.T, id string, stats latencyStats) {
 
 func buildFuseBinary(t *testing.T) string {
 	t.Helper()
-	binaryPath := filepath.Join(t.TempDir(), "fuse")
+	buildDir := t.TempDir()
+	// Go build creates read-only module cache files inside the temp dir.
+	// Ensure cleanup can delete them by making everything writable first.
+	t.Cleanup(func() {
+		_ = filepath.Walk(buildDir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				_ = os.Chmod(path, 0o755)
+			} else {
+				_ = os.Chmod(path, 0o644)
+			}
+			return nil
+		})
+	})
+	binaryPath := filepath.Join(buildDir, "fuse")
 	cmd := exec.Command("go", "build", "-o", binaryPath, "./cmd/fuse")
 	cmd.Dir = repoRoot(t)
 	output, err := cmd.CombinedOutput()
