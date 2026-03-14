@@ -15,6 +15,7 @@ Most users should think of `fuse` as integration infrastructure, not as a daily 
 - `fuse install claude`: install the Claude hook integration
 - `fuse install codex`: install the Codex shell MCP integration
 - `fuse doctor [--live]`: verify that the local setup, terminal, and hook/proxy wiring are healthy
+- `fuse events` / `fuse stats`: inspect recent local activity from the shared `~/.fuse` event database
 
 The lower-level runtime surfaces still exist:
 
@@ -49,6 +50,20 @@ fuse doctor --live
 ```
 
 `--live` checks command classification plus terminal/TTY capabilities needed for approval prompts and foreground execution.
+
+## Local observability
+
+`fuse` stores local approvals and events in a shared per-user state directory under `~/.fuse`. This means multiple Claude and Codex instances across different workspace folders contribute to the same local audit store by default.
+
+Use these commands to inspect that activity:
+
+```bash
+fuse events --limit 20
+fuse events --source codex-shell --workspace /path/to/repo
+fuse stats
+```
+
+`fuse events` shows recent activity with agent/source/workspace attribution. `fuse stats` summarizes decisions, agents, sources, and workspace roots across the local event store.
 
 ## Advanced usage
 

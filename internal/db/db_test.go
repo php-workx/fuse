@@ -206,7 +206,15 @@ func TestConsumeApproval_Scope(t *testing.T) {
 func TestLogEvent(t *testing.T) {
 	d := openTestDB(t)
 
-	err := d.LogEvent("sess1", "echo hello", "SAFE", "rule1", "builtin allow", 5, `{"foo":"bar"}`)
+	err := d.LogEvent(EventRecord{
+		SessionID:  "sess1",
+		Command:    "echo hello",
+		Decision:   "SAFE",
+		RuleID:     "rule1",
+		Reason:     "builtin allow",
+		DurationMs: 5,
+		Metadata:   `{"foo":"bar"}`,
+	})
 	if err != nil {
 		t.Fatalf("LogEvent: %v", err)
 	}
@@ -243,7 +251,11 @@ func TestPruneEvents(t *testing.T) {
 
 	// Insert 10 events.
 	for i := 0; i < 10; i++ {
-		err := d.LogEvent("s", "cmd", "SAFE", "", "", 0, "")
+		err := d.LogEvent(EventRecord{
+			SessionID: "s",
+			Command:   "cmd",
+			Decision:  "SAFE",
+		})
 		if err != nil {
 			t.Fatalf("LogEvent %d: %v", i, err)
 		}

@@ -210,12 +210,12 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 	case core.DecisionBlocked:
 		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", result.Reason)
 		fmt.Fprintln(stderr, msg)
-		logHookEvent(req.SessionID, input.Command, result)
+		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
 		return 2
 
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
-		logHookEvent(req.SessionID, input.Command, result)
+		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
 		return 0
 
 	case core.DecisionApproval:
@@ -270,13 +270,24 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 
 // logHookEvent logs a classification event best-effort (non-blocking).
 // Only called for non-SAFE decisions where audit trail matters.
-func logHookEvent(sessionID, command string, result *core.ClassifyResult) {
+func logHookEvent(sessionID, command, cwd string, result *core.ClassifyResult) {
 	database, err := db.OpenDB(config.DBPath())
 	if err != nil {
 		return // best-effort: skip if DB unavailable
 	}
 	defer func() { _ = database.Close() }()
-	_ = database.LogEvent(sessionID, command, string(result.Decision), result.RuleID, result.Reason, 0, "hook")
+	_ = database.LogEvent(db.EventRecord{
+		SessionID:  sessionID,
+		Command:    command,
+		Decision:   string(result.Decision),
+		RuleID:     result.RuleID,
+		Reason:     result.Reason,
+		DurationMs: 0,
+		Metadata:   "hook",
+		Source:     "hook",
+		Agent:      "claude",
+		Cwd:        cwd,
+	})
 	cleanupExecutionState(database, loadRuntimeConfig())
 }
 
