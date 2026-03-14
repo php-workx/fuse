@@ -7,7 +7,7 @@ import (
 
 // EventFilter defines filters for querying events.
 type EventFilter struct {
-	Source    string
+	Source   string
 	Agent    string
 	Decision string
 	Session  string
@@ -26,7 +26,7 @@ type EventRecord struct {
 	Duration  int64
 	Metadata  string
 	Source    string
-	Agent    string
+	Agent     string
 }
 
 // EventSummary holds aggregated event statistics.
@@ -142,7 +142,7 @@ func (d *DB) SummarizeEvents(f EventFilter) ([]EventSummary, int64, error) {
 	}
 
 	// Get grouped summary.
-	summaryQuery := "SELECT decision, COALESCE(source, 'shell'), COUNT(*) FROM events" + where + " GROUP BY decision, source ORDER BY COUNT(*) DESC"
+	summaryQuery := "SELECT decision, COALESCE(source, 'shell'), COUNT(*) FROM events" + where + " GROUP BY decision, COALESCE(source, 'shell') ORDER BY COUNT(*) DESC"
 	rows, err := d.db.Query(summaryQuery, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("summarize events: %w", err)

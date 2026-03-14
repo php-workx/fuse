@@ -110,7 +110,7 @@ func buildFuseBinary(t *testing.T) string {
 	t.Cleanup(func() {
 		_ = filepath.Walk(buildDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return nil
+				return filepath.SkipDir
 			}
 			if info.IsDir() {
 				_ = os.Chmod(path, 0o755)
