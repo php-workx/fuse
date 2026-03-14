@@ -44,16 +44,25 @@ func OpenDB(path string) (*DB, error) {
 		return nil, fmt.Errorf("open database: %w", err)
 	}
 
-	// Enable WAL mode for better concurrency.
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		_ = db.Close()
-		return nil, fmt.Errorf("enable WAL mode: %w", err)
-	}
-
-	// Set busy timeout so concurrent writers wait instead of failing.
-	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+	// Set busy timeout FIRST so concurrent opens wait instead of failing.
+	// This must precede journal_mode=WAL because WAL activation is itself a write.
+	if _, err := db.Exec("PRAGMA busy_timeout=10000"); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
+
+	// Enable WAL mode for better concurrency. Check first to avoid
+	// contention when multiple instances open the same database.
+	var currentMode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&currentMode); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("query journal mode: %w", err)
+	}
+	if currentMode != "wal" {
+		if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			_ = db.Close()
+			return nil, fmt.Errorf("enable WAL mode: %w", err)
+		}
 	}
 
 	// Enable foreign key enforcement.
