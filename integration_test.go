@@ -112,6 +112,7 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 	})
 
 	t.Run("destructive MCP delete tool returns caution/approval", func(t *testing.T) {
+		t.Setenv("FUSE_NON_INTERACTIVE", "1")
 		input := `{"tool_name":"mcp__server__delete_database","tool_input":{"name":"prod"},"session_id":"integ-test","cwd":"/tmp"}`
 		stdin := strings.NewReader(input)
 		stderr := &bytes.Buffer{}

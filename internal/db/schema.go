@@ -6,7 +6,7 @@ import (
 )
 
 // currentSchemaVersion is the latest schema version applied by migrate.
-const currentSchemaVersion = "3"
+const currentSchemaVersion = "4"
 
 // migrate creates or updates the database schema.
 func migrate(db *sql.DB) error {
@@ -48,6 +48,13 @@ func migrate(db *sql.DB) error {
 
 	if version == "2" {
 		if err := applyV3(db); err != nil {
+			return err
+		}
+		version = "3"
+	}
+
+	if version == "3" {
+		if err := applyV4(db); err != nil {
 			return err
 		}
 	}
@@ -130,6 +137,21 @@ func applyV3(db *sql.DB) error {
 
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyV4(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE events ADD COLUMN cwd TEXT`,
+		`ALTER TABLE events ADD COLUMN workspace_root TEXT`,
+		`INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', '4')`,
+	}
+
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumnError(err) {
 			return err
 		}
 	}

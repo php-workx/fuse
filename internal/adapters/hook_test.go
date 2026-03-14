@@ -93,6 +93,7 @@ func TestRunHook_MCP(t *testing.T) {
 }
 
 func TestRunHook_MCP_DestructiveAction(t *testing.T) {
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 	// MCP tool with a destructive-prefix action should trigger caution/approval path.
 	input := `{"tool_name":"mcp__server__delete_items","tool_input":{"id":"123"},"session_id":"test","cwd":"/tmp"}`
 	stdin := strings.NewReader(input)

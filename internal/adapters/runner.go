@@ -154,7 +154,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	switch result.Decision {
 	case core.DecisionBlocked:
 		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
-		logEvent(database, "", command, result, "shell")
+		logEvent(database, "run", "manual", "", command, cwd, result, "blocked")
 		cleanupExecutionState(database, cfg)
 		return 1, nil
 
@@ -192,7 +192,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 		}
 		if decision == core.DecisionBlocked {
 			fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
-			logEvent(database, "", command, result, "shell")
+			logEvent(database, "run", "manual", "", command, cwd, result, "denied")
 			cleanupExecutionState(database, cfg)
 			return 1, nil
 		}
@@ -208,7 +208,12 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	// Execute the command.
 	exitCode, err = executeShellCommand(command, cwd, timeout)
 
-	logEvent(database, "", command, result, "shell")
+	// Log event.
+	outcome := "executed"
+	if err != nil {
+		outcome = "error"
+	}
+	logEvent(database, "run", "manual", "", command, cwd, result, outcome)
 	cleanupExecutionState(database, cfg)
 
 	return exitCode, err
@@ -351,19 +356,22 @@ func executeCapturedShellCommandWithStdin(command, cwd string, timeout time.Dura
 }
 
 // logEvent logs an execution event to the database if available.
-func logEvent(database *db.DB, sessionID, command string, result *core.ClassifyResult, source string) {
+func logEvent(database *db.DB, source, agent, sessionID, command, cwd string, result *core.ClassifyResult, outcome string) {
 	if database == nil {
 		return
 	}
-	_ = database.LogEvent(
-		sessionID,               // sessionID
-		command,                 // command
-		string(result.Decision), // decision
-		result.RuleID,           // ruleID
-		result.Reason,           // reason
-		0,                       // durationMs
-		source,                  // source
-	)
+	_ = database.LogEvent(db.EventRecord{
+		SessionID:  sessionID,
+		Command:    command,
+		Decision:   string(result.Decision),
+		RuleID:     result.RuleID,
+		Reason:     result.Reason,
+		DurationMs: 0,
+		Metadata:   outcome,
+		Source:     source,
+		Agent:      agent,
+		Cwd:        cwd,
+	})
 }
 
 func loadRuntimeConfig() *config.Config {

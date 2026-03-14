@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -11,112 +13,167 @@ import (
 	"github.com/runger/fuse/internal/db"
 )
 
-var (
-	eventsSource   string
-	eventsAgent    string
-	eventsDecision string
-	eventsSession  string
-	eventsLimit    int
-)
+type eventsOptions struct {
+	limit     int
+	json      bool
+	source    string
+	agent     string
+	decision  string
+	session   string
+	workspace string
+}
+
+var eventsOpts eventsOptions
+
+var statsJSON bool
 
 var eventsCmd = &cobra.Command{
 	Use:   "events",
-	Short: "List recent fuse events",
+	Short: "Show recent local fuse events",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		database, err := db.OpenDB(config.DBPath())
-		if err != nil {
-			return fmt.Errorf("open database: %w", err)
-		}
-		defer func() { _ = database.Close() }()
-
-		filter := db.EventFilter{
-			Source:   eventsSource,
-			Agent:    eventsAgent,
-			Decision: eventsDecision,
-			Session:  eventsSession,
-			Limit:    eventsLimit,
-		}
-
-		events, err := database.ListEvents(filter)
-		if err != nil {
-			return err
-		}
-
-		if len(events) == 0 {
-			fmt.Fprintln(os.Stderr, "No events found.")
-			return nil
-		}
-
-		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tTIMESTAMP\tDECISION\tSOURCE\tSESSION\tCOMMAND")
-		for _, e := range events {
-			cmd := e.Command
-			if len(cmd) > 60 {
-				cmd = cmd[:57] + "..."
-			}
-			session := e.SessionID
-			if len(session) > 16 {
-				session = session[:16]
-			}
-			fmt.Fprintf(w, "%d\t%s\t%s\t%s\t%s\t%s\n",
-				e.ID, truncTimestamp(e.Timestamp), e.Decision, e.Source, session, cmd)
-		}
-		return w.Flush()
+		return runEvents(&eventsOpts)
 	},
 }
 
 var statsCmd = &cobra.Command{
 	Use:   "stats",
-	Short: "Show aggregated fuse event statistics",
+	Short: "Summarize local fuse activity",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		database, err := db.OpenDB(config.DBPath())
-		if err != nil {
-			return fmt.Errorf("open database: %w", err)
-		}
-		defer func() { _ = database.Close() }()
-
-		filter := db.EventFilter{
-			Source:   eventsSource,
-			Agent:    eventsAgent,
-			Decision: eventsDecision,
-			Session:  eventsSession,
-		}
-
-		summaries, total, err := database.SummarizeEvents(filter)
-		if err != nil {
-			return err
-		}
-
-		fmt.Printf("Total events: %d\n\n", total)
-		if len(summaries) == 0 {
-			return nil
-		}
-
-		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "DECISION\tSOURCE\tCOUNT")
-		for _, s := range summaries {
-			fmt.Fprintf(w, "%s\t%s\t%d\n", s.Decision, s.Source, s.Count)
-		}
-		return w.Flush()
+		return runStats()
 	},
 }
 
-func truncTimestamp(ts string) string {
-	if len(ts) > 19 {
-		return ts[:19]
-	}
-	return ts
-}
-
 func init() {
-	for _, cmd := range []*cobra.Command{eventsCmd, statsCmd} {
-		cmd.Flags().StringVar(&eventsSource, "source", "", "Filter by source (hook, codex, shell)")
-		cmd.Flags().StringVar(&eventsAgent, "agent", "", "Filter by agent")
-		cmd.Flags().StringVar(&eventsDecision, "decision", "", "Filter by decision (SAFE, CAUTION, APPROVAL, BLOCKED)")
-		cmd.Flags().StringVar(&eventsSession, "session", "", "Filter by session ID")
-	}
-	eventsCmd.Flags().IntVar(&eventsLimit, "limit", 50, "Maximum number of events to show")
+	eventsCmd.Flags().IntVar(&eventsOpts.limit, "limit", 20, "Maximum number of events to show")
+	eventsCmd.Flags().BoolVar(&eventsOpts.json, "json", false, "Emit JSON")
+	eventsCmd.Flags().StringVar(&eventsOpts.source, "source", "", "Filter by source (hook, run, codex-shell)")
+	eventsCmd.Flags().StringVar(&eventsOpts.agent, "agent", "", "Filter by agent (claude, codex, manual)")
+	eventsCmd.Flags().StringVar(&eventsOpts.decision, "decision", "", "Filter by decision")
+	eventsCmd.Flags().StringVar(&eventsOpts.session, "session", "", "Filter by session ID")
+	eventsCmd.Flags().StringVar(&eventsOpts.workspace, "workspace", "", "Filter by workspace root")
+
+	statsCmd.Flags().BoolVar(&statsJSON, "json", false, "Emit JSON")
 
 	rootCmd.AddCommand(eventsCmd)
 	rootCmd.AddCommand(statsCmd)
+}
+
+func runEvents(opts *eventsOptions) error {
+	database, exists, err := openEventsDB()
+	if err != nil {
+		return err
+	}
+	if !exists {
+		fmt.Println("No fuse events recorded yet.")
+		return nil
+	}
+	defer func() { _ = database.Close() }()
+
+	events, err := database.ListEvents(db.EventFilter{
+		Limit:         opts.limit,
+		Source:        opts.source,
+		Agent:         opts.agent,
+		Decision:      strings.ToUpper(opts.decision),
+		Session:       opts.session,
+		WorkspaceRoot: opts.workspace,
+	})
+	if err != nil {
+		return err
+	}
+
+	if opts.json {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(events)
+	}
+
+	if len(events) == 0 {
+		fmt.Println("No matching fuse events.")
+		return nil
+	}
+
+	fmt.Println("Recent fuse events")
+	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
+	_, _ = fmt.Fprintln(w, "TIME\tAGENT\tSOURCE\tDECISION\tWORKSPACE\tCOMMAND")
+	for _, event := range events {
+		_, _ = fmt.Fprintf(
+			w,
+			"%s\t%s\t%s\t%s\t%s\t%s\n",
+			event.Timestamp,
+			fallbackValue(event.Agent),
+			fallbackValue(event.Source),
+			fallbackValue(event.Decision),
+			fallbackValue(event.WorkspaceRoot),
+			shorten(event.Command, 96),
+		)
+	}
+	return w.Flush()
+}
+
+func runStats() error {
+	database, exists, err := openEventsDB()
+	if err != nil {
+		return err
+	}
+	if !exists {
+		fmt.Println("No fuse events recorded yet.")
+		return nil
+	}
+	defer func() { _ = database.Close() }()
+
+	summary, err := database.SummarizeEvents()
+	if err != nil {
+		return err
+	}
+
+	if statsJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(summary)
+	}
+
+	fmt.Printf("Total events: %d\n", summary.Total)
+	printCounts("By decision", summary.ByDecision)
+	printCounts("By agent", summary.ByAgent)
+	printCounts("By source", summary.BySource)
+	printCounts("By workspace", summary.ByWorkspace)
+	return nil
+}
+
+func openEventsDB() (*db.DB, bool, error) {
+	if _, err := os.Stat(config.DBPath()); err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		return nil, false, err
+	}
+	return database, true, nil
+}
+
+func printCounts(title string, counts map[string]int) {
+	fmt.Printf("\n%s\n", title)
+	for _, pair := range db.SortedCounts(counts) {
+		fmt.Printf("  %s: %d\n", pair.Key, pair.Count)
+	}
+}
+
+func fallbackValue(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
+}
+
+func shorten(value string, maxLen int) string {
+	if len(value) <= maxLen {
+		return value
+	}
+	if maxLen <= 3 {
+		return value[:maxLen]
+	}
+	return value[:maxLen-3] + "..."
 }
