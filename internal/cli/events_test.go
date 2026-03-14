@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/runger/fuse/internal/config"
@@ -124,17 +125,24 @@ func captureCLIOutput(t *testing.T, fn func() error) (string, string, error) {
 		os.Stderr = origStderr
 	}()
 
+	// Read pipes concurrently to prevent deadlock when fn() output
+	// exceeds the OS pipe buffer (~64KB).
+	var stdoutBuf, stderrBuf bytes.Buffer
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, _ = stdoutBuf.ReadFrom(stdoutR)
+	}()
+	go func() {
+		defer wg.Done()
+		_, _ = stderrBuf.ReadFrom(stderrR)
+	}()
+
 	runErr := fn()
 	_ = stdoutW.Close()
 	_ = stderrW.Close()
+	wg.Wait()
 
-	var stdoutBuf bytes.Buffer
-	var stderrBuf bytes.Buffer
-	if _, err := stdoutBuf.ReadFrom(stdoutR); err != nil {
-		t.Fatalf("read stdout: %v", err)
-	}
-	if _, err := stderrBuf.ReadFrom(stderrR); err != nil {
-		t.Fatalf("read stderr: %v", err)
-	}
 	return stdoutBuf.String(), stderrBuf.String(), runErr
 }

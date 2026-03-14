@@ -179,30 +179,44 @@ func (d *DB) ListEvents(filter EventFilter) ([]EventRecord, error) {
 	var events []EventRecord
 	for rows.Next() {
 		var event EventRecord
-		var fileInspected int
+		var sessionID, command, decision, ruleID, reason, metadata sql.NullString
+		var source, agent, cwd, workspaceRoot, approvalID, userResponse sql.NullString
+		var fileInspected sql.NullInt64
 		var executionExitCode sql.NullInt64
 		if err := rows.Scan(
 			&event.ID,
 			&event.Timestamp,
-			&event.SessionID,
-			&event.Command,
-			&event.Decision,
-			&event.RuleID,
-			&event.Reason,
+			&sessionID,
+			&command,
+			&decision,
+			&ruleID,
+			&reason,
 			&event.DurationMs,
-			&event.Metadata,
-			&event.Source,
-			&event.Agent,
-			&event.Cwd,
-			&event.WorkspaceRoot,
+			&metadata,
+			&source,
+			&agent,
+			&cwd,
+			&workspaceRoot,
 			&fileInspected,
-			&event.ApprovalID,
-			&event.UserResponse,
+			&approvalID,
+			&userResponse,
 			&executionExitCode,
 		); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
 		}
-		event.FileInspected = fileInspected != 0
+		event.SessionID = sessionID.String
+		event.Command = command.String
+		event.Decision = decision.String
+		event.RuleID = ruleID.String
+		event.Reason = reason.String
+		event.Metadata = metadata.String
+		event.Source = source.String
+		event.Agent = agent.String
+		event.Cwd = cwd.String
+		event.WorkspaceRoot = workspaceRoot.String
+		event.ApprovalID = approvalID.String
+		event.UserResponse = userResponse.String
+		event.FileInspected = fileInspected.Valid && fileInspected.Int64 != 0
 		if executionExitCode.Valid {
 			code := executionExitCode.Int64
 			event.ExecutionExitCode = &code
@@ -215,26 +229,53 @@ func (d *DB) ListEvents(filter EventFilter) ([]EventRecord, error) {
 	return events, nil
 }
 
-// SummarizeEvents aggregates counts across the full local event table.
+// SummarizeEvents aggregates counts across the full local event table
+// using SQL GROUP BY queries to avoid loading all rows into memory.
 func (d *DB) SummarizeEvents() (EventSummary, error) {
-	events, err := d.ListEvents(EventFilter{Limit: 1<<31 - 1})
-	if err != nil {
-		return EventSummary{}, err
-	}
-
 	summary := EventSummary{
-		Total:       len(events),
 		ByDecision:  map[string]int{},
 		ByAgent:     map[string]int{},
 		BySource:    map[string]int{},
 		ByWorkspace: map[string]int{},
 	}
-	for _, event := range events {
-		incrementCount(summary.ByDecision, event.Decision)
-		incrementCount(summary.ByAgent, event.Agent)
-		incrementCount(summary.BySource, event.Source)
-		incrementCount(summary.ByWorkspace, event.WorkspaceRoot)
+
+	if err := d.db.QueryRow("SELECT COUNT(*) FROM events").Scan(&summary.Total); err != nil {
+		return EventSummary{}, fmt.Errorf("count events: %w", err)
 	}
+
+	for _, dim := range []struct {
+		column string
+		dest   map[string]int
+	}{
+		{"decision", summary.ByDecision},
+		{"agent", summary.ByAgent},
+		{"source", summary.BySource},
+		{"workspace_root", summary.ByWorkspace},
+	} {
+		rows, err := d.db.Query(
+			fmt.Sprintf("SELECT COALESCE(%s, ''), COUNT(*) FROM events GROUP BY %s", dim.column, dim.column),
+		)
+		if err != nil {
+			return EventSummary{}, fmt.Errorf("summarize %s: %w", dim.column, err)
+		}
+		for rows.Next() {
+			var key string
+			var count int
+			if err := rows.Scan(&key, &count); err != nil {
+				rows.Close()
+				return EventSummary{}, fmt.Errorf("scan %s: %w", dim.column, err)
+			}
+			if key == "" {
+				key = "(unknown)"
+			}
+			dim.dest[key] = count
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return EventSummary{}, fmt.Errorf("iterate %s: %w", dim.column, err)
+		}
+	}
+
 	return summary, nil
 }
 
