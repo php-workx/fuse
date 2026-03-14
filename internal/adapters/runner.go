@@ -154,7 +154,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	switch result.Decision {
 	case core.DecisionBlocked:
 		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
-		logEvent(database, command, result, "blocked")
+		logEvent(database, "", command, result, "blocked")
 		cleanupExecutionState(database, cfg)
 		return 1, nil
 
@@ -192,7 +192,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 		}
 		if decision == core.DecisionBlocked {
 			fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
-			logEvent(database, command, result, "denied")
+			logEvent(database, "", command, result, "denied")
 			cleanupExecutionState(database, cfg)
 			return 1, nil
 		}
@@ -213,7 +213,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	if err != nil {
 		outcome = "error"
 	}
-	logEvent(database, command, result, outcome)
+	logEvent(database, "", command, result, outcome)
 	cleanupExecutionState(database, cfg)
 
 	return exitCode, err
@@ -356,12 +356,12 @@ func executeCapturedShellCommandWithStdin(command, cwd string, timeout time.Dura
 }
 
 // logEvent logs an execution event to the database if available.
-func logEvent(database *db.DB, command string, result *core.ClassifyResult, outcome string) {
+func logEvent(database *db.DB, sessionID, command string, result *core.ClassifyResult, outcome string) {
 	if database == nil {
 		return
 	}
 	_ = database.LogEvent(
-		"",                      // sessionID (none in run mode)
+		sessionID,               // sessionID
 		command,                 // command
 		string(result.Decision), // decision
 		result.RuleID,           // ruleID

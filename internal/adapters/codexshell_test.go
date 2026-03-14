@@ -179,7 +179,7 @@ func TestExecuteCodexShellCommand_AllowsBlockedCommandWhenDisabled(t *testing.T)
 		t.Fatalf("mkdir target: %v", err)
 	}
 
-	_, _, exitCode, err := executeCodexShellCommand("rm -rf "+targetDir, "", time.Minute)
+	_, _, exitCode, err := executeCodexShellCommand("rm -rf "+targetDir, "", "test-session", time.Minute)
 	if err != nil {
 		t.Fatalf("expected disabled mode to bypass classification, got error: %v", err)
 	}
@@ -200,7 +200,7 @@ func TestExecuteCodexShellCommand_LogsAndPrunesEvents(t *testing.T) {
 	}
 
 	for _, command := range []string{"printf one", "printf two"} {
-		if _, _, exitCode, err := executeCodexShellCommand(command, "", time.Minute); err != nil {
+		if _, _, exitCode, err := executeCodexShellCommand(command, "", "test-session", time.Minute); err != nil {
 			t.Fatalf("executeCodexShellCommand(%q): %v", command, err)
 		} else if exitCode != 0 {
 			t.Fatalf("executeCodexShellCommand(%q) exit code = %d", command, exitCode)
@@ -226,7 +226,7 @@ func TestExecuteCodexShellCommand_EnabledSafeCommand(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 
-	stdout, stderr, exitCode, err := executeCodexShellCommand("printf safe", "", time.Minute)
+	stdout, stderr, exitCode, err := executeCodexShellCommand("printf safe", "", "test-session", time.Minute)
 	if err != nil {
 		t.Fatalf("executeCodexShellCommand: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestExecuteCodexShellCommand_EnabledBlockedCommand(t *testing.T) {
 	enableFuseForTest(t)
 
 	command := "printf blocked > " + filepath.Join(fuseHome, "config", "policy.yaml")
-	stdout, stderr, exitCode, err := executeCodexShellCommand(command, "", time.Minute)
+	stdout, stderr, exitCode, err := executeCodexShellCommand(command, "", "test-session", time.Minute)
 	if err == nil {
 		t.Fatal("expected blocked command to return an error")
 	}
@@ -262,7 +262,7 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 
-	_, _, exitCode, err := executeCodexShellCommand("python nonexistent_script.py", "", time.Minute)
+	_, _, exitCode, err := executeCodexShellCommand("python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
 		t.Fatal("expected approval-required command without TTY to return an error")
 	}
