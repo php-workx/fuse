@@ -69,7 +69,7 @@ func runEvents(opts *eventsOptions) error {
 	}
 	defer func() { _ = database.Close() }()
 
-	events, err := database.ListEvents(db.EventFilter{
+	events, err := database.ListEvents(&db.EventFilter{
 		Limit:         opts.limit,
 		Source:        opts.source,
 		Agent:         opts.agent,
@@ -95,16 +95,17 @@ func runEvents(opts *eventsOptions) error {
 	fmt.Println("Recent fuse events")
 	w := tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
 	_, _ = fmt.Fprintln(w, "TIME\tAGENT\tSOURCE\tDECISION\tWORKSPACE\tCOMMAND")
-	for _, event := range events {
+	for i := range events {
+		e := &events[i]
 		_, _ = fmt.Fprintf(
 			w,
 			"%s\t%s\t%s\t%s\t%s\t%s\n",
-			event.Timestamp,
-			fallbackValue(event.Agent),
-			fallbackValue(event.Source),
-			fallbackValue(event.Decision),
-			fallbackValue(event.WorkspaceRoot),
-			shorten(event.Command, 96),
+			e.Timestamp,
+			fallbackValue(e.Agent),
+			fallbackValue(e.Source),
+			fallbackValue(e.Decision),
+			fallbackValue(e.WorkspaceRoot),
+			shorten(e.Command, 96),
 		)
 	}
 	return w.Flush()

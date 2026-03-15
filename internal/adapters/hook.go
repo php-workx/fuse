@@ -267,13 +267,13 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 	cmd := extractCommandFromResult(result)
 	switch decision {
 	case core.DecisionApproval, core.DecisionSafe, core.DecisionCaution:
-		_ = database.LogEvent(db.EventRecord{
+		_ = database.LogEvent(&db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: string(decision),
 			RuleID: result.RuleID, Reason: result.Reason, Source: "hook", Agent: "claude", Cwd: req.Cwd,
 		})
 		return 0
 	default:
-		_ = database.LogEvent(db.EventRecord{
+		_ = database.LogEvent(&db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: "BLOCKED",
 			RuleID: result.RuleID, Reason: "user denied", Source: "hook", Agent: "claude", Cwd: req.Cwd,
 		})
@@ -294,7 +294,7 @@ func logHookEventFields(sessionID, command, cwd, decision, ruleID, reason string
 		return // best-effort: skip if DB unavailable
 	}
 	defer func() { _ = database.Close() }()
-	_ = database.LogEvent(db.EventRecord{
+	_ = database.LogEvent(&db.EventRecord{
 		SessionID: sessionID,
 		Command:   command,
 		Decision:  decision,

@@ -25,7 +25,7 @@ func TestRunEvents_PrintsRecentActivity(t *testing.T) {
 	}
 	defer func() { _ = database.Close() }()
 
-	if err := database.LogEvent(db.EventRecord{
+	if err := database.LogEvent(&db.EventRecord{
 		Command:       "git status",
 		Decision:      "SAFE",
 		Source:        "codex-shell",
@@ -88,7 +88,7 @@ func TestRunStats_SummarizesActivity(t *testing.T) {
 		},
 	}
 	for i, record := range records {
-		if err := database.LogEvent(record); err != nil {
+		if err := database.LogEvent(&record); err != nil {
 			t.Fatalf("LogEvent(%d): %v", i, err)
 		}
 	}

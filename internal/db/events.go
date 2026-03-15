@@ -86,7 +86,7 @@ func ScrubCredentials(command string) string {
 }
 
 // LogEvent inserts an event record with credential scrubbing and normalized path metadata.
-func (d *DB) LogEvent(record EventRecord) error {
+func (d *DB) LogEvent(record *EventRecord) error {
 	record.Command = ScrubCredentials(record.Command)
 	record.Cwd = normalizeEventPath(record.Cwd)
 	if record.WorkspaceRoot == "" {
@@ -130,7 +130,7 @@ func (d *DB) LogEvent(record EventRecord) error {
 }
 
 // ListEvents returns recent events ordered newest-first.
-func (d *DB) ListEvents(filter EventFilter) ([]EventRecord, error) {
+func (d *DB) ListEvents(filter *EventFilter) ([]EventRecord, error) {
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = 20
@@ -159,18 +159,18 @@ func (d *DB) ListEvents(filter EventFilter) ([]EventRecord, error) {
 		args = append(args, normalizeEventPath(filter.WorkspaceRoot))
 	}
 
-	query := `
-		SELECT id, timestamp, session_id, command, decision, rule_id, reason, duration_ms, metadata,
-		       source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code
-		FROM events
-	`
+	var qb strings.Builder
+	qb.WriteString(`SELECT id, timestamp, session_id, command, decision, rule_id, reason, duration_ms, metadata,
+		source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code
+		FROM events`)
 	if len(clauses) > 0 {
-		query += " WHERE " + strings.Join(clauses, " AND ")
+		qb.WriteString(" WHERE ")
+		qb.WriteString(strings.Join(clauses, " AND "))
 	}
-	query += " ORDER BY id DESC LIMIT ?"
+	qb.WriteString(" ORDER BY id DESC LIMIT ?")
 	args = append(args, limit)
 
-	rows, err := d.db.Query(query, args...)
+	rows, err := d.db.Query(qb.String(), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list events: %w", err)
 	}
@@ -341,13 +341,6 @@ func detectWorkspaceRoot(cwd string) string {
 		}
 		dir = parent
 	}
-}
-
-func incrementCount(m map[string]int, key string) {
-	if key == "" {
-		key = "(unknown)"
-	}
-	m[key]++
 }
 
 // SortedCounts returns map entries sorted by count descending, then key ascending.

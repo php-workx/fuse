@@ -360,7 +360,7 @@ func logEvent(database *db.DB, source, agent, sessionID, command, cwd string, re
 	if database == nil {
 		return
 	}
-	_ = database.LogEvent(db.EventRecord{
+	_ = database.LogEvent(&db.EventRecord{
 		SessionID:  sessionID,
 		Command:    command,
 		Decision:   string(result.Decision),

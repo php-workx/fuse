@@ -206,7 +206,7 @@ func TestConsumeApproval_Scope(t *testing.T) {
 func TestLogEvent(t *testing.T) {
 	d := openTestDB(t)
 
-	err := d.LogEvent(EventRecord{
+	err := d.LogEvent(&EventRecord{
 		SessionID:  "sess1",
 		Command:    "echo hello",
 		Decision:   "SAFE",
@@ -251,7 +251,7 @@ func TestPruneEvents(t *testing.T) {
 
 	// Insert 10 events.
 	for i := 0; i < 10; i++ {
-		err := d.LogEvent(EventRecord{
+		err := d.LogEvent(&EventRecord{
 			SessionID: "s",
 			Command:   "cmd",
 			Decision:  "SAFE",

@@ -10,8 +10,8 @@ import (
 )
 
 // testEvent creates an EventRecord with the given fields for testing.
-func testEvent(sessionID, command, decision, source string) EventRecord {
-	return EventRecord{
+func testEvent(sessionID, command, decision, source string) *EventRecord {
+	return &EventRecord{
 		SessionID: sessionID,
 		Command:   command,
 		Decision:  decision,
@@ -194,7 +194,7 @@ func TestListEvents_SessionFilter(t *testing.T) {
 	}
 
 	// Filter by session-A: should get exactly 5 events.
-	eventsA, err := d.ListEvents(EventFilter{Session: "sess-A"})
+	eventsA, err := d.ListEvents(&EventFilter{Session: "sess-A"})
 	if err != nil {
 		t.Fatalf("ListEvents sess-A: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestListEvents_SessionFilter(t *testing.T) {
 	}
 
 	// Filter by session-B: should get exactly 3 events.
-	eventsB, err := d.ListEvents(EventFilter{Session: "sess-B"})
+	eventsB, err := d.ListEvents(&EventFilter{Session: "sess-B"})
 	if err != nil {
 		t.Fatalf("ListEvents sess-B: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestListEvents_SessionFilter(t *testing.T) {
 	}
 
 	// Filter by nonexistent session: should get 0.
-	eventsNone, err := d.ListEvents(EventFilter{Session: "sess-Z"})
+	eventsNone, err := d.ListEvents(&EventFilter{Session: "sess-Z"})
 	if err != nil {
 		t.Fatalf("ListEvents sess-Z: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestListEvents_SessionFilter(t *testing.T) {
 	}
 
 	// No filter: should get all 10.
-	all, err := d.ListEvents(EventFilter{})
+	all, err := d.ListEvents(&EventFilter{})
 	if err != nil {
 		t.Fatalf("ListEvents all: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestListEvents_CombinedFilters(t *testing.T) {
 	_ = d.LogEvent(testEvent("sess-B", "safe-hook", "SAFE", "hook"))
 
 	// Session=A + Decision=SAFE.
-	events, err := d.ListEvents(EventFilter{Session: "sess-A", Decision: "SAFE"})
+	events, err := d.ListEvents(&EventFilter{Session: "sess-A", Decision: "SAFE"})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestListEvents_CombinedFilters(t *testing.T) {
 	}
 
 	// Session=A + Source=hook.
-	events, err = d.ListEvents(EventFilter{Session: "sess-A", Source: "hook"})
+	events, err = d.ListEvents(&EventFilter{Session: "sess-A", Source: "hook"})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -262,7 +262,7 @@ func TestListEvents_CombinedFilters(t *testing.T) {
 	}
 
 	// Session=A + Source=hook + Decision=SAFE.
-	events, err = d.ListEvents(EventFilter{Session: "sess-A", Source: "hook", Decision: "SAFE"})
+	events, err = d.ListEvents(&EventFilter{Session: "sess-A", Source: "hook", Decision: "SAFE"})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}

@@ -9,7 +9,7 @@ import (
 func TestLogEvent_PersistsObservabilityFields(t *testing.T) {
 	d := openTestDB(t)
 
-	err := d.LogEvent(EventRecord{
+	err := d.LogEvent(&EventRecord{
 		SessionID:     "claude-session-1",
 		Command:       "git status",
 		Decision:      "SAFE",
@@ -26,7 +26,7 @@ func TestLogEvent_PersistsObservabilityFields(t *testing.T) {
 		t.Fatalf("LogEvent: %v", err)
 	}
 
-	events, err := d.ListEvents(EventFilter{Limit: 10})
+	events, err := d.ListEvents(&EventFilter{Limit: 10})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestSummarizeEvents_AggregatesByDecisionAgentSourceAndWorkspace(t *testing.
 		},
 	}
 	for i, record := range records {
-		if err := d.LogEvent(record); err != nil {
+		if err := d.LogEvent(&record); err != nil {
 			t.Fatalf("LogEvent(%d): %v", i, err)
 		}
 	}
@@ -118,7 +118,7 @@ func TestLogEvent_DetectsWorkspaceRootFromNestedCwd(t *testing.T) {
 		t.Fatalf("mkdir nested cwd: %v", err)
 	}
 
-	if err := d.LogEvent(EventRecord{
+	if err := d.LogEvent(&EventRecord{
 		Command:  "go test ./...",
 		Decision: "SAFE",
 		Source:   "codex-shell",
@@ -128,7 +128,7 @@ func TestLogEvent_DetectsWorkspaceRootFromNestedCwd(t *testing.T) {
 		t.Fatalf("LogEvent: %v", err)
 	}
 
-	events, err := d.ListEvents(EventFilter{Limit: 1})
+	events, err := d.ListEvents(&EventFilter{Limit: 1})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
