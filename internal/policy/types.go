@@ -9,8 +9,9 @@ import (
 // HardcodedRule represents a non-overridable safety rule compiled into the binary.
 // These rules cannot be disabled by user policy.
 type HardcodedRule struct {
-	Pattern *regexp.Regexp
-	Reason  string
+	Pattern   *regexp.Regexp
+	Reason    string
+	Predicate func(string) bool // optional: if set, Pattern must match AND Predicate must return true
 }
 
 // BuiltinRule represents a built-in preset rule that ships with fuse.
@@ -32,6 +33,9 @@ var BuiltinRules []BuiltinRule
 func EvaluateHardcoded(classNorm string) (core.Decision, string) {
 	for _, r := range HardcodedBlocked {
 		if r.Pattern.MatchString(classNorm) {
+			if r.Predicate != nil && !r.Predicate(classNorm) {
+				continue
+			}
 			return core.DecisionBlocked, r.Reason
 		}
 	}

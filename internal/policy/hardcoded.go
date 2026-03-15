@@ -5,6 +5,15 @@ import "regexp"
 // HardcodedBlocked contains the 22 non-overridable BLOCKED rules compiled into
 // the binary. These protect against catastrophic system destruction and fuse
 // self-protection. They cannot be disabled via disabled_builtins or policy.yaml.
+// unsafeDevRedirect matches redirects to actual block/char devices.
+var unsafeDevRedirect = regexp.MustCompile(`>\s*/dev/(?:sd|vd|hd|xvd|nvme|disk|loop|dm-|md|nbd|sr|mapper|tcp|udp)[a-z0-9/]`)
+
+// hasUnsafeDevRedirect returns true if the command contains a redirect to a raw
+// device that isn't /dev/null, /dev/stderr, /dev/stdout, or /dev/fd.
+func hasUnsafeDevRedirect(cmd string) bool {
+	return unsafeDevRedirect.MatchString(cmd)
+}
+
 var HardcodedBlocked = []HardcodedRule{
 	// === Catastrophic filesystem destruction ===
 
@@ -64,8 +73,11 @@ var HardcodedBlocked = []HardcodedRule{
 		Reason:  "Raw disk write via dd",
 	},
 	{
-		Pattern: regexp.MustCompile(`>\s*/dev/[a-z]`),
-		Reason:  "Redirect to raw device",
+		// Block redirects to raw devices like /dev/sda, /dev/vda, /dev/disk0.
+		// Exclude /dev/null, /dev/stderr, /dev/stdout, /dev/fd (safe standard redirects).
+		Pattern:   regexp.MustCompile(`>\s*/dev/[a-z]`),
+		Reason:    "Redirect to raw device",
+		Predicate: hasUnsafeDevRedirect,
 	},
 
 	// Fork bomb
@@ -86,9 +98,9 @@ var HardcodedBlocked = []HardcodedRule{
 
 	// === Self-protection: fuse runtime integrity ===
 
-	// Prevent agent from disabling/uninstalling fuse
+	// Prevent agent from disabling/uninstalling fuse (only at command position)
 	{
-		Pattern: regexp.MustCompile(`\bfuse\s+(disable|uninstall|enable)\b`),
+		Pattern: regexp.MustCompile(`(^|[;&|]\s*)fuse\s+(disable|uninstall|enable|dryrun)\b`),
 		Reason:  "Cannot modify fuse state through mediated path",
 	},
 
@@ -110,10 +122,10 @@ var HardcodedBlocked = []HardcodedRule{
 		Reason:  "Cannot delete Claude Code settings through mediated path",
 	},
 
-	// Prevent agent from directly manipulating fuse SQLite database
+	// Prevent agent from modifying fuse SQLite database (allow read-only queries).
 	{
-		Pattern: regexp.MustCompile(`\bsqlite3?\s+.*fuse\.db\b`),
-		Reason:  "Cannot directly access fuse database",
+		Pattern: regexp.MustCompile(`\bsqlite3?\s+.*fuse\.db\b.*\b(DELETE|DROP|INSERT|UPDATE|ALTER|ATTACH|DETACH|VACUUM|REINDEX)\b`),
+		Reason:  "Cannot modify fuse database through mediated path",
 	},
 
 	// Prevent inline interpreter/eval commands from touching fuse-managed files

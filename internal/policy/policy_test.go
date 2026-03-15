@@ -60,7 +60,7 @@ func TestHardcoded_MatchExamples(t *testing.T) {
 		{"sed -i 's/a/b/' ~/.fuse/config/policy.yaml", "modifying fuse config should be blocked"},
 		{"rm -rf ~/.fuse/", "deleting fuse directory should be blocked"},
 		{"rm .claude/settings.json", "deleting claude settings should be blocked"},
-		{"sqlite3 fuse.db", "direct access to fuse db should be blocked"},
+		{"sqlite3 fuse.db \"DROP TABLE events\"", "destructive sqlite3 on fuse db should be blocked"},
 		{"python -c 'import os' ~/.fuse/config", "python eval touching fuse files should be blocked"},
 		{"node -e 'code' .claude/settings.json", "node eval touching claude settings should be blocked"},
 		{"bash -c 'cat fuse.db'", "bash eval touching fuse db should be blocked"},
