@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"os"
 	"strings"
 	"time"
 
@@ -59,12 +58,6 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 // runHookInternal contains the core hook logic without timeout management.
 func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 	dryRun := config.IsDisabled()
-	if dryRun {
-		// Dry-run: classify and log but never prompt or block.
-		// Force non-interactive so approval prompts return immediately.
-		os.Setenv("FUSE_NON_INTERACTIVE", "1")
-		defer os.Unsetenv("FUSE_NON_INTERACTIVE")
-	}
 
 	// Load config for log level.
 	cfg := loadRuntimeConfig()
@@ -97,9 +90,9 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 	var exitCode int
 	switch {
 	case strings.HasPrefix(req.ToolName, "mcp__"):
-		exitCode = handleMCPTool(req, stderr, cfg)
+		exitCode = handleMCPTool(req, stderr, cfg, dryRun)
 	case req.ToolName == "Bash":
-		exitCode = handleBashTool(req, stderr, cfg)
+		exitCode = handleBashTool(req, stderr, cfg, dryRun)
 	default:
 		// Non-Bash, non-MCP tool: allow (fuse only mediates shell commands and MCP).
 		return 0
@@ -113,7 +106,7 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 }
 
 // handleMCPTool handles MCP tool classification.
-func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
+func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Parse tool_input as a generic map for MCP argument scanning.
 	var args map[string]interface{}
 	if len(req.ToolInput) > 0 {
@@ -151,7 +144,7 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 				},
 			},
 		}
-		return handleApproval(req, result, stderr, cfg)
+		return handleApproval(req, result, stderr, cfg, dryRun)
 	default:
 		// SAFE
 		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionSafe), "", "")
@@ -175,7 +168,7 @@ func extractMCPAction(toolName string) string {
 }
 
 // handleBashTool handles Bash tool classification.
-func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
+func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Parse tool_input to extract command.
 	if len(req.ToolInput) == 0 {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Missing tool_input. Do not retry this exact command. Ask the user for guidance.")
@@ -234,7 +227,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 		return 0
 
 	case core.DecisionApproval:
-		return handleApproval(req, result, stderr, cfg)
+		return handleApproval(req, result, stderr, cfg, dryRun)
 
 	default:
 		// Unknown decision: fail-closed.
@@ -244,7 +237,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 }
 
 // handleApproval handles the APPROVAL decision path, which requires DB access.
-func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writer, cfg *config.Config) int {
+func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Lazy DB access: only APPROVAL path opens the database.
 	database, secret, err := openDBAndSecret()
 	if err != nil {
@@ -261,7 +254,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		return 2
 	}
 
-	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true)
+	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
 	if err != nil {
 		slog.Error("approval error", "error", err)
 		if msg := extractFuseDirective(err); msg != "" {

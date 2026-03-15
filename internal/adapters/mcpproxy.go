@@ -216,15 +216,17 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 }
 
 func interceptProxyRequest(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
-	dryRun := config.IsDisabled()
+	if config.IsDisabled() {
+		// Dry-run: classify for logging but always pass through.
+		if method, _ := msg["method"].(string); method == "tools/call" {
+			_, _, _ = interceptToolCall(msg) // classify + log side-effect
+		}
+		return true, nil, nil
+	}
 	method, _ := msg["method"].(string)
 	switch method {
 	case "tools/call":
-		passThrough, errResp, err := interceptToolCall(msg)
-		if dryRun {
-			return true, nil, nil // dry-run: classify happened, always pass through
-		}
-		return passThrough, errResp, err
+		return interceptToolCall(msg)
 	case "resources/read", "resources/subscribe":
 		if sensitive, target := isSensitiveResourceRequest(msg); sensitive {
 			return false, jsonRPCErrorResponse(msg["id"], -32000, fmt.Sprintf("fuse denied sensitive resource access: %s", target)), nil
@@ -284,7 +286,7 @@ func requestMCPApproval(name string, arguments map[string]interface{}) (bool, er
 		},
 	}
 
-	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, "", false)
+	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, "", false, false)
 	if err != nil {
 		return false, err
 	}

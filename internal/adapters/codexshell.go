@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/runger/fuse/internal/approve"
@@ -225,11 +224,6 @@ func handleCodexShellToolCall(msg jsonRPCMessage, sessionID string) (jsonRPCMess
 func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Duration) (string, string, int, error) {
 	cfg := loadRuntimeConfig()
 	dryRun := config.IsDisabled()
-	if dryRun {
-		// Dry-run: classify and log but never prompt or block.
-		os.Setenv("FUSE_NON_INTERACTIVE", "1")
-		defer os.Unsetenv("FUSE_NON_INTERACTIVE")
-	}
 
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
 	evaluator := policy.NewEvaluator(policyCfg)
@@ -276,7 +270,7 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 			if mgrErr != nil {
 				return "", "", 0, mgrErr
 			}
-			decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, sessionID, false)
+			decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, sessionID, false, dryRun)
 			if promptErr != nil {
 				return "", "", 0, promptErr
 			}

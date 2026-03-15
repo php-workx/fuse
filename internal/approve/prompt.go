@@ -17,8 +17,8 @@ var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval req
 // hookMode: true = 25s timeout, false = 5min timeout.
 // openTTY opens /dev/tty for interactive prompts.
 // Returns errNonInteractive if FUSE_NON_INTERACTIVE is set or /dev/tty is unavailable.
-func openTTY() (*os.File, error) {
-	if os.Getenv("FUSE_NON_INTERACTIVE") != "" {
+func openTTY(nonInteractive bool) (*os.File, error) {
+	if nonInteractive || os.Getenv("FUSE_NON_INTERACTIVE") != "" {
 		return nil, errNonInteractive
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -28,8 +28,8 @@ func openTTY() (*os.File, error) {
 	return tty, nil
 }
 
-func PromptUser(command, reason string, hookMode bool) (approved bool, scope string, err error) {
-	tty, err := openTTY()
+func PromptUser(command, reason string, hookMode, nonInteractive bool) (approved bool, scope string, err error) {
+	tty, err := openTTY(nonInteractive)
 	if err != nil {
 		return false, "", err
 	}

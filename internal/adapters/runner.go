@@ -120,10 +120,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	// Load configuration.
 	cfg := loadRuntimeConfig()
 
-	// Check if fuse is disabled (allow-all mode).
-	if config.IsDisabled() {
-		return executeShellCommand(command, cwd, timeout)
-	}
+	dryRun := config.IsDisabled()
 
 	// Load policy.
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
@@ -153,10 +150,12 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	// Handle classification result.
 	switch result.Decision {
 	case core.DecisionBlocked:
-		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
 		logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "blocked"))
 		cleanupExecutionState(database, cfg)
-		return 1, nil
+		if !dryRun {
+			fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
+			return 1, nil
+		}
 
 	case core.DecisionSafe:
 		// Execute directly.
@@ -165,44 +164,51 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 		// Execute directly.
 
 	case core.DecisionApproval:
-		// Prompt user for approval.
-		if database == nil {
-			fmt.Fprintf(os.Stderr, "fuse: approval required but database unavailable\n")
-			return 1, fmt.Errorf("database unavailable for approval")
-		}
+		if !dryRun {
+			// Prompt user for approval.
+			if database == nil {
+				fmt.Fprintf(os.Stderr, "fuse: approval required but database unavailable\n")
+				return 1, fmt.Errorf("database unavailable for approval")
+			}
 
-		secret, secretErr := db.EnsureSecret(config.SecretPath())
-		if secretErr != nil {
-			return 1, fmt.Errorf("load HMAC secret: %w", secretErr)
-		}
+			secret, secretErr := db.EnsureSecret(config.SecretPath())
+			if secretErr != nil {
+				return 1, fmt.Errorf("load HMAC secret: %w", secretErr)
+			}
 
-		mgr, mgrErr := approve.NewManager(database, secret)
-		if mgrErr != nil {
-			return 1, fmt.Errorf("create approval manager: %w", mgrErr)
-		}
-		decision, promptErr := mgr.RequestApproval(
-			result.DecisionKey,
-			command,
-			result.Reason,
-			"",    // no session ID in run mode
-			false, // not hook mode — 5min timeout
-		)
-		if promptErr != nil {
-			return 1, fmt.Errorf("approval: %w", promptErr)
-		}
-		if decision == core.DecisionBlocked {
-			fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
-			logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "denied"))
-			cleanupExecutionState(database, cfg)
-			return 1, nil
+			mgr, mgrErr := approve.NewManager(database, secret)
+			if mgrErr != nil {
+				return 1, fmt.Errorf("create approval manager: %w", mgrErr)
+			}
+			decision, promptErr := mgr.RequestApproval(
+				result.DecisionKey,
+				command,
+				result.Reason,
+				"",    // no session ID in run mode
+				false, // not hook mode — 5min timeout
+				false, // not dry-run (already checked above)
+			)
+			if promptErr != nil {
+				return 1, fmt.Errorf("approval: %w", promptErr)
+			}
+			if decision == core.DecisionBlocked {
+				fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
+				logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "denied"))
+				cleanupExecutionState(database, cfg)
+				return 1, nil
+			}
+		} else {
+			logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "dry-run"))
 		}
 
 	default:
 		// Unknown decision — execute directly (safe fallback).
 	}
 
-	if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
-		return 1, verifyErr
+	if !dryRun {
+		if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
+			return 1, verifyErr
+		}
 	}
 
 	// Execute the command.

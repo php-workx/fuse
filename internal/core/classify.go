@@ -349,9 +349,12 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 var dangerousPythonInline = regexp.MustCompile(
 	`(?i)\b(subprocess|os\s*\.\s*system|os\s*\.\s*exec|os\s*\.\s*popen|` +
 		`shutil\s*\.\s*rmtree|shutil\s*\.\s*move|` +
-		`__import__|eval\s*\(|exec\s*\(|compile\s*\(|` +
+		`__import__|eval\s*\(|exec\s*\(|compile\s*\(|getattr\s*\(|` +
 		`open\s*\([^)]*,\s*['"][wa]|` +
 		`requests\s*\.|urllib\s*\.|http\.client|socket\s*\.|` +
+		`ctypes|cffi|pty\s*\.\s*spawn|multiprocessing|` +
+		`importlib\s*\.\s*import_module|` +
+		`code\s*\.\s*interact|codeop|` +
 		`boto3|google\.cloud|azure\.)`,
 )
 
