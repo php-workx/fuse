@@ -6,7 +6,6 @@ golangci_lint_ver := "v2.11.3"
 gofumpt_ver       := "v0.7.0"
 govulncheck_ver   := "v1.1.4"
 actionlint_ver    := "v1.7.11"
-gotestfmt_ver     := "v2.5.0"
 
 version    := `git describe --tags --always --dirty 2>/dev/null || echo "dev"`
 commit     := `git rev-parse --short HEAD 2>/dev/null || echo "unknown"`
@@ -16,19 +15,22 @@ ldflags    := "-X github.com/runger/fuse/internal/cli.Version=" + version + " -X
 default:
     @just --list
 
-# --- Quality gate (pre-commit: fast checks) ---
+# --- Quality gates ---
 
-# Run all pre-commit checks (format, vet, lint, build, mod-tidy, workflow lint, secrets)
-pre-commit: fmt vet lint build-check mod-tidy actionlint gitleaks
+# Pre-commit: fast local checks (~15s)
+pre-commit: fmt vet lint build-check mod-tidy actionlint shellcheck gitleaks
 
-# Run full quality gate (pre-push: pre-commit + tests + vuln)
-check: pre-commit test vuln
+# Local quality gate: pre-commit + tests + vuln + semgrep (no SonarQube)
+check-local: pre-commit test vuln semgrep budgets
 
-# Run everything including release checks
-dev: check
+# Full quality gate: local + SonarQube
+check: check-local sonar
+
+# Developer shorthand: full local gate
+dev: check-local
     @echo "All checks passed!"
 
-# --- Individual checks ---
+# --- Static analysis ---
 
 # Check formatting with gofumpt (detect-only, no auto-fix)
 fmt:
@@ -51,6 +53,16 @@ actionlint:
         actionlint .github/workflows/*.yml; \
     fi
 
+# Lint shell scripts with shellcheck
+shellcheck:
+    @if command -v shellcheck >/dev/null 2>&1; then \
+        find scripts -name '*.sh' -o -name 'pre-commit' -o -name 'pre-push' | xargs shellcheck --; \
+    else \
+        echo "warning: shellcheck not installed, skipping"; \
+    fi
+
+# --- Security ---
+
 # Scan for leaked secrets
 gitleaks:
     @if command -v gitleaks >/dev/null 2>&1; then \
@@ -58,6 +70,38 @@ gitleaks:
     else \
         echo "warning: gitleaks not installed, skipping secret scan"; \
     fi
+
+# SAST scan with semgrep (auto-config for Go patterns)
+semgrep:
+    @if command -v semgrep >/dev/null 2>&1; then \
+        semgrep scan --config auto --error --quiet --exclude='testdata' .; \
+    else \
+        echo "warning: semgrep not installed, skipping SAST scan"; \
+    fi
+
+# Scan for known vulnerabilities in dependencies
+vuln:
+    @command -v govulncheck >/dev/null 2>&1 || (echo "govulncheck not installed (run: just install-dev)" && exit 1)
+    govulncheck ./...
+
+# Enforce suppression budgets (nolint/nosec counts)
+budgets nolint_budget="4" nosec_budget="0":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    nolint_count="$( (git grep -n '//nolint' -- '*.go' || true) | wc -l | tr -d '[:space:]' )"
+    nosec_count="$( (git grep -n '#nosec' -- '*.go' || true) | wc -l | tr -d '[:space:]' )"
+    echo "//nolint: ${nolint_count} (budget: {{nolint_budget}})"
+    echo "#nosec:  ${nosec_count} (budget: {{nosec_budget}})"
+    if [ "${nolint_count}" -gt "{{nolint_budget}}" ]; then
+        echo "Error: //nolint count exceeded budget."
+        exit 1
+    fi
+    if [ "${nosec_count}" -gt "{{nosec_budget}}" ]; then
+        echo "Error: #nosec count exceeded budget."
+        exit 1
+    fi
+
+# --- Testing ---
 
 # Verify the project compiles (fast, no binary output)
 build-check:
@@ -86,27 +130,67 @@ cover:
     go tool cover -html=coverage.out -o coverage.html
     @echo "Coverage report: coverage.html"
 
-# Scan for known vulnerabilities
-vuln:
-    @command -v govulncheck >/dev/null 2>&1 || (echo "govulncheck not installed (run: just install-dev)" && exit 1)
-    govulncheck ./...
+# --- SonarQube ---
 
-# Enforce suppression budgets (nolint/nosec counts)
-budgets nolint_budget="4" nosec_budget="0":
+# Run SonarQube scan (requires local SonarQube + .env with SONAR_TOKEN)
+sonar:
+    @if ! command -v sonar-scanner >/dev/null 2>&1; then \
+        echo "sonar-scanner not installed, skipping"; \
+    elif [ ! -f .env ]; then \
+        echo ".env missing, skipping sonar scan (run: just sonar-setup)"; \
+    else \
+        TOKEN=$$(grep -E '^SONAR_TOKEN=[A-Za-z0-9_]+$$' .env | cut -d= -f2); \
+        if [ -z "$$TOKEN" ]; then \
+            echo "error: SONAR_TOKEN not found or invalid in .env"; exit 1; \
+        fi; \
+        just cover; \
+        SONAR_TOKEN="$$TOKEN" sonar-scanner -Dsonar.qualitygate.wait=true; \
+    fi
+
+# Provision SonarQube: wait for server, create project, generate token
+sonar-setup:
     #!/usr/bin/env bash
     set -euo pipefail
-    nolint_count="$( (git grep -n '//nolint' -- '*.go' || true) | wc -l | tr -d '[:space:]' )"
-    nosec_count="$( (git grep -n '#nosec' -- '*.go' || true) | wc -l | tr -d '[:space:]' )"
-    echo "//nolint: ${nolint_count} (budget: {{nolint_budget}})"
-    echo "#nosec:  ${nosec_count} (budget: {{nosec_budget}})"
-    if [ "${nolint_count}" -gt "{{nolint_budget}}" ]; then
-        echo "Error: //nolint count exceeded budget."
+    SONAR_URL="http://localhost:9000"
+    PROJECT_KEY="fuse"
+    printf "Waiting for SonarQube at %s ..." "$SONAR_URL"
+    for i in $(seq 1 30); do
+        if curl -sf "$SONAR_URL/api/system/status" | grep -q '"status":"UP"'; then
+            printf " ready.\n"
+            break
+        fi
+        printf "."
+        sleep 2
+        if [ "$i" -eq 30 ]; then
+            printf "\nSonarQube not reachable after 60s. Start it with:\n"
+            printf "  docker run -d -p 9000:9000 sonarqube:community\n"
+            exit 1
+        fi
+    done
+    # Create project (idempotent).
+    curl -sf -u admin:admin -X POST \
+        "$SONAR_URL/api/projects/create?name=$PROJECT_KEY&project=$PROJECT_KEY" \
+        -o /dev/null || true
+    # Revoke old token, generate new one.
+    curl -sf -u admin:admin -X POST \
+        "$SONAR_URL/api/user_tokens/revoke?name=fuse-local" -o /dev/null || true
+    TOKEN=$(curl -sf -u admin:admin -X POST \
+        "$SONAR_URL/api/user_tokens/generate?name=fuse-local" \
+        | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
+    if [ -z "$TOKEN" ]; then
+        echo "Failed to generate token. Check SonarQube credentials (default: admin/admin)."
         exit 1
     fi
-    if [ "${nosec_count}" -gt "{{nosec_budget}}" ]; then
-        echo "Error: #nosec count exceeded budget."
-        exit 1
+    # Write token to .env.
+    if [ -f .env ]; then
+        grep -v '^SONAR_TOKEN=' .env > .env.tmp || true
+        mv .env.tmp .env
     fi
+    echo "SONAR_TOKEN=$TOKEN" >> .env
+    # Set new code period to main branch.
+    curl -sf -H "Authorization: Bearer $TOKEN" -X POST \
+        "$SONAR_URL/api/new_code_periods/set?project=$PROJECT_KEY&type=REFERENCE_BRANCH&value=main"
+    echo "Done. Token written to .env, new code period set to main. Run: just sonar"
 
 # --- Build targets ---
 
@@ -132,18 +216,27 @@ build-darwin:
 
 # --- Setup ---
 
+# Full developer setup: install tools, configure git hooks
+setup: install-dev
+    git config core.hooksPath scripts
+    @echo "Git hooks configured (scripts/)"
+
 # Install development tools and git hooks
 install-dev:
     @echo "Installing Go tools..."
     go install github.com/golangci/golangci-lint/cmd/golangci-lint@{{golangci_lint_ver}}
     go install golang.org/x/vuln/cmd/govulncheck@{{govulncheck_ver}}
     go install mvdan.cc/gofumpt@{{gofumpt_ver}}
+    go install github.com/rhysd/actionlint/cmd/actionlint@{{actionlint_ver}}
     go install golang.org/x/tools/cmd/goimports@latest
     go install golang.org/x/tools/cmd/deadcode@latest
-    go install gotest.tools/gotestsum@v1.12.1
     @echo "Installing git hooks..."
     @bash scripts/install-hooks.sh
     @echo "Done! Development environment ready."
+
+# Format all Go files in-place (use when `just fmt` fails)
+format:
+    gofumpt --extra -w .
 
 # Remove build artifacts
 clean:

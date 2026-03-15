@@ -239,7 +239,9 @@ func executeShellCommand(command, cwd string, timeout time.Duration) (int, error
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd := exec.CommandContext( // nosemgrep: dangerous-exec-command
+		ctx, "/bin/sh", "-c", command,
+	)
 	cmd.Dir = cwd
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -325,7 +327,9 @@ func executeCapturedShellCommandWithStdin(command, cwd string, timeout time.Dura
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd := exec.CommandContext( // nosemgrep: dangerous-exec-command
+		ctx, "/bin/sh", "-c", command,
+	)
 	cmd.Dir = cwd
 	cmd.Stdin = stdin
 	cmd.Env = BuildChildEnv(os.Environ())

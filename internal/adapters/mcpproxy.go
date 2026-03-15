@@ -60,7 +60,9 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 		return err
 	}
 
-	cmd := exec.Command(proxyCfg.Command, proxyCfg.Args...)
+	cmd := exec.Command( // nosemgrep: dangerous-exec-command
+		proxyCfg.Command, proxyCfg.Args...,
+	)
 	cmd.Env = buildProxyEnv(proxyCfg.Env)
 	cmd.Stderr = stderr
 

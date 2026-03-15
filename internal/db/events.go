@@ -243,27 +243,27 @@ func (d *DB) SummarizeEvents() (EventSummary, error) {
 		return EventSummary{}, fmt.Errorf("count events: %w", err)
 	}
 
-	for _, dim := range []struct {
-		column string
-		dest   map[string]int
+	// Queries are constant strings — no dynamic SQL.
+	dimQueries := []struct {
+		query string
+		dest  map[string]int
 	}{
-		{"decision", summary.ByDecision},
-		{"agent", summary.ByAgent},
-		{"source", summary.BySource},
-		{"workspace_root", summary.ByWorkspace},
-	} {
-		rows, err := d.db.Query(
-			fmt.Sprintf("SELECT COALESCE(%s, ''), COUNT(*) FROM events GROUP BY %s", dim.column, dim.column),
-		)
+		{"SELECT COALESCE(decision, ''), COUNT(*) FROM events GROUP BY decision", summary.ByDecision},
+		{"SELECT COALESCE(agent, ''), COUNT(*) FROM events GROUP BY agent", summary.ByAgent},
+		{"SELECT COALESCE(source, ''), COUNT(*) FROM events GROUP BY source", summary.BySource},
+		{"SELECT COALESCE(workspace_root, ''), COUNT(*) FROM events GROUP BY workspace_root", summary.ByWorkspace},
+	}
+	for _, dim := range dimQueries {
+		rows, err := d.db.Query(dim.query)
 		if err != nil {
-			return EventSummary{}, fmt.Errorf("summarize %s: %w", dim.column, err)
+			return EventSummary{}, fmt.Errorf("summarize events: %w", err)
 		}
 		for rows.Next() {
 			var key string
 			var count int
 			if err := rows.Scan(&key, &count); err != nil {
 				rows.Close()
-				return EventSummary{}, fmt.Errorf("scan %s: %w", dim.column, err)
+				return EventSummary{}, fmt.Errorf("scan summary: %w", err)
 			}
 			if key == "" {
 				key = "(unknown)"
@@ -272,7 +272,7 @@ func (d *DB) SummarizeEvents() (EventSummary, error) {
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
-			return EventSummary{}, fmt.Errorf("iterate %s: %w", dim.column, err)
+			return EventSummary{}, fmt.Errorf("iterate summary: %w", err)
 		}
 	}
 
