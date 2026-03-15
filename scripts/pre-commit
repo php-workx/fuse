@@ -1,20 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pre-commit: fast checks (format, vet, lint, compile, mod-tidy, workflow lint, secrets).
-# Install: git config core.hooksPath .githooks  OR  just install-dev
+# Pre-commit: fast quality checks. Delegates to justfile.
+# Install: just install-dev
 
-# Git hooks run in a minimal env — ensure tools are on PATH.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:$HOME/.cargo/bin:$PATH"
 
-repo_root=$(git rev-parse --show-toplevel)
-cd "$repo_root"
-
+cd "$(git rev-parse --show-toplevel)"
 just pre-commit
-
-# Secret scanning on staged changes (separate from just — needs --staged flag).
-if command -v gitleaks >/dev/null 2>&1; then
-    gitleaks git --staged --no-banner
-else
-    echo "warning: gitleaks not installed, skipping secret scan"
-fi

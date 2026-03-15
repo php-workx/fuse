@@ -18,8 +18,8 @@ default:
 
 # --- Quality gate (pre-commit: fast checks) ---
 
-# Run all pre-commit checks (format, vet, lint, build, mod-tidy, workflow lint)
-pre-commit: fmt vet lint build-check mod-tidy actionlint
+# Run all pre-commit checks (format, vet, lint, build, mod-tidy, workflow lint, secrets)
+pre-commit: fmt vet lint build-check mod-tidy actionlint gitleaks
 
 # Run full quality gate (pre-push: pre-commit + tests + vuln)
 check: pre-commit test vuln
@@ -49,6 +49,14 @@ actionlint:
     @if [ -d .github/workflows ]; then \
         command -v actionlint >/dev/null 2>&1 || (echo "actionlint not installed (run: just install-dev)" && exit 1); \
         actionlint .github/workflows/*.yml; \
+    fi
+
+# Scan for leaked secrets
+gitleaks:
+    @if command -v gitleaks >/dev/null 2>&1; then \
+        gitleaks git --no-banner; \
+    else \
+        echo "warning: gitleaks not installed, skipping secret scan"; \
     fi
 
 # Verify the project compiles (fast, no binary output)
