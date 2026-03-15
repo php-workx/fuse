@@ -216,6 +216,9 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 }
 
 func interceptProxyRequest(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
+	if config.IsDisabled() {
+		return true, nil, nil // disabled: pass everything through
+	}
 	method, _ := msg["method"].(string)
 	switch method {
 	case "tools/call":
