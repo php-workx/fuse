@@ -192,9 +192,49 @@ func TestClassify_InlineScript(t *testing.T) {
 			expected: core.DecisionApproval,
 		},
 		{
-			name:     "python -c inline",
+			name:     "python -c inline unknown",
 			command:  "python -c 'print(1)'",
 			expected: core.DecisionApproval,
+		},
+		{
+			name:     "python -c safe ast.parse",
+			command:  `python -c "import ast; ast.parse(open('foo.py').read()); print('OK')"`,
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "python -c safe json.load",
+			command:  `python -c "import json; print(json.dumps({'a':1}))"`,
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "python -c safe sys.version",
+			command:  `python3 -c "import sys; print(sys.version)"`,
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "python -c safe importlib",
+			command:  `python -c "import importlib; print(importlib.metadata.version('requests'))"`,
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "python -c dangerous subprocess",
+			command:  `python -c "import subprocess; subprocess.run(['rm','-rf','/'])"`,
+			expected: core.DecisionApproval,
+		},
+		{
+			name:     "python -c dangerous os.system",
+			command:  `python -c "import os; os.system('cat /etc/passwd')"`,
+			expected: core.DecisionApproval,
+		},
+		{
+			name:     "python -c dangerous shutil",
+			command:  `python -c "import shutil; shutil.rmtree('/tmp/data')"`,
+			expected: core.DecisionApproval,
+		},
+		{
+			name:     "python -c safe pathlib",
+			command:  `python -c "import pathlib; print(pathlib.Path('.').resolve())"`,
+			expected: core.DecisionSafe,
 		},
 		{
 			name:     "bash -c inline",

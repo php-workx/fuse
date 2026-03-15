@@ -345,6 +345,24 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	return DecisionSafe, "no matching rule (default safe)", ""
 }
 
+// Patterns that indicate dangerous inline Python code.
+var dangerousPythonInline = regexp.MustCompile(
+	`(?i)\b(subprocess|os\s*\.\s*system|os\s*\.\s*exec|os\s*\.\s*popen|` +
+		`shutil\s*\.\s*rmtree|shutil\s*\.\s*move|` +
+		`__import__|eval\s*\(|exec\s*\(|compile\s*\(|` +
+		`open\s*\([^)]*,\s*['"][wa]|` +
+		`requests\s*\.|urllib\s*\.|http\.client|socket\s*\.|` +
+		`boto3|google\.cloud|azure\.)`,
+)
+
+// Safe Python modules commonly used by agents for read-only introspection.
+var safePythonInline = regexp.MustCompile(
+	`\bpython[23]?\s+-c\s+.*\bimport\s+(ast|json|sys|os\.path|pathlib|importlib|` +
+		`collections|re|math|hashlib|base64|struct|textwrap|inspect|tokenize|` +
+		`configparser|tomllib|typing|dataclasses|enum|functools|itertools|operator|string|` +
+		`platform|sysconfig|site|pkg_resources|setuptools|pip)\b`,
+)
+
 // detectInlineScript checks for inline script/heredoc patterns (§5.4).
 // Returns the decision and reason if a pattern matches, or empty strings if none.
 func detectInlineScript(cmd string) (Decision, string) {
@@ -353,6 +371,11 @@ func detectInlineScript(cmd string) (Decision, string) {
 
 	for _, p := range inlineScriptPatterns {
 		if p.re.MatchString(cmd) {
+			// Check if this is a safe python -c pattern.
+			if p.re == reInlinePythonC && isSafePythonInline(cmd) {
+				continue
+			}
+
 			var d Decision
 			if p.approval {
 				d = DecisionApproval
@@ -373,6 +396,15 @@ func detectInlineScript(cmd string) (Decision, string) {
 	}
 
 	return bestDecision, bestReason
+}
+
+// isSafePythonInline returns true if a python -c command uses only safe,
+// read-only modules and contains no dangerous patterns.
+func isSafePythonInline(cmd string) bool {
+	if !safePythonInline.MatchString(cmd) {
+		return false
+	}
+	return !dangerousPythonInline.MatchString(cmd)
 }
 
 // escalateDecision applies the sudo/doas escalation modifier.
