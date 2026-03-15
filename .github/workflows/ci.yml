@@ -18,8 +18,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Test
+  check:
+    name: Quality Gate
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -33,108 +33,31 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Download dependencies
-        run: go mod download
+      - name: Install just
+        uses: extractions/setup-just@v2
 
-      - name: Install gotestfmt
-        run: go install github.com/gotesttools/gotestfmt/v2/cmd/gotestfmt@v2.5.0
+      - name: Install tools
+        run: just install-dev
 
-      - name: Run tests with race detector
-        shell: bash
-        run: |
-          set -euo pipefail
-          go test -race -count=1 -json -coverprofile=coverage.out -covermode=atomic ./... \
-            2>&1 | tee /tmp/gotest.log | gotestfmt
+      - name: Run quality gate (fmt, vet, lint, build, mod-tidy, actionlint, test, vuln)
+        run: just check
+
+      - name: Enforce suppression budgets
+        run: just budgets
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-out
-          path: coverage.out
-          if-no-files-found: error
+        if: always()
+        run: |
+          go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./... || true
+        continue-on-error: true
 
       - name: Upload coverage reports to Codecov
+        if: always()
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: php-workx/fuse
-
-      - name: Upload test log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: gotest-log
-          path: /tmp/gotest.log
-          if-no-files-found: ignore
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    env:
-      NOLINT_BUDGET: "4"
-      NOSEC_BUDGET: "0"
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Enforce suppression budgets
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          nolint_count="$( (git grep -n '//nolint' -- '*.go' || true) | wc -l | tr -d '[:space:]' )"
-          nosec_count="$( (git grep -n '#nosec' -- '*.go' || true) | wc -l | tr -d '[:space:]' )"
-
-          echo "Current //nolint count: ${nolint_count} (budget: ${NOLINT_BUDGET})"
-          echo "Current #nosec count: ${nosec_count} (budget: ${NOSEC_BUDGET})"
-
-          if [ "${nolint_count}" -gt "${NOLINT_BUDGET}" ]; then
-            echo "Error: //nolint count exceeded budget."
-            exit 1
-          fi
-
-          if [ "${nosec_count}" -gt "${NOSEC_BUDGET}" ]; then
-            echo "Error: #nosec count exceeded budget."
-            exit 1
-          fi
-
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: v2.11.3
-
-  vuln:
-    name: Vulnerability Scan
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Download dependencies
-        run: go mod download
-
-      - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
-
-      - name: Run govulncheck
-        run: govulncheck ./...
 
   compat:
     name: Shell Compatibility
@@ -179,9 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs:
-      - test
-      - lint
-      - vuln
+      - check
       - compat
     permissions:
       contents: read
@@ -194,5 +115,8 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Cross-build binaries
-        run: make build-all
+        run: just build-all

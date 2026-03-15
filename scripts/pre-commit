@@ -1,21 +1,20 @@
 #!/usr/bin/env bash
-# pre-commit hook: lint staged Go files and scan for secrets.
 set -euo pipefail
 
-# Run golangci-lint if installed.
-if command -v golangci-lint >/dev/null 2>&1; then
-    echo "pre-commit: running linter..."
-    golangci-lint run ./...
-else
-    echo "pre-commit: golangci-lint not installed — skipping lint."
-    echo "  Install with: make install-dev"
-fi
+# Pre-commit: fast checks (format, vet, lint, compile, mod-tidy, workflow lint, secrets).
+# Install: git config core.hooksPath .githooks  OR  just install-dev
 
-# Run gitleaks if installed.
+# Git hooks run in a minimal env — ensure tools are on PATH.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:$HOME/.cargo/bin:$PATH"
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+just pre-commit
+
+# Secret scanning on staged changes (separate from just — needs --staged flag).
 if command -v gitleaks >/dev/null 2>&1; then
-    echo "pre-commit: scanning staged changes for secrets..."
-    gitleaks protect --staged --verbose
+    gitleaks git --staged --no-banner
 else
-    echo "pre-commit: gitleaks not installed — skipping secret scan."
-    echo "  Install with: brew install gitleaks  (or see https://github.com/gitleaks/gitleaks)"
+    echo "warning: gitleaks not installed, skipping secret scan"
 fi
