@@ -225,6 +225,21 @@ func TestExecuteCommand_SafeCommand(t *testing.T) {
 	}
 }
 
+func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
+	tmpDir := t.TempDir()
+	os.Setenv("HOME", tmpDir)
+	defer os.Unsetenv("HOME")
+	// Do NOT enable fuse — disabled = dry-run mode.
+
+	exitCode, err := ExecuteCommand("echo dryrun", tmpDir, time.Minute)
+	if err != nil {
+		t.Fatalf("ExecuteCommand in dry-run returned error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exit code = %d, want 0 in dry-run", exitCode)
+	}
+}
+
 func TestReverifyDecisionKeyDetectsChangedScript(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "task.py")
