@@ -9,4 +9,4 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:$HOME/.cargo/bin:$PAT
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-just check-local
+just check

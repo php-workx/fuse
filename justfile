@@ -132,10 +132,13 @@ cover:
 
 # --- SonarQube ---
 
-# Run SonarQube scan (requires local SonarQube + .env with SONAR_TOKEN)
+# Run SonarQube: scan → terminal report → quality gate (fails if gate doesn't pass)
 sonar:
     #!/usr/bin/env bash
     set -euo pipefail
+    SONAR_URL="http://localhost:9000"
+    PROJECT_KEY="fuse"
+
     if ! command -v sonar-scanner >/dev/null 2>&1; then
         echo "sonar-scanner not installed, skipping"
         exit 0
@@ -149,8 +152,45 @@ sonar:
         echo "error: SONAR_TOKEN not found or invalid in .env"
         exit 1
     fi
+    AUTH=(-H "Authorization: Bearer $TOKEN")
+
+    # 1. Generate coverage for SonarQube
     just cover
-    SONAR_TOKEN="$TOKEN" sonar-scanner -Dsonar.qualitygate.wait=true
+
+    # 2. Run sonar-scanner (allow non-zero exit — we check the gate ourselves)
+    printf '\n=== SonarQube Scan ===\n'
+    SONAR_TOKEN="$TOKEN" sonar-scanner -Dsonar.qualitygate.wait=true || true
+
+    # 3. Report
+    printf '\n=== Quality Gate ===\n'
+    QG=$(curl -sf "${AUTH[@]}" "$SONAR_URL/api/qualitygates/project_status?projectKey=$PROJECT_KEY")
+    STATUS=$(echo "$QG" | jq -r '.projectStatus.status')
+    if [ "$STATUS" = "OK" ]; then
+        printf '  Status: PASSED\n'
+    elif [ "$STATUS" = "ERROR" ]; then
+        printf '  Status: FAILED\n'
+        echo "$QG" | jq -r '.projectStatus.conditions[] | select(.status == "ERROR") | "  ! \(.metricKey): \(.actualValue) (threshold: \(.errorThreshold))"'
+    else
+        printf '  Status: %s\n' "$STATUS"
+    fi
+
+    printf '\n=== Metrics ===\n'
+    METRICS="bugs,vulnerabilities,code_smells,coverage,duplicated_lines_density,ncloc"
+    curl -sf "${AUTH[@]}" "$SONAR_URL/api/measures/component?component=$PROJECT_KEY&metricKeys=$METRICS" \
+        | jq -r '.component.measures[] | "  \(.metric): \(.value)"'
+
+    printf '\n=== Open Issues (top 15) ===\n'
+    ISSUES=$(curl -sf "${AUTH[@]}" "$SONAR_URL/api/issues/search?componentKeys=$PROJECT_KEY&statuses=OPEN,CONFIRMED&ps=15&s=SEVERITY&asc=false")
+    TOTAL=$(echo "$ISSUES" | jq '.total')
+    printf '  Total open: %s\n\n' "$TOTAL"
+    echo "$ISSUES" | jq -r '.issues[] | "  \(.severity | ascii_downcase) | \(.component | split(":")[1] // .component):\(.line // "?") | \(.message | .[0:100])"'
+
+    printf '\n  Full report: %s/dashboard?id=%s\n' "$SONAR_URL" "$PROJECT_KEY"
+
+    # 4. Gate — exit non-zero if quality gate failed
+    if [ "$STATUS" != "OK" ]; then
+        exit 1
+    fi
 
 # Provision SonarQube: wait for server, create project, generate token
 sonar-setup:
