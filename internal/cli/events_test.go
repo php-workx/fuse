@@ -215,6 +215,50 @@ func TestRunStats_NoDB(t *testing.T) {
 	}
 }
 
+func TestDryrunCommand(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+
+	stdout, _, err := captureCLIOutput(t, func() error {
+		return dryrunCmd.RunE(dryrunCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("dryrun: %v", err)
+	}
+	if !strings.Contains(stdout, "dry-run") {
+		t.Fatalf("expected dry-run message, got: %s", stdout)
+	}
+	if config.Mode() != config.ModeDryRun {
+		t.Fatalf("mode = %d, want ModeDryRun", config.Mode())
+	}
+}
+
+func TestDisableCommand(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	// Enable first, then disable.
+	_ = enableCmd.RunE(enableCmd, nil)
+
+	stdout, _, err := captureCLIOutput(t, func() error {
+		return disableCmd.RunE(disableCmd, nil)
+	})
+	if err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	if !strings.Contains(stdout, "disabled") {
+		t.Fatalf("expected disabled message, got: %s", stdout)
+	}
+	if config.Mode() != config.ModeDisabled {
+		t.Fatalf("mode = %d, want ModeDisabled", config.Mode())
+	}
+}
+
 func TestShorten(t *testing.T) {
 	if got := shorten("hello", 10); got != "hello" {
 		t.Errorf("shorten(hello, 10) = %q", got)
