@@ -671,11 +671,24 @@ Approval prompt must appear within 500 ms of the command being intercepted.
 
 ---
 
-## 18. Disable and uninstall
+## 18. Operational modes, disable, and uninstall
 
-### 18.1 Temporary disable
+### 18.1 Three-state operational model
 
-- **`fuse disable`**: exits immediately with code 0 (allow all) while preserving hook configuration.
+fuse has three operational modes, controlled by marker files in `~/.fuse/state/`:
+
+| Mode | Command | Behavior |
+|------|---------|----------|
+| **Enabled** | `fuse enable` | Full enforcement: classify, block, prompt for approval |
+| **Dry-run** | `fuse dryrun` | Audit mode: classify and log all decisions, never block or prompt |
+| **Disabled** | `fuse disable` | Instant pass-through: zero processing, zero overhead |
+
+- **Enabled** (marker: `state/enabled`): the default operational mode. Commands are classified and may be blocked or require approval.
+- **Dry-run** (marker: `state/dryrun`): useful for gathering data on what fuse would do before enabling enforcement, or for temporarily relaxing enforcement while keeping the audit trail. All decisions are logged to the event database.
+- **Disabled** (no markers): emergency escape hatch. Returns immediately with zero processing — no classification, no database access, no risk of approval timeouts. Use when fuse itself is causing problems.
+
+### 18.2 Self-protection
+
 - **`fuse enable`**: re-enables classification.
 
 ### 18.2 Uninstall
@@ -787,7 +800,25 @@ Ship: Terraform plan JSON inspection, CDK diff/synth inspection, artifact-hash b
 
 ---
 
-## 21. v1 success criteria
+## 21. Related projects and competitive landscape
+
+fuse exists in an emerging space of AI agent security guardrails:
+
+| Project | Approach | Key Differentiator |
+|---------|----------|-------------------|
+| **SLB** (Go) | Hook + daemon | Normalization pipeline, two-person approval |
+| **DCG** (Rust) | CLI guard | 49+ detection packs, AST matching |
+| **AgentGuard** (TS) | Hook for Claude/Cursor | Recursive command unwrapping |
+| **Command Security Layer** | MCP server | Security-first MCP guardrail |
+| **OpenGuardrails** | Runtime monitor | Config scanning, vulnerability detection |
+| **TaskPilot** | Task-level | Task context informs security |
+| **Rubberband** (TS) | Security layer | OpenClaw integration |
+
+See technical spec §15 for detailed reuse analysis per project.
+
+---
+
+## 22. v1 success criteria
 
 v1 is successful if:
 1. a developer can install and configure fuse for Claude Code in under 10 minutes

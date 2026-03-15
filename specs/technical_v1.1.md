@@ -2415,6 +2415,55 @@ Repository: `github.com/Dicklesworthstone/destructive_command_guard`
 - Pack system auto-loading. v1 has all rules compiled in.
 - Directory scanning (`dcg scan`). Not a v1 feature.
 
+### 15.3 AgentGuard (TypeScript)
+
+Repository: `github.com/krishkumar/agentguard`
+
+A direct alternative that installs as a hook for Claude Code and Cursor. Key differentiator: recursive command unwrapping — catches destructive commands hidden inside `sudo bash -c` strings by walking nested shell invocations.
+
+**Study for:**
+- Recursive unwrapping approach (fuse currently relies on `mvdan.cc/sh` compound splitting, which may miss deeply nested cases).
+- Rules file format (YAML-based, user-editable).
+- Hook installation for both Claude Code and Cursor.
+
+### 15.4 Command Security Layer (MCP)
+
+Author: Andrew Beniash
+
+An MCP server designed as a security-first guardrail between AI intent and the system shell. Unlike fuse's hook+proxy hybrid, this is MCP-native from the ground up.
+
+**Study for:**
+- Pure MCP-server architecture (vs fuse's multi-adapter approach).
+- Security classification within the MCP protocol layer.
+
+### 15.5 OpenGuardrails
+
+An open-source security layer providing runtime monitoring, configuration scanning, and vulnerability detection for agents.
+
+**Study for:**
+- Runtime monitoring patterns (fuse currently does pre-execution classification only).
+- Configuration scanning (detecting insecure agent configurations).
+- Vulnerability detection patterns.
+
+### 15.6 TaskPilot
+
+Repository: `github.com/NexTryApp/TaskPilot`
+
+**Study for:**
+- Task-level guardrails and agent workflow patterns.
+- How task context can inform security decisions.
+
+### 15.7 Rubberband
+
+Repository: `github.com/jeffaf/openclaw` (`src/security/rubberband.ts`)
+
+TypeScript security layer for OpenClaw agents.
+
+**Study for:**
+- Different language perspective on the same problem space.
+- How TypeScript ecosystems approach command classification.
+- Integration patterns for non-Go agent runtimes.
+
 ---
 
 ## 16. Known limitations and security notes
