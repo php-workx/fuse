@@ -174,6 +174,47 @@ func TestRunEvents_NoDB(t *testing.T) {
 	}
 }
 
+func TestRunStats_JSONOutput(t *testing.T) {
+	origStatsJSON := statsJSON
+	statsJSON = true
+	defer func() { statsJSON = origStatsJSON }()
+
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	_ = database.LogEvent(&db.EventRecord{Command: "ls", Decision: "SAFE", Source: "hook", Agent: "claude"})
+	_ = database.Close()
+
+	stdout, _, err := captureCLIOutput(t, runStats)
+	if err != nil {
+		t.Fatalf("runStats: %v", err)
+	}
+	if !strings.Contains(stdout, `"total"`) {
+		t.Fatalf("expected JSON with total, got:\n%s", stdout)
+	}
+}
+
+func TestRunStats_NoDB(t *testing.T) {
+	origStatsJSON := statsJSON
+	statsJSON = false
+	defer func() { statsJSON = origStatsJSON }()
+
+	t.Setenv("FUSE_HOME", filepath.Join(t.TempDir(), "nonexistent"))
+	stdout, _, err := captureCLIOutput(t, runStats)
+	if err != nil {
+		t.Fatalf("runStats: %v", err)
+	}
+	if !strings.Contains(stdout, "No fuse events recorded") {
+		t.Fatalf("expected no-events message, got:\n%s", stdout)
+	}
+}
+
 func TestShorten(t *testing.T) {
 	if got := shorten("hello", 10); got != "hello" {
 		t.Errorf("shorten(hello, 10) = %q", got)
