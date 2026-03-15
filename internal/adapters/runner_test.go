@@ -226,17 +226,29 @@ func TestExecuteCommand_SafeCommand(t *testing.T) {
 }
 
 func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
-	tmpDir := t.TempDir()
-	os.Setenv("HOME", tmpDir)
-	defer os.Unsetenv("HOME")
+	withFuseHome(t)
 	// Do NOT enable fuse — disabled = dry-run mode.
 
-	exitCode, err := ExecuteCommand("echo dryrun", tmpDir, time.Minute)
+	// A normally-blocked command should execute in dry-run.
+	exitCode, err := ExecuteCommand("printf dryrun", t.TempDir(), time.Minute)
 	if err != nil {
 		t.Fatalf("ExecuteCommand in dry-run returned error: %v", err)
 	}
 	if exitCode != 0 {
 		t.Errorf("exit code = %d, want 0 in dry-run", exitCode)
+	}
+}
+
+func TestExecuteCommand_EnabledBlockedCommand(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	exitCode, err := ExecuteCommand("rm -rf /", t.TempDir(), time.Minute)
+	if err != nil {
+		t.Fatalf("ExecuteCommand returned error: %v", err)
+	}
+	if exitCode != 1 {
+		t.Errorf("exit code = %d, want 1 for blocked command", exitCode)
 	}
 }
 
