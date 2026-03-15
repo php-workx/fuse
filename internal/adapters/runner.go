@@ -154,7 +154,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	switch result.Decision {
 	case core.DecisionBlocked:
 		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
-		logEvent(database, "run", "manual", "", command, cwd, result, "blocked")
+		logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "blocked"))
 		cleanupExecutionState(database, cfg)
 		return 1, nil
 
@@ -192,7 +192,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 		}
 		if decision == core.DecisionBlocked {
 			fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
-			logEvent(database, "run", "manual", "", command, cwd, result, "denied")
+			logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "denied"))
 			cleanupExecutionState(database, cfg)
 			return 1, nil
 		}
@@ -213,7 +213,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	if err != nil {
 		outcome = "error"
 	}
-	logEvent(database, "run", "manual", "", command, cwd, result, outcome)
+	logEvent(database, newEvent(result, "run", "manual", "", command, cwd, outcome))
 	cleanupExecutionState(database, cfg)
 
 	return exitCode, err
@@ -360,22 +360,26 @@ func executeCapturedShellCommandWithStdin(command, cwd string, timeout time.Dura
 }
 
 // logEvent logs an execution event to the database if available.
-func logEvent(database *db.DB, source, agent, sessionID, command, cwd string, result *core.ClassifyResult, outcome string) {
+func logEvent(database *db.DB, record *db.EventRecord) {
 	if database == nil {
 		return
 	}
-	_ = database.LogEvent(&db.EventRecord{
-		SessionID:  sessionID,
-		Command:    command,
-		Decision:   string(result.Decision),
-		RuleID:     result.RuleID,
-		Reason:     result.Reason,
-		DurationMs: 0,
-		Metadata:   outcome,
-		Source:     source,
-		Agent:      agent,
-		Cwd:        cwd,
-	})
+	_ = database.LogEvent(record)
+}
+
+// newEvent builds an EventRecord from a ClassifyResult and context.
+func newEvent(result *core.ClassifyResult, source, agent, sessionID, command, cwd, outcome string) *db.EventRecord {
+	return &db.EventRecord{
+		SessionID: sessionID,
+		Command:   command,
+		Decision:  string(result.Decision),
+		RuleID:    result.RuleID,
+		Reason:    result.Reason,
+		Metadata:  outcome,
+		Source:    source,
+		Agent:     agent,
+		Cwd:       cwd,
+	}
 }
 
 func loadRuntimeConfig() *config.Config {

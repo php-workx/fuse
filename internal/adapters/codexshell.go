@@ -252,7 +252,7 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 
 	switch result.Decision {
 	case core.DecisionBlocked:
-		logEvent(database, "codex-shell", "codex", sessionID, command, cwd, result, "blocked")
+		logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "blocked"))
 		cleanupExecutionState(database, cfg)
 		return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
 	case core.DecisionSafe, core.DecisionCaution:
@@ -275,7 +275,7 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 			return "", "", 0, promptErr
 		}
 		if decision == core.DecisionBlocked {
-			logEvent(database, "codex-shell", "codex", sessionID, command, cwd, result, "denied")
+			logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "denied"))
 			cleanupExecutionState(database, cfg)
 			return "", "", 0, errApprovalDenied
 		}
@@ -293,7 +293,7 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 	if err != nil {
 		outcome = "error"
 	}
-	logEvent(database, "codex-shell", "codex", sessionID, command, cwd, result, outcome)
+	logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, outcome))
 	cleanupExecutionState(database, cfg)
 	return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
 }
