@@ -237,6 +237,19 @@ func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
 	}
 }
 
+func TestExecuteCommand_DisabledPassesThrough(t *testing.T) {
+	withFuseHome(t)
+	// Neither enabled nor dry-run — fully disabled.
+
+	exitCode, err := ExecuteCommand("printf disabled", t.TempDir(), time.Minute)
+	if err != nil {
+		t.Fatalf("ExecuteCommand when disabled returned error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exit code = %d, want 0 when disabled", exitCode)
+	}
+}
+
 func TestExecuteCommand_EnabledBlockedCommand(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)

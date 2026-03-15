@@ -166,6 +166,23 @@ func TestRunHook_DryRunAllowsApprovalCommand(t *testing.T) {
 	}
 }
 
+func TestRunHook_DisabledPassesThrough(t *testing.T) {
+	withFuseHome(t)
+	// Neither enabled nor dry-run — fully disabled.
+
+	input := `{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"disabled-test","cwd":"/tmp"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := RunHook(stdin, stderr)
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0 when disabled, got %d", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("expected no stderr when disabled, got: %s", stderr.String())
+	}
+}
+
 func TestExtractMCPAction(t *testing.T) {
 	tests := []struct {
 		name     string
