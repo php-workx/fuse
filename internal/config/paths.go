@@ -53,15 +53,42 @@ func SecretPath() string {
 	return filepath.Join(StateDir(), "secret.key")
 }
 
+// FuseMode represents the operational mode of fuse.
+type FuseMode int
+
+const (
+	// ModeDisabled means fuse is fully off — zero processing, instant pass-through.
+	ModeDisabled FuseMode = iota
+	// ModeDryRun means fuse classifies and logs but never blocks or prompts.
+	ModeDryRun
+	// ModeEnabled means fuse enforces classification with blocking and approval prompts.
+	ModeEnabled
+)
+
 // EnabledMarkerPath returns the path to the enabled marker file.
 func EnabledMarkerPath() string {
 	return filepath.Join(StateDir(), "enabled")
 }
 
-// IsDisabled returns true when fuse is disabled (marker file does not exist).
+// DryRunMarkerPath returns the path to the dry-run marker file.
+func DryRunMarkerPath() string {
+	return filepath.Join(StateDir(), "dryrun")
+}
+
+// Mode returns the current operational mode of fuse.
+func Mode() FuseMode {
+	if _, err := os.Stat(EnabledMarkerPath()); err == nil {
+		return ModeEnabled
+	}
+	if _, err := os.Stat(DryRunMarkerPath()); err == nil {
+		return ModeDryRun
+	}
+	return ModeDisabled
+}
+
+// IsDisabled returns true when fuse is fully disabled (neither enabled nor dry-run).
 func IsDisabled() bool {
-	_, err := os.Stat(EnabledMarkerPath())
-	return os.IsNotExist(err)
+	return Mode() == ModeDisabled
 }
 
 // EnsureDirectories creates the fuse directory structure with correct permissions.

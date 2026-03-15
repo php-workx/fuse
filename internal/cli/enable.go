@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -12,21 +11,19 @@ import (
 
 var enableCmd = &cobra.Command{
 	Use:   "enable",
-	Short: "Re-enable fuse after it has been disabled",
+	Short: "Enable fuse enforcement (classify, block, prompt)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		markerPath := filepath.Join(config.StateDir(), "enabled")
-
-		// Ensure the state directory exists.
 		if err := os.MkdirAll(config.StateDir(), 0o700); err != nil {
 			return fmt.Errorf("creating state directory: %w", err)
 		}
 
-		// Create the enabled marker file.
-		if err := os.WriteFile(markerPath, []byte("1\n"), 0o600); err != nil {
+		// Set enabled marker, remove dry-run marker.
+		if err := os.WriteFile(config.EnabledMarkerPath(), []byte("1\n"), 0o600); err != nil {
 			return fmt.Errorf("creating enabled marker: %w", err)
 		}
+		_ = os.Remove(config.DryRunMarkerPath())
 
-		fmt.Println("fuse is now enabled.")
+		fmt.Println("fuse is now enabled. Commands will be classified, blocked, and may require approval.")
 		return nil
 	},
 }

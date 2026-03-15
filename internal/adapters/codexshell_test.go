@@ -54,6 +54,13 @@ func enableFuseForTest(t *testing.T) {
 	}
 }
 
+func enableDryRunForTest(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(config.DryRunMarkerPath(), []byte("1"), 0o600); err != nil {
+		t.Fatalf("write dry-run marker: %v", err)
+	}
+}
+
 func runCodexShellServerRequests(t *testing.T, requests ...jsonRPCMessage) []jsonRPCMessage {
 	t.Helper()
 

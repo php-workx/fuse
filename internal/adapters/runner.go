@@ -120,7 +120,11 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	// Load configuration.
 	cfg := loadRuntimeConfig()
 
-	dryRun := config.IsDisabled()
+	mode := config.Mode()
+	if mode == config.ModeDisabled {
+		return executeShellCommand(command, cwd, timeout)
+	}
+	dryRun := mode == config.ModeDryRun
 
 	// Load policy.
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())

@@ -216,10 +216,14 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 }
 
 func interceptProxyRequest(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
-	if config.IsDisabled() {
+	mode := config.Mode()
+	if mode == config.ModeDisabled {
+		return true, nil, nil // fully disabled: zero processing
+	}
+	if mode == config.ModeDryRun {
 		// Dry-run: classify for logging but always pass through.
 		if method, _ := msg["method"].(string); method == "tools/call" {
-			_, _, _ = interceptToolCall(msg) // classify + log side-effect
+			_, _, _ = interceptToolCall(msg)
 		}
 		return true, nil, nil
 	}

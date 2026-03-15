@@ -227,9 +227,7 @@ func TestExecuteCommand_SafeCommand(t *testing.T) {
 
 func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
 	withFuseHome(t)
-	// Do NOT enable fuse — disabled = dry-run mode.
-
-	// A normally-blocked command should execute in dry-run.
+	enableDryRunForTest(t)
 	exitCode, err := ExecuteCommand("printf dryrun", t.TempDir(), time.Minute)
 	if err != nil {
 		t.Fatalf("ExecuteCommand in dry-run returned error: %v", err)

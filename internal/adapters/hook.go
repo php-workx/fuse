@@ -57,7 +57,11 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 
 // runHookInternal contains the core hook logic without timeout management.
 func runHookInternal(stdin io.Reader, stderr io.Writer) int {
-	dryRun := config.IsDisabled()
+	mode := config.Mode()
+	if mode == config.ModeDisabled {
+		return 0 // fully disabled: zero processing
+	}
+	dryRun := mode == config.ModeDryRun
 
 	// Load config for log level.
 	cfg := loadRuntimeConfig()

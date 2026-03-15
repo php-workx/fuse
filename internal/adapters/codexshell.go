@@ -223,7 +223,12 @@ func handleCodexShellToolCall(msg jsonRPCMessage, sessionID string) (jsonRPCMess
 
 func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Duration) (string, string, int, error) {
 	cfg := loadRuntimeConfig()
-	dryRun := config.IsDisabled()
+	mode := config.Mode()
+	if mode == config.ModeDisabled {
+		execResult, err := executeCapturedShellCommand(command, cwd, timeout)
+		return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
+	}
+	dryRun := mode == config.ModeDryRun
 
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
 	evaluator := policy.NewEvaluator(policyCfg)

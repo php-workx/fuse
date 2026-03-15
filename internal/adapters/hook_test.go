@@ -136,9 +136,8 @@ func TestRunHook_MissingToolInput(t *testing.T) {
 }
 
 func TestRunHook_DryRunAllowsBlockedCommand(t *testing.T) {
-	// Simulate disabled (dry-run) mode: classification runs but always returns 0.
 	withFuseHome(t)
-	// Do NOT enable fuse — disabled = dry-run mode.
+	enableDryRunForTest(t)
 
 	input := `{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"dry-run-test","cwd":"/tmp"}`
 	stdin := strings.NewReader(input)
@@ -154,7 +153,7 @@ func TestRunHook_DryRunAllowsBlockedCommand(t *testing.T) {
 
 func TestRunHook_DryRunAllowsApprovalCommand(t *testing.T) {
 	withFuseHome(t)
-	// Do NOT enable fuse — disabled = dry-run mode.
+	enableDryRunForTest(t)
 
 	input := `{"tool_name":"mcp__server__delete_items","tool_input":{"id":"123"},"session_id":"dry-run-test","cwd":"/tmp"}`
 	stdin := strings.NewReader(input)

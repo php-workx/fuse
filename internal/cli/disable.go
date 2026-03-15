@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -12,17 +11,14 @@ import (
 
 var disableCmd = &cobra.Command{
 	Use:   "disable",
-	Short: "Temporarily disable fuse (allow-all mode)",
+	Short: "Fully disable fuse (zero processing, instant pass-through)",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		markerPath := filepath.Join(config.StateDir(), "enabled")
+		// Remove both markers — fully disabled.
+		_ = os.Remove(config.EnabledMarkerPath())
+		_ = os.Remove(config.DryRunMarkerPath())
 
-		// Remove the enabled marker file.
-		if err := os.Remove(markerPath); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("removing enabled marker: %w", err)
-		}
-
-		fmt.Println("fuse is now in dry-run mode. Commands are classified and logged but never blocked.")
-		fmt.Println("Run 'fuse events' to see decisions. Run 'fuse enable' to re-enable enforcement.")
+		fmt.Println("fuse is now disabled. All commands pass through with zero processing.")
+		fmt.Println("Run 'fuse dryrun' to classify without blocking, or 'fuse enable' for full enforcement.")
 		return nil
 	},
 }
