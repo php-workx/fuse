@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -57,9 +58,12 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 
 // runHookInternal contains the core hook logic without timeout management.
 func runHookInternal(stdin io.Reader, stderr io.Writer) int {
-	// Check if fuse is disabled (allow-all mode).
-	if config.IsDisabled() {
-		return 0
+	dryRun := config.IsDisabled()
+	if dryRun {
+		// Dry-run: classify and log but never prompt or block.
+		// Force non-interactive so approval prompts return immediately.
+		os.Setenv("FUSE_NON_INTERACTIVE", "1")
+		defer os.Unsetenv("FUSE_NON_INTERACTIVE")
 	}
 
 	// Load config for log level.
@@ -89,17 +93,23 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 		return 2
 	}
 
-	// Route based on tool_name.
-	if strings.HasPrefix(req.ToolName, "mcp__") {
-		return handleMCPTool(req, stderr, cfg)
-	}
-
-	if req.ToolName != "Bash" {
+	// Route based on tool_name and classify.
+	var exitCode int
+	switch {
+	case strings.HasPrefix(req.ToolName, "mcp__"):
+		exitCode = handleMCPTool(req, stderr, cfg)
+	case req.ToolName == "Bash":
+		exitCode = handleBashTool(req, stderr, cfg)
+	default:
 		// Non-Bash, non-MCP tool: allow (fuse only mediates shell commands and MCP).
 		return 0
 	}
 
-	return handleBashTool(req, stderr, cfg)
+	// Dry-run mode: classify and log happened above, but always allow.
+	if dryRun {
+		return 0
+	}
+	return exitCode
 }
 
 // handleMCPTool handles MCP tool classification.

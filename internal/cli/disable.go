@@ -21,8 +21,8 @@ var disableCmd = &cobra.Command{
 			return fmt.Errorf("removing enabled marker: %w", err)
 		}
 
-		fmt.Println("fuse is now disabled. All commands will be allowed.")
-		fmt.Println("Run 'fuse enable' to re-enable.")
+		fmt.Println("fuse is now in dry-run mode. Commands are classified and logged but never blocked.")
+		fmt.Println("Run 'fuse events' to see decisions. Run 'fuse enable' to re-enable enforcement.")
 		return nil
 	},
 }

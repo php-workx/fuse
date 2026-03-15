@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"github.com/runger/fuse/internal/approve"
@@ -223,9 +224,11 @@ func handleCodexShellToolCall(msg jsonRPCMessage, sessionID string) (jsonRPCMess
 
 func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Duration) (string, string, int, error) {
 	cfg := loadRuntimeConfig()
-	if config.IsDisabled() {
-		execResult, err := executeCapturedShellCommand(command, cwd, timeout)
-		return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
+	dryRun := config.IsDisabled()
+	if dryRun {
+		// Dry-run: classify and log but never prompt or block.
+		os.Setenv("FUSE_NON_INTERACTIVE", "1")
+		defer os.Unsetenv("FUSE_NON_INTERACTIVE")
 	}
 
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
@@ -254,38 +257,46 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 	case core.DecisionBlocked:
 		logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "blocked"))
 		cleanupExecutionState(database, cfg)
-		return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
+		if !dryRun {
+			return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
+		}
 	case core.DecisionSafe, core.DecisionCaution:
 		// Execute directly.
 	case core.DecisionApproval:
-		if database == nil {
-			return "", "", 0, fmt.Errorf("database unavailable for approval")
-		}
-		secret, secretErr := db.EnsureSecret(config.SecretPath())
-		if secretErr != nil {
-			return "", "", 0, secretErr
-		}
+		if !dryRun {
+			if database == nil {
+				return "", "", 0, fmt.Errorf("database unavailable for approval")
+			}
+			secret, secretErr := db.EnsureSecret(config.SecretPath())
+			if secretErr != nil {
+				return "", "", 0, secretErr
+			}
 
-		mgr, mgrErr := approve.NewManager(database, secret)
-		if mgrErr != nil {
-			return "", "", 0, mgrErr
-		}
-		decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, sessionID, false)
-		if promptErr != nil {
-			return "", "", 0, promptErr
-		}
-		if decision == core.DecisionBlocked {
-			logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "denied"))
-			cleanupExecutionState(database, cfg)
-			return "", "", 0, errApprovalDenied
+			mgr, mgrErr := approve.NewManager(database, secret)
+			if mgrErr != nil {
+				return "", "", 0, mgrErr
+			}
+			decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, sessionID, false)
+			if promptErr != nil {
+				return "", "", 0, promptErr
+			}
+			if decision == core.DecisionBlocked {
+				logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "denied"))
+				cleanupExecutionState(database, cfg)
+				return "", "", 0, errApprovalDenied
+			}
+		} else {
+			logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "dry-run"))
 		}
 
 	default:
 		// Unknown decision — execute directly (safe fallback).
 	}
 
-	if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
-		return "", "", 0, verifyErr
+	if !dryRun {
+		if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
+			return "", "", 0, verifyErr
+		}
 	}
 
 	execResult, err := executeCapturedShellCommand(command, cwd, timeout)

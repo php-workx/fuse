@@ -216,13 +216,15 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 }
 
 func interceptProxyRequest(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
-	if config.IsDisabled() {
-		return true, nil, nil // disabled: pass everything through
-	}
+	dryRun := config.IsDisabled()
 	method, _ := msg["method"].(string)
 	switch method {
 	case "tools/call":
-		return interceptToolCall(msg)
+		passThrough, errResp, err := interceptToolCall(msg)
+		if dryRun {
+			return true, nil, nil // dry-run: classify happened, always pass through
+		}
+		return passThrough, errResp, err
 	case "resources/read", "resources/subscribe":
 		if sensitive, target := isSensitiveResourceRequest(msg); sensitive {
 			return false, jsonRPCErrorResponse(msg["id"], -32000, fmt.Sprintf("fuse denied sensitive resource access: %s", target)), nil
