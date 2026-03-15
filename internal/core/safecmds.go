@@ -528,3 +528,43 @@ func isAzSafe(fields []string) bool {
 
 	return false
 }
+
+// safeBuildDirs are directories that agents commonly clean and are safe to rm -rf.
+// Sourced from AgentGuard's default allowlist.
+var safeBuildDirs = map[string]bool{
+	"node_modules": true, "dist": true, "build": true, ".next": true,
+	"out": true, "target": true, ".cache": true, "__pycache__": true,
+	".pytest_cache": true, "tmp": true, "temp": true, "coverage": true,
+	".nyc_output": true, ".turbo": true, ".parcel-cache": true,
+	".vite": true, ".nuxt": true, ".output": true, ".svelte-kit": true,
+	"vendor": true, ".tox": true, ".mypy_cache": true, ".ruff_cache": true,
+	"bin": true, "obj": true, ".gradle": true, ".angular": true,
+}
+
+// IsSafeBuildCleanup returns true if the command is rm -rf targeting
+// only known safe build/cache directories.
+func IsSafeBuildCleanup(cmd string) bool {
+	fields := strings.Fields(cmd)
+	if len(fields) < 3 || fields[0] != "rm" {
+		return false
+	}
+	hasRecursive := false
+	argStart := 1
+	for argStart < len(fields) && strings.HasPrefix(fields[argStart], "-") {
+		if strings.ContainsAny(fields[argStart], "rR") || fields[argStart] == "--recursive" {
+			hasRecursive = true
+		}
+		argStart++
+	}
+	if !hasRecursive || argStart >= len(fields) {
+		return false
+	}
+	for _, arg := range fields[argStart:] {
+		dir := strings.TrimRight(arg, "/")
+		parts := strings.Split(dir, "/")
+		if !safeBuildDirs[parts[len(parts)-1]] {
+			return false
+		}
+	}
+	return true
+}

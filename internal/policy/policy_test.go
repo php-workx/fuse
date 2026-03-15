@@ -282,7 +282,8 @@ func TestEvaluateBuiltins_Empty(t *testing.T) {
 	BuiltinRules = nil
 	defer func() { BuiltinRules = saved }()
 
-	dec, reason, id := EvaluateBuiltins("rm -rf /", nil)
+	idx := BuildRuleIndex(BuiltinRules)
+	dec, reason, id := EvaluateBuiltins("rm -rf /", nil, nil, idx)
 	if dec != "" || reason != "" || id != "" {
 		t.Errorf("expected no match with empty builtins, got dec=%q reason=%q id=%q", dec, reason, id)
 	}
@@ -303,8 +304,10 @@ func TestEvaluateBuiltins_WithRule(t *testing.T) {
 		},
 	}
 
+	idx := BuildRuleIndex(BuiltinRules)
+
 	// Should match
-	dec, reason, id := EvaluateBuiltins("run test now", nil)
+	dec, reason, id := EvaluateBuiltins("run test now", nil, nil, idx)
 	if dec != core.DecisionCaution {
 		t.Errorf("expected CAUTION, got %q", dec)
 	}
@@ -317,7 +320,7 @@ func TestEvaluateBuiltins_WithRule(t *testing.T) {
 
 	// Should be skipped when disabled
 	disabled := map[string]bool{"test:rule1": true}
-	dec, reason, id = EvaluateBuiltins("run test now", disabled)
+	dec, reason, id = EvaluateBuiltins("run test now", disabled, nil, idx)
 	if dec != "" || reason != "" || id != "" {
 		t.Errorf("expected no match when disabled, got dec=%q reason=%q id=%q", dec, reason, id)
 	}

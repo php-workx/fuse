@@ -306,6 +306,13 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	}
 
 	// Step 9: Evaluate rules in order (most restrictive wins within each layer).
+
+	// Layer 2.5: Safe build directory cleanup (rm -rf node_modules, dist, etc.)
+	// Checked before builtins to prevent false APPROVAL on common agent operations.
+	if IsSafeBuildCleanup(cmd) {
+		return DecisionSafe, "safe build directory cleanup", ""
+	}
+
 	if evaluator != nil {
 		// Layer 2: User policy rules.
 		if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
