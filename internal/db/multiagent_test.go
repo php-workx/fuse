@@ -321,6 +321,33 @@ func TestSummarizeEvents_FullTable(t *testing.T) {
 	}
 }
 
+func TestSummarizeEvents_Empty(t *testing.T) {
+	d := openTestDB(t)
+	summary, err := d.SummarizeEvents()
+	if err != nil {
+		t.Fatalf("SummarizeEvents: %v", err)
+	}
+	if summary.Total != 0 {
+		t.Fatalf("total = %d, want 0", summary.Total)
+	}
+}
+
+func TestSummarizeEvents_NullFields(t *testing.T) {
+	d := openTestDB(t)
+	// Log event with empty agent/source to test COALESCE paths.
+	_ = d.LogEvent(&EventRecord{Command: "test", Decision: "SAFE"})
+	summary, err := d.SummarizeEvents()
+	if err != nil {
+		t.Fatalf("SummarizeEvents: %v", err)
+	}
+	if summary.Total != 1 {
+		t.Fatalf("total = %d, want 1", summary.Total)
+	}
+	if summary.ByAgent["(unknown)"] != 1 {
+		t.Errorf("ByAgent[(unknown)] = %d, want 1", summary.ByAgent["(unknown)"])
+	}
+}
+
 // --- fu-uvi: Test session-scoped approval isolation ---
 
 func TestSessionApprovalIsolation(t *testing.T) {

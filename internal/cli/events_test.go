@@ -107,6 +107,97 @@ func TestRunStats_SummarizesActivity(t *testing.T) {
 	}
 }
 
+func TestRunEvents_JSONOutput(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	if err := database.LogEvent(&db.EventRecord{
+		Command: "echo json", Decision: "SAFE", Source: "hook", Agent: "claude",
+	}); err != nil {
+		t.Fatalf("LogEvent: %v", err)
+	}
+	_ = database.Close()
+
+	stdout, _, err := captureCLIOutput(t, func() error {
+		return runEvents(&eventsOptions{limit: 10, json: true})
+	})
+	if err != nil {
+		t.Fatalf("runEvents: %v", err)
+	}
+	if !strings.Contains(stdout, `"command"`) || !strings.Contains(stdout, "echo json") {
+		t.Fatalf("expected JSON output with command, got:\n%s", stdout)
+	}
+}
+
+func TestRunEvents_NoEvents(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	_ = database.Close()
+
+	stdout, _, err := captureCLIOutput(t, func() error {
+		return runEvents(&eventsOptions{limit: 10})
+	})
+	if err != nil {
+		t.Fatalf("runEvents: %v", err)
+	}
+	if !strings.Contains(stdout, "No matching") {
+		t.Fatalf("expected 'No matching' message, got:\n%s", stdout)
+	}
+}
+
+func TestRunEvents_NoDB(t *testing.T) {
+	t.Setenv("FUSE_HOME", filepath.Join(t.TempDir(), "nonexistent"))
+
+	stdout, _, err := captureCLIOutput(t, func() error {
+		return runEvents(&eventsOptions{limit: 10})
+	})
+	if err != nil {
+		t.Fatalf("runEvents: %v", err)
+	}
+	if !strings.Contains(stdout, "No fuse events recorded") {
+		t.Fatalf("expected 'No fuse events recorded' message, got:\n%s", stdout)
+	}
+}
+
+func TestShorten(t *testing.T) {
+	if got := shorten("hello", 10); got != "hello" {
+		t.Errorf("shorten(hello, 10) = %q", got)
+	}
+	if got := shorten("hello world", 5); got != "he..." {
+		t.Errorf("shorten(hello world, 5) = %q, want he...", got)
+	}
+	if got := shorten("hello", 3); got != "hel" {
+		t.Errorf("shorten(hello, 3) = %q, want hel", got)
+	}
+	if got := shorten("hi", 2); got != "hi" {
+		t.Errorf("shorten(hi, 2) = %q", got)
+	}
+}
+
+func TestFallbackValue(t *testing.T) {
+	if got := fallbackValue(""); got != "-" {
+		t.Errorf("fallbackValue('') = %q, want '-'", got)
+	}
+	if got := fallbackValue("x"); got != "x" {
+		t.Errorf("fallbackValue('x') = %q, want 'x'", got)
+	}
+}
+
 func captureCLIOutput(t *testing.T, fn func() error) (string, string, error) {
 	t.Helper()
 
