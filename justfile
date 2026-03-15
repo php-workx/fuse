@@ -134,18 +134,23 @@ cover:
 
 # Run SonarQube scan (requires local SonarQube + .env with SONAR_TOKEN)
 sonar:
-    @if ! command -v sonar-scanner >/dev/null 2>&1; then \
-        echo "sonar-scanner not installed, skipping"; \
-    elif [ ! -f .env ]; then \
-        echo ".env missing, skipping sonar scan (run: just sonar-setup)"; \
-    else \
-        TOKEN=$$(grep -E '^SONAR_TOKEN=[A-Za-z0-9_]+$$' .env | cut -d= -f2); \
-        if [ -z "$$TOKEN" ]; then \
-            echo "error: SONAR_TOKEN not found or invalid in .env"; exit 1; \
-        fi; \
-        just cover; \
-        SONAR_TOKEN="$$TOKEN" sonar-scanner -Dsonar.qualitygate.wait=true; \
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v sonar-scanner >/dev/null 2>&1; then
+        echo "sonar-scanner not installed, skipping"
+        exit 0
     fi
+    if [ ! -f .env ]; then
+        echo ".env missing, skipping sonar scan (run: just sonar-setup)"
+        exit 0
+    fi
+    TOKEN=$(grep -E '^SONAR_TOKEN=[A-Za-z0-9_]+$' .env | cut -d= -f2)
+    if [ -z "$TOKEN" ]; then
+        echo "error: SONAR_TOKEN not found or invalid in .env"
+        exit 1
+    fi
+    just cover
+    SONAR_TOKEN="$TOKEN" sonar-scanner -Dsonar.qualitygate.wait=true
 
 # Provision SonarQube: wait for server, create project, generate token
 sonar-setup:
