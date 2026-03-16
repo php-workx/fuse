@@ -64,7 +64,11 @@ func runEvents(opts *eventsOptions) error {
 		return err
 	}
 	if !exists {
-		fmt.Println("No fuse events recorded yet.")
+		if opts.json {
+			fmt.Println("[]")
+		} else {
+			fmt.Println("No fuse events recorded yet.")
+		}
 		return nil
 	}
 	defer func() { _ = database.Close() }()
@@ -117,7 +121,11 @@ func runStats() error {
 		return err
 	}
 	if !exists {
-		fmt.Println("No fuse events recorded yet.")
+		if statsJSON {
+			fmt.Println("{}")
+		} else {
+			fmt.Println("No fuse events recorded yet.")
+		}
 		return nil
 	}
 	defer func() { _ = database.Close() }()
