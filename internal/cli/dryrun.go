@@ -21,7 +21,9 @@ var dryrunCmd = &cobra.Command{
 		if err := os.WriteFile(config.DryRunMarkerPath(), []byte("1\n"), 0o600); err != nil {
 			return fmt.Errorf("creating dry-run marker: %w", err)
 		}
-		_ = os.Remove(config.EnabledMarkerPath())
+		if err := os.Remove(config.EnabledMarkerPath()); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing enabled marker: %w", err)
+		}
 
 		fmt.Println("fuse is now in dry-run mode. Commands are classified and logged but never blocked.")
 		fmt.Println("Run 'fuse events' to see decisions. Run 'fuse enable' for full enforcement.")

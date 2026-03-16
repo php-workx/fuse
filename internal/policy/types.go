@@ -50,7 +50,7 @@ func BuildRuleIndex(rules []BuiltinRule) *RuleIndex {
 			idx.noKeywordRules = append(idx.noKeywordRules, i)
 		} else {
 			for _, kw := range r.Keywords {
-				idx.keywordToRules[kw] = append(idx.keywordToRules[kw], i)
+				idx.keywordToRules[strings.ToLower(kw)] = append(idx.keywordToRules[strings.ToLower(kw)], i)
 			}
 		}
 	}

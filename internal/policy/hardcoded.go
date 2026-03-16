@@ -123,9 +123,12 @@ var HardcodedBlocked = []HardcodedRule{
 	},
 
 	// Prevent agent from modifying fuse SQLite database (allow read-only queries).
+	// Matches destructive SQL whether it appears before or after the db path.
 	{
-		Pattern: regexp.MustCompile(`\bsqlite3?\s+.*fuse\.db\b.*\b(DELETE|DROP|INSERT|UPDATE|ALTER|ATTACH|DETACH|VACUUM|REINDEX)\b`),
-		Reason:  "Cannot modify fuse database through mediated path",
+		Pattern: regexp.MustCompile(
+			`\bsqlite3?\b.*\b(DELETE|DROP|INSERT|UPDATE|ALTER|ATTACH|DETACH|VACUUM|REINDEX)\b.*fuse\.db` +
+				`|\bsqlite3?\s+.*fuse\.db\b.*\b(DELETE|DROP|INSERT|UPDATE|ALTER|ATTACH|DETACH|VACUUM|REINDEX)\b`),
+		Reason: "Cannot modify fuse database through mediated path",
 	},
 
 	// Prevent inline interpreter/eval commands from touching fuse-managed files
