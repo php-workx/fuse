@@ -561,6 +561,10 @@ func IsSafeBuildCleanup(cmd string) bool {
 	}
 	for _, arg := range fields[argStart:] {
 		dir := strings.TrimRight(arg, "/")
+		// Reject absolute paths, home-relative paths, and parent traversal.
+		if strings.HasPrefix(dir, "/") || strings.HasPrefix(dir, "~") || strings.Contains(dir, "..") {
+			return false
+		}
 		parts := strings.Split(dir, "/")
 		if !safeBuildDirs[parts[len(parts)-1]] {
 			return false

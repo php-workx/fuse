@@ -212,9 +212,9 @@ func TestClassify_InlineScript(t *testing.T) {
 			expected: core.DecisionSafe,
 		},
 		{
-			name:     "python -c safe importlib",
+			name:     "python -c importlib requires approval",
 			command:  `python -c "import importlib; print(importlib.metadata.version('requests'))"`,
-			expected: core.DecisionSafe,
+			expected: core.DecisionApproval,
 		},
 		{
 			name:     "python -c dangerous subprocess",
