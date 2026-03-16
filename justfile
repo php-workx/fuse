@@ -269,7 +269,7 @@ setup: install-dev
 # Install development tools and git hooks
 install-dev:
     @echo "Installing Go tools..."
-    go install github.com/golangci/golangci-lint/cmd/golangci-lint@{{golangci_lint_ver}}
+    go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{golangci_lint_ver}}
     go install golang.org/x/vuln/cmd/govulncheck@{{govulncheck_ver}}
     go install mvdan.cc/gofumpt@{{gofumpt_ver}}
     go install github.com/rhysd/actionlint/cmd/actionlint@{{actionlint_ver}}
