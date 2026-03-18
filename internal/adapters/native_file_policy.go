@@ -24,7 +24,7 @@ func isNativeClaudeFileTool(toolName string) bool {
 	return ok
 }
 
-func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
+func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	if len(req.ToolInput) == 0 {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Missing tool_input. Do not retry this exact command. Ask the user for guidance.")
 		return 2
@@ -49,7 +49,7 @@ func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config)
 		logHookEvent(req.SessionID, extractCommandFromResult(result), req.Cwd, result)
 		return 2
 	case core.DecisionApproval:
-		return handleApproval(req, result, stderr, cfg, false)
+		return handleApproval(req, result, stderr, cfg, dryRun)
 	default:
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Unknown classification result. Do not retry this exact command. Ask the user for guidance.")
 		return 2
@@ -159,7 +159,10 @@ type filePathInfo struct {
 }
 
 func nativeFilePathInfo(path, cwd string) filePathInfo {
-	homeDir, _ := os.UserHomeDir()
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/nonexistent-home" // fail-closed: treat ~/ paths as unresolvable
+	}
 	cleanCwd := filepath.Clean(cwd)
 	cleanRaw := filepath.Clean(path)
 	resolved := cleanRaw

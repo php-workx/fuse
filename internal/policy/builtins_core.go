@@ -276,7 +276,7 @@ func init() {
 		// §6.3.2 AWS — Infrastructure & networking
 		BuiltinRule{
 			ID:      "builtin:aws:delete-stack",
-			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack\b`),
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack(?:\s|$)`),
 			Action:  core.DecisionApproval,
 			Reason:  "Deletes CloudFormation stack",
 		},

@@ -121,8 +121,8 @@ func TestRunHook_MCP_DestructiveAction(t *testing.T) {
 	}
 
 	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") && !strings.Contains(stderrStr, "USER_DENIED") && !strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
-		t.Errorf("expected stderr to contain an approval-denial directive, got: %s", stderrStr)
+	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") && !strings.Contains(stderrStr, "USER_DENIED") {
+		t.Errorf("expected NON_INTERACTIVE_MODE or USER_DENIED, got: %s", stderrStr)
 	}
 }
 

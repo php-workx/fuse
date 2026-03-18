@@ -382,7 +382,7 @@ func TestRunDoctorSecurity_WarnsOnUnmediatedClaudeMCPServers(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
-	configYAML := "mcp_proxies:\n  - name: aws-mcp\n    command: npx\n    args: [\"-y\", \"@aws/mcp-server\"]\n    env: {}\n"
+	configYAML := "mcp_proxies:\n  - name: aws-mcp\n    command: echo\n    args: [\"-y\", \"@aws/mcp-server\"]\n    env: {}\n"
 	if err := os.WriteFile(configPathForTest(t), []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -442,7 +442,7 @@ func TestRunDoctorSecurity_PassesForMediatedClaudeMCPServers(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
-	configYAML := "mcp_proxies:\n  - name: aws-mcp\n    command: npx\n    args: [\"-y\", \"@aws/mcp-server\"]\n    env: {}\n"
+	configYAML := "mcp_proxies:\n  - name: aws-mcp\n    command: echo\n    args: [\"-y\", \"@aws/mcp-server\"]\n    env: {}\n"
 	if err := os.WriteFile(configPathForTest(t), []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestRunDoctorSecurity_WarnsWhenClaudeMCPDownstreamNameIsMissingOrUnknown(t 
 	if err := os.MkdirAll(filepath.Dir(configPathForTest(t)), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
-	configYAML := "mcp_proxies:\n  - name: aws-mcp\n    command: npx\n    args: [\"-y\", \"@aws/mcp-server\"]\n    env: {}\n"
+	configYAML := "mcp_proxies:\n  - name: aws-mcp\n    command: echo\n    args: [\"-y\", \"@aws/mcp-server\"]\n    env: {}\n"
 	if err := os.WriteFile(configPathForTest(t), []byte(configYAML), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
