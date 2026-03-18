@@ -61,10 +61,23 @@ func claudeSettingsPath() string {
 }
 
 func rejectSymlinkedClaudeSettingsPath(settingsPath string) error {
-	for _, candidate := range []string{filepath.Dir(settingsPath), settingsPath} {
+	// Walk ancestors from settingsPath up to (but not including) the user's
+	// home directory. System-level symlinks (e.g., /var -> /private/var on
+	// macOS) are normal and should not be flagged.
+	homeDir, _ := os.UserHomeDir()
+	for candidate := filepath.Clean(settingsPath); ; {
+		// Stop at home directory — system paths above it may have normal symlinks.
+		if homeDir != "" && candidate == filepath.Clean(homeDir) {
+			break
+		}
 		info, err := os.Lstat(candidate)
 		if err != nil {
 			if os.IsNotExist(err) {
+				parent := filepath.Dir(candidate)
+				if parent == candidate {
+					break
+				}
+				candidate = parent
 				continue
 			}
 			return fmt.Errorf("inspect %s: %w", candidate, err)
@@ -72,6 +85,11 @@ func rejectSymlinkedClaudeSettingsPath(settingsPath string) error {
 		if info.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("refusing to use symlinked Claude settings path %s", candidate)
 		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			break
+		}
+		candidate = parent
 	}
 	return nil
 }
