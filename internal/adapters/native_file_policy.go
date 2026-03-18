@@ -125,7 +125,7 @@ func classifyNativeFilePath(path, cwd string) (core.Decision, string) {
 		return core.DecisionBlocked, fmt.Sprintf("access to git hooks path %s is blocked", path)
 	case info.isEnvFile():
 		return core.DecisionApproval, fmt.Sprintf("access to sensitive environment file %s requires approval", path)
-	case info.isUnder(filepath.Join(cwd, "secrets")) || info.matchesRelative("secrets"):
+	case info.isUnder(filepath.Join(cwd, "secrets")) || info.matchesRelative("secrets") || info.containsSegment("secrets"):
 		return core.DecisionApproval, fmt.Sprintf("access to secret path %s requires approval", path)
 	case info.isUnder(filepath.Join(info.homeDir, ".ssh")):
 		return core.DecisionApproval, fmt.Sprintf("access to SSH path %s requires approval", path)
@@ -180,6 +180,11 @@ func nativeFilePathInfo(path, cwd string) filePathInfo {
 	if !filepath.IsAbs(resolved) && cleanCwd != "" {
 		resolved = filepath.Join(cleanCwd, resolved)
 	}
+	// Resolve symlinks to prevent bypass via symlinked paths
+	// (e.g., safe.txt -> ~/.fuse/state/secret.key).
+	if evalResolved, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = evalResolved
+	}
 	return filePathInfo{
 		raw:      path,
 		cleanRaw: cleanRaw,
@@ -201,6 +206,15 @@ func (p *filePathInfo) matchesAbsolute(want string) bool {
 		return false
 	}
 	return p.slashAbs == filepath.ToSlash(filepath.Clean(want))
+}
+
+func (p *filePathInfo) containsSegment(segment string) bool {
+	for _, s := range strings.Split(p.slashAbs, "/") {
+		if s == segment {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *filePathInfo) endsWithPathSuffix(suffix string) bool {
