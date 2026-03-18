@@ -49,28 +49,7 @@ func TestRunDoctorSecurity_WarnsWhenClaudeHookExistsWithoutSecureSettings(t *tes
 		t.Fatalf("mkdir settings dir: %v", err)
 	}
 
-	settings := mustClaudeSettings(t, []map[string]interface{}{
-		{
-			"matcher": "Bash",
-			"hooks": []map[string]interface{}{
-				{
-					"type":    "command",
-					"command": "fuse hook evaluate",
-					"timeout": float64(30),
-				},
-			},
-		},
-		{
-			"matcher": "mcp__.*",
-			"hooks": []map[string]interface{}{
-				{
-					"type":    "command",
-					"command": "fuse hook evaluate",
-					"timeout": float64(30),
-				},
-			},
-		},
-	})
+	settings := mustClaudeSettings(t, defaultFuseHookEntries())
 	writeJSONForTest(t, settingsPath, settings)
 
 	stdout, stderr, err := captureDoctorOutput(t, func() error {
@@ -132,28 +111,7 @@ func TestRunDoctorSecurity_PassesWithSecureClaudeSettingsPresent(t *testing.T) {
 		t.Fatalf("mkdir settings dir: %v", err)
 	}
 
-	settings := mustClaudeSettings(t, []map[string]interface{}{
-		{
-			"matcher": "Bash",
-			"hooks": []map[string]interface{}{
-				{
-					"type":    "command",
-					"command": "fuse hook evaluate",
-					"timeout": float64(30),
-				},
-			},
-		},
-		{
-			"matcher": "mcp__.*",
-			"hooks": []map[string]interface{}{
-				{
-					"type":    "command",
-					"command": "fuse hook evaluate",
-					"timeout": float64(30),
-				},
-			},
-		},
-	})
+	settings := mustClaudeSettings(t, defaultFuseHookEntries())
 	if err := mergeClaudeSecureSettings(settings); err != nil {
 		t.Fatalf("mergeClaudeSecureSettings: %v", err)
 	}
@@ -234,28 +192,7 @@ func TestRunDoctorSecurity_WarnsAboutMCPRiskWhenClaudeHookExistsWithoutProxies(t
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatalf("mkdir settings dir: %v", err)
 	}
-	settings := mustClaudeSettings(t, []map[string]interface{}{
-		{
-			"matcher": "Bash",
-			"hooks": []map[string]interface{}{
-				{
-					"type":    "command",
-					"command": "fuse hook evaluate",
-					"timeout": float64(30),
-				},
-			},
-		},
-		{
-			"matcher": "mcp__.*",
-			"hooks": []map[string]interface{}{
-				{
-					"type":    "command",
-					"command": "fuse hook evaluate",
-					"timeout": float64(30),
-				},
-			},
-		},
-	})
+	settings := mustClaudeSettings(t, defaultFuseHookEntries())
 	if err := mergeClaudeSecureSettings(settings); err != nil {
 		t.Fatalf("mergeClaudeSecureSettings: %v", err)
 	}
@@ -354,20 +291,7 @@ func TestRunDoctorSecurity_WarnsOnUnmediatedClaudeMCPServers(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatalf("mkdir settings dir: %v", err)
 	}
-	settings := mustClaudeSettings(t, []map[string]interface{}{
-		{
-			"matcher": "Bash",
-			"hooks": []map[string]interface{}{
-				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
-			},
-		},
-		{
-			"matcher": "mcp__.*",
-			"hooks": []map[string]interface{}{
-				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
-			},
-		},
-	})
+	settings := mustClaudeSettings(t, defaultFuseHookEntries())
 	settings["mcpServers"] = map[string]interface{}{
 		"aws-direct": map[string]interface{}{
 			"command": "npx",
@@ -414,20 +338,7 @@ func TestRunDoctorSecurity_PassesForMediatedClaudeMCPServers(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatalf("mkdir settings dir: %v", err)
 	}
-	settings := mustClaudeSettings(t, []map[string]interface{}{
-		{
-			"matcher": "Bash",
-			"hooks": []map[string]interface{}{
-				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
-			},
-		},
-		{
-			"matcher": "mcp__.*",
-			"hooks": []map[string]interface{}{
-				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
-			},
-		},
-	})
+	settings := mustClaudeSettings(t, defaultFuseHookEntries())
 	settings["mcpServers"] = map[string]interface{}{
 		"aws-mcp": map[string]interface{}{
 			"command": "fuse",
@@ -475,20 +386,7 @@ func TestRunDoctorSecurity_WarnsWhenClaudeMCPDownstreamNameIsMissingOrUnknown(t 
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		t.Fatalf("mkdir settings dir: %v", err)
 	}
-	settings := mustClaudeSettings(t, []map[string]interface{}{
-		{
-			"matcher": "Bash",
-			"hooks": []map[string]interface{}{
-				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
-			},
-		},
-		{
-			"matcher": "mcp__.*",
-			"hooks": []map[string]interface{}{
-				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
-			},
-		},
-	})
+	settings := mustClaudeSettings(t, defaultFuseHookEntries())
 	settings["mcpServers"] = map[string]interface{}{
 		"missing-name": map[string]interface{}{
 			"command": "fuse",
@@ -702,6 +600,11 @@ func TestMergeClaudeSecureSettings_UpgradesExplicitFalse(t *testing.T) {
 func writeJSONForTest(t *testing.T, path string, data map[string]interface{}) {
 	t.Helper()
 
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
 	blob, err := json.Marshal(data)
 	if err != nil {
 		t.Fatalf("marshal JSON: %v", err)

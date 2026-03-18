@@ -47,6 +47,9 @@ func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config,
 	case core.DecisionBlocked:
 		fmt.Fprintf(stderr, "fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.\n", result.Reason)
 		logHookEvent(req.SessionID, extractCommandFromResult(result), req.Cwd, result)
+		if dryRun {
+			return 0
+		}
 		return 2
 	case core.DecisionApproval:
 		return handleApproval(req, result, stderr, cfg, dryRun)
@@ -119,7 +122,7 @@ func classifyNativeFilePath(path, cwd string) (core.Decision, string) {
 		return core.DecisionBlocked, fmt.Sprintf("access to Claude settings path %s is blocked", path)
 	case info.isCodexConfigPath():
 		return core.DecisionBlocked, fmt.Sprintf("access to Codex config path %s is blocked", path)
-	case info.hasBase("fuse.db") || info.hasBase("secret.key"):
+	case (info.hasBase("fuse.db") || info.hasBase("secret.key")) && info.isUnder(filepath.Join(info.homeDir, ".fuse")):
 		return core.DecisionBlocked, fmt.Sprintf("access to protected fuse state file %s is blocked", path)
 	case info.isGitHookPath():
 		return core.DecisionBlocked, fmt.Sprintf("access to git hooks path %s is blocked", path)

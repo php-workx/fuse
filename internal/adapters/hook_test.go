@@ -381,6 +381,34 @@ func TestRunHook_NativeFileIgnoresNestedMetadataPaths(t *testing.T) {
 	}
 }
 
+func TestRunHook_NativeFileParentTraversalSecretsRequiresApproval(t *testing.T) {
+	enableHookForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// From a subdirectory, ../secrets/prod.json should still require approval.
+	projectDir := filepath.Join(tmpHome, "project")
+	subdir := filepath.Join(projectDir, "src")
+	secretsDir := filepath.Join(projectDir, "secrets")
+	if err := os.MkdirAll(secretsDir, 0o755); err != nil {
+		t.Fatalf("mkdir secrets: %v", err)
+	}
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	input := `{"tool_name":"Read","tool_input":{"file_path":"../secrets/prod.json"},"session_id":"test","cwd":"` + filepath.ToSlash(subdir) + `"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := RunHook(stdin, stderr)
+
+	if exitCode != 2 {
+		t.Fatalf("expected exit code 2 for ../secrets/prod.json traversal, got %d; stderr: %s", exitCode, stderr.String())
+	}
+}
+
 func enableHookForTest(t *testing.T) {
 	t.Helper()
 
