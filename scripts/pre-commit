@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# pre-commit hook: run gitleaks on staged changes to prevent secret leaks.
 set -euo pipefail
 
-if ! command -v gitleaks >/dev/null 2>&1; then
-    echo "pre-commit: gitleaks not installed — skipping secret scan."
-    echo "  Install with: brew install gitleaks  (or see https://github.com/gitleaks/gitleaks)"
-    exit 0
-fi
+# Pre-commit: fast quality checks. Delegates to justfile.
+# Install: just install-dev
 
-echo "pre-commit: scanning staged changes for secrets..."
-gitleaks protect --staged --verbose
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:$HOME/.cargo/bin:$PATH"
+
+cd "$(git rev-parse --show-toplevel)"
+just pre-commit

@@ -47,7 +47,7 @@ func scopeExpiry(scope string) *time.Time {
 
 // RequestApproval checks for an existing valid approval or prompts the user.
 // Returns the decision and any error.
-func (m *Manager) RequestApproval(decisionKey, command, reason, sessionID string, hookMode bool) (core.Decision, error) {
+func (m *Manager) RequestApproval(decisionKey, command, reason, sessionID string, hookMode, nonInteractive bool) (core.Decision, error) {
 	// First, check for an existing valid approval.
 	existing, err := m.ConsumeApproval(decisionKey, sessionID)
 	if err != nil {
@@ -58,7 +58,7 @@ func (m *Manager) RequestApproval(decisionKey, command, reason, sessionID string
 	}
 
 	// No existing approval — prompt the user.
-	approved, scope, err := PromptUser(command, reason, hookMode)
+	approved, scope, err := PromptUser(command, reason, hookMode, nonInteractive)
 	if err != nil {
 		return core.DecisionBlocked, fmt.Errorf("prompt user: %w", err)
 	}

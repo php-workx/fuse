@@ -57,10 +57,11 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 
 // runHookInternal contains the core hook logic without timeout management.
 func runHookInternal(stdin io.Reader, stderr io.Writer) int {
-	// Check if fuse is disabled (allow-all mode).
-	if config.IsDisabled() {
-		return 0
+	mode := config.Mode()
+	if mode == config.ModeDisabled {
+		return 0 // fully disabled: zero processing
 	}
+	dryRun := mode == config.ModeDryRun
 
 	// Load config for log level.
 	cfg := loadRuntimeConfig()
@@ -89,21 +90,27 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 		return 2
 	}
 
-	// Route based on tool_name.
-	if strings.HasPrefix(req.ToolName, "mcp__") {
-		return handleMCPTool(req, stderr, cfg)
-	}
-
-	if req.ToolName != "Bash" {
+	// Route based on tool_name and classify.
+	var exitCode int
+	switch {
+	case strings.HasPrefix(req.ToolName, "mcp__"):
+		exitCode = handleMCPTool(req, stderr, cfg, dryRun)
+	case req.ToolName == "Bash":
+		exitCode = handleBashTool(req, stderr, cfg, dryRun)
+	default:
 		// Non-Bash, non-MCP tool: allow (fuse only mediates shell commands and MCP).
 		return 0
 	}
 
-	return handleBashTool(req, stderr, cfg)
+	// Dry-run mode: classify and log happened above, but always allow.
+	if dryRun {
+		return 0
+	}
+	return exitCode
 }
 
 // handleMCPTool handles MCP tool classification.
-func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
+func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Parse tool_input as a generic map for MCP argument scanning.
 	var args map[string]interface{}
 	if len(req.ToolInput) > 0 {
@@ -122,11 +129,11 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 	switch decision {
 	case core.DecisionBlocked:
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. MCP tool call blocked by policy. Do not retry this exact command. Ask the user for guidance.")
-		logHookEventFields(req.SessionID, mcpCommand, string(core.DecisionBlocked), "", "MCP tool blocked by policy")
+		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionBlocked), "", "MCP tool blocked by policy")
 		return 2
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s classified as CAUTION\n", req.ToolName)
-		logHookEventFields(req.SessionID, mcpCommand, string(core.DecisionCaution), "", fmt.Sprintf("MCP tool %s classified as CAUTION", req.ToolName))
+		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionCaution), "", fmt.Sprintf("MCP tool %s classified as CAUTION", req.ToolName))
 		return 0
 	case core.DecisionApproval:
 		result := &core.ClassifyResult{
@@ -141,10 +148,10 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 				},
 			},
 		}
-		return handleApproval(req, result, stderr, cfg)
+		return handleApproval(req, result, stderr, cfg, dryRun)
 	default:
 		// SAFE
-		logHookEventFields(req.SessionID, mcpCommand, string(core.DecisionSafe), "", "")
+		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionSafe), "", "")
 		return 0
 	}
 }
@@ -165,7 +172,7 @@ func extractMCPAction(toolName string) string {
 }
 
 // handleBashTool handles Bash tool classification.
-func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
+func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Parse tool_input to extract command.
 	if len(req.ToolInput) == 0 {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Missing tool_input. Do not retry this exact command. Ask the user for guidance.")
@@ -209,22 +216,22 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 
 	switch result.Decision {
 	case core.DecisionSafe:
-		logHookEvent(req.SessionID, input.Command, result)
+		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
 		return 0
 
 	case core.DecisionBlocked:
 		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", result.Reason)
 		fmt.Fprintln(stderr, msg)
-		logHookEvent(req.SessionID, input.Command, result)
+		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
 		return 2
 
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
-		logHookEvent(req.SessionID, input.Command, result)
+		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
 		return 0
 
 	case core.DecisionApproval:
-		return handleApproval(req, result, stderr, cfg)
+		return handleApproval(req, result, stderr, cfg, dryRun)
 
 	default:
 		// Unknown decision: fail-closed.
@@ -234,7 +241,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config) int {
 }
 
 // handleApproval handles the APPROVAL decision path, which requires DB access.
-func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writer, cfg *config.Config) int {
+func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Lazy DB access: only APPROVAL path opens the database.
 	database, secret, err := openDBAndSecret()
 	if err != nil {
@@ -251,7 +258,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		return 2
 	}
 
-	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true)
+	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
 	if err != nil {
 		slog.Error("approval error", "error", err)
 		if msg := extractFuseDirective(err); msg != "" {
@@ -267,28 +274,43 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 	cmd := extractCommandFromResult(result)
 	switch decision {
 	case core.DecisionApproval, core.DecisionSafe, core.DecisionCaution:
-		_ = database.LogEvent(req.SessionID, cmd, string(decision), result.RuleID, result.Reason, 0, "hook")
+		_ = database.LogEvent(&db.EventRecord{
+			SessionID: req.SessionID, Command: cmd, Decision: string(decision),
+			RuleID: result.RuleID, Reason: result.Reason, Source: "hook", Agent: "claude", Cwd: req.Cwd,
+		})
 		return 0
 	default:
-		_ = database.LogEvent(req.SessionID, cmd, "BLOCKED", result.RuleID, "user denied", 0, "hook")
+		_ = database.LogEvent(&db.EventRecord{
+			SessionID: req.SessionID, Command: cmd, Decision: "BLOCKED",
+			RuleID: result.RuleID, Reason: "user denied", Source: "hook", Agent: "claude", Cwd: req.Cwd,
+		})
 		fmt.Fprintln(stderr, "fuse:USER_DENIED STOP. Do not retry this exact command without new user input.")
 		return 2
 	}
 }
 
 // logHookEvent logs a classification event best-effort (non-blocking).
-func logHookEvent(sessionID, command string, result *core.ClassifyResult) {
-	logHookEventFields(sessionID, command, string(result.Decision), result.RuleID, result.Reason)
+func logHookEvent(sessionID, command, cwd string, result *core.ClassifyResult) {
+	logHookEventFields(sessionID, command, cwd, string(result.Decision), result.RuleID, result.Reason)
 }
 
 // logHookEventFields logs a hook event with individual fields. Best-effort.
-func logHookEventFields(sessionID, command, decision, ruleID, reason string) {
+func logHookEventFields(sessionID, command, cwd, decision, ruleID, reason string) {
 	database, err := db.OpenDB(config.DBPath())
 	if err != nil {
 		return // best-effort: skip if DB unavailable
 	}
 	defer func() { _ = database.Close() }()
-	_ = database.LogEvent(sessionID, command, decision, ruleID, reason, 0, "hook")
+	_ = database.LogEvent(&db.EventRecord{
+		SessionID: sessionID,
+		Command:   command,
+		Decision:  decision,
+		RuleID:    ruleID,
+		Reason:    reason,
+		Source:    "hook",
+		Agent:     "claude",
+		Cwd:       cwd,
+	})
 	cleanupExecutionState(database, loadRuntimeConfig())
 }
 

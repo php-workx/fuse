@@ -120,10 +120,11 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	// Load configuration.
 	cfg := loadRuntimeConfig()
 
-	// Check if fuse is disabled (allow-all mode).
-	if config.IsDisabled() {
+	mode := config.Mode()
+	if mode == config.ModeDisabled {
 		return executeShellCommand(command, cwd, timeout)
 	}
+	dryRun := mode == config.ModeDryRun
 
 	// Load policy.
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
@@ -153,10 +154,12 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	// Handle classification result.
 	switch result.Decision {
 	case core.DecisionBlocked:
-		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
-		logEvent(database, "", command, result, "shell")
+		logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "blocked"))
 		cleanupExecutionState(database, cfg)
-		return 1, nil
+		if !dryRun {
+			fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
+			return 1, nil
+		}
 
 	case core.DecisionSafe:
 		// Execute directly.
@@ -165,50 +168,62 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 		// Execute directly.
 
 	case core.DecisionApproval:
-		// Prompt user for approval.
-		if database == nil {
-			fmt.Fprintf(os.Stderr, "fuse: approval required but database unavailable\n")
-			return 1, fmt.Errorf("database unavailable for approval")
-		}
+		if !dryRun {
+			// Prompt user for approval.
+			if database == nil {
+				fmt.Fprintf(os.Stderr, "fuse: approval required but database unavailable\n")
+				return 1, fmt.Errorf("database unavailable for approval")
+			}
 
-		secret, secretErr := db.EnsureSecret(config.SecretPath())
-		if secretErr != nil {
-			return 1, fmt.Errorf("load HMAC secret: %w", secretErr)
-		}
+			secret, secretErr := db.EnsureSecret(config.SecretPath())
+			if secretErr != nil {
+				return 1, fmt.Errorf("load HMAC secret: %w", secretErr)
+			}
 
-		mgr, mgrErr := approve.NewManager(database, secret)
-		if mgrErr != nil {
-			return 1, fmt.Errorf("create approval manager: %w", mgrErr)
-		}
-		decision, promptErr := mgr.RequestApproval(
-			result.DecisionKey,
-			command,
-			result.Reason,
-			"",    // no session ID in run mode
-			false, // not hook mode — 5min timeout
-		)
-		if promptErr != nil {
-			return 1, fmt.Errorf("approval: %w", promptErr)
-		}
-		if decision == core.DecisionBlocked {
-			fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
-			logEvent(database, "", command, result, "shell")
-			cleanupExecutionState(database, cfg)
-			return 1, nil
+			mgr, mgrErr := approve.NewManager(database, secret)
+			if mgrErr != nil {
+				return 1, fmt.Errorf("create approval manager: %w", mgrErr)
+			}
+			decision, promptErr := mgr.RequestApproval(
+				result.DecisionKey,
+				command,
+				result.Reason,
+				"",    // no session ID in run mode
+				false, // not hook mode — 5min timeout
+				false, // not dry-run (already checked above)
+			)
+			if promptErr != nil {
+				return 1, fmt.Errorf("approval: %w", promptErr)
+			}
+			if decision == core.DecisionBlocked {
+				fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
+				logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "denied"))
+				cleanupExecutionState(database, cfg)
+				return 1, nil
+			}
+		} else {
+			logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "dry-run"))
 		}
 
 	default:
 		// Unknown decision — execute directly (safe fallback).
 	}
 
-	if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
-		return 1, verifyErr
+	if !dryRun {
+		if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
+			return 1, verifyErr
+		}
 	}
 
 	// Execute the command.
 	exitCode, err = executeShellCommand(command, cwd, timeout)
 
-	logEvent(database, "", command, result, "shell")
+	// Log event.
+	outcome := "executed"
+	if err != nil {
+		outcome = "error"
+	}
+	logEvent(database, newEvent(result, "run", "manual", "", command, cwd, outcome))
 	cleanupExecutionState(database, cfg)
 
 	return exitCode, err
@@ -234,7 +249,9 @@ func executeShellCommand(command, cwd string, timeout time.Duration) (int, error
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd := exec.CommandContext( // nosemgrep: dangerous-exec-command
+		ctx, "/bin/sh", "-c", command,
+	)
 	cmd.Dir = cwd
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -320,7 +337,9 @@ func executeCapturedShellCommandWithStdin(command, cwd string, timeout time.Dura
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	cmd := exec.CommandContext( // nosemgrep: dangerous-exec-command
+		ctx, "/bin/sh", "-c", command,
+	)
 	cmd.Dir = cwd
 	cmd.Stdin = stdin
 	cmd.Env = BuildChildEnv(os.Environ())
@@ -351,19 +370,26 @@ func executeCapturedShellCommandWithStdin(command, cwd string, timeout time.Dura
 }
 
 // logEvent logs an execution event to the database if available.
-func logEvent(database *db.DB, sessionID, command string, result *core.ClassifyResult, source string) {
+func logEvent(database *db.DB, record *db.EventRecord) {
 	if database == nil {
 		return
 	}
-	_ = database.LogEvent(
-		sessionID,               // sessionID
-		command,                 // command
-		string(result.Decision), // decision
-		result.RuleID,           // ruleID
-		result.Reason,           // reason
-		0,                       // durationMs
-		source,                  // source
-	)
+	_ = database.LogEvent(record)
+}
+
+// newEvent builds an EventRecord from a ClassifyResult and context.
+func newEvent(result *core.ClassifyResult, source, agent, sessionID, command, cwd, outcome string) *db.EventRecord {
+	return &db.EventRecord{
+		SessionID: sessionID,
+		Command:   command,
+		Decision:  string(result.Decision),
+		RuleID:    result.RuleID,
+		Reason:    result.Reason,
+		Metadata:  outcome,
+		Source:    source,
+		Agent:     agent,
+		Cwd:       cwd,
+	}
 }
 
 func loadRuntimeConfig() *config.Config {

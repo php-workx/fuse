@@ -9,6 +9,16 @@ import (
 	"time"
 )
 
+// testEvent creates an EventRecord with the given fields for testing.
+func testEvent(sessionID, command, decision, source string) *EventRecord {
+	return &EventRecord{
+		SessionID: sessionID,
+		Command:   command,
+		Decision:  decision,
+		Source:    source,
+	}
+}
+
 // --- fu-xio: Test concurrent DB writes under WAL + busy_timeout ---
 
 // initSharedDB pre-creates and migrates the database so concurrent
@@ -49,7 +59,7 @@ func TestConcurrentEventWrites(t *testing.T) {
 			sessionID := fmt.Sprintf("session-%d", writerID)
 			for i := 0; i < eventsPerWriter; i++ {
 				cmd := fmt.Sprintf("command-%d-%d", writerID, i)
-				if err := d.LogEvent(sessionID, cmd, "SAFE", "", "", 0, "test"); err != nil {
+				if err := d.LogEvent(testEvent(sessionID, cmd, "SAFE", "test")); err != nil {
 					t.Errorf("writer %d event %d: LogEvent: %v", writerID, i, err)
 					failures.Add(1)
 					return
@@ -106,7 +116,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 			// Mix event writes, approval creates, and approval consumes.
 			for i := 0; i < 20; i++ {
 				// Log an event.
-				if err := d.LogEvent(sessionID, fmt.Sprintf("cmd-%d", i), "SAFE", "", "", 0, "mixed"); err != nil {
+				if err := d.LogEvent(testEvent(sessionID, fmt.Sprintf("cmd-%d", i), "SAFE", "mixed")); err != nil {
 					t.Errorf("worker %d: LogEvent: %v", workerID, err)
 					failures.Add(1)
 					return
@@ -174,17 +184,17 @@ func TestListEvents_SessionFilter(t *testing.T) {
 
 	// Log events from 3 sessions and 2 sources.
 	for i := 0; i < 5; i++ {
-		_ = d.LogEvent("sess-A", fmt.Sprintf("cmd-a-%d", i), "SAFE", "", "", 0, "hook")
+		_ = d.LogEvent(testEvent("sess-A", fmt.Sprintf("cmd-a-%d", i), "SAFE", "hook"))
 	}
 	for i := 0; i < 3; i++ {
-		_ = d.LogEvent("sess-B", fmt.Sprintf("cmd-b-%d", i), "BLOCKED", "", "blocked by policy", 0, "codex")
+		_ = d.LogEvent(testEvent("sess-B", fmt.Sprintf("cmd-b-%d", i), "BLOCKED", "codex"))
 	}
 	for i := 0; i < 2; i++ {
-		_ = d.LogEvent("sess-C", fmt.Sprintf("cmd-c-%d", i), "APPROVAL", "", "", 0, "hook")
+		_ = d.LogEvent(testEvent("sess-C", fmt.Sprintf("cmd-c-%d", i), "APPROVAL", "hook"))
 	}
 
 	// Filter by session-A: should get exactly 5 events.
-	eventsA, err := d.ListEvents(EventFilter{Session: "sess-A"})
+	eventsA, err := d.ListEvents(&EventFilter{Session: "sess-A"})
 	if err != nil {
 		t.Fatalf("ListEvents sess-A: %v", err)
 	}
@@ -198,7 +208,7 @@ func TestListEvents_SessionFilter(t *testing.T) {
 	}
 
 	// Filter by session-B: should get exactly 3 events.
-	eventsB, err := d.ListEvents(EventFilter{Session: "sess-B"})
+	eventsB, err := d.ListEvents(&EventFilter{Session: "sess-B"})
 	if err != nil {
 		t.Fatalf("ListEvents sess-B: %v", err)
 	}
@@ -207,7 +217,7 @@ func TestListEvents_SessionFilter(t *testing.T) {
 	}
 
 	// Filter by nonexistent session: should get 0.
-	eventsNone, err := d.ListEvents(EventFilter{Session: "sess-Z"})
+	eventsNone, err := d.ListEvents(&EventFilter{Session: "sess-Z"})
 	if err != nil {
 		t.Fatalf("ListEvents sess-Z: %v", err)
 	}
@@ -216,7 +226,7 @@ func TestListEvents_SessionFilter(t *testing.T) {
 	}
 
 	// No filter: should get all 10.
-	all, err := d.ListEvents(EventFilter{})
+	all, err := d.ListEvents(&EventFilter{})
 	if err != nil {
 		t.Fatalf("ListEvents all: %v", err)
 	}
@@ -228,13 +238,13 @@ func TestListEvents_SessionFilter(t *testing.T) {
 func TestListEvents_CombinedFilters(t *testing.T) {
 	d := openTestDB(t)
 
-	_ = d.LogEvent("sess-A", "safe-hook", "SAFE", "", "", 0, "hook")
-	_ = d.LogEvent("sess-A", "blocked-hook", "BLOCKED", "", "", 0, "hook")
-	_ = d.LogEvent("sess-A", "safe-codex", "SAFE", "", "", 0, "codex")
-	_ = d.LogEvent("sess-B", "safe-hook", "SAFE", "", "", 0, "hook")
+	_ = d.LogEvent(testEvent("sess-A", "safe-hook", "SAFE", "hook"))
+	_ = d.LogEvent(testEvent("sess-A", "blocked-hook", "BLOCKED", "hook"))
+	_ = d.LogEvent(testEvent("sess-A", "safe-codex", "SAFE", "codex"))
+	_ = d.LogEvent(testEvent("sess-B", "safe-hook", "SAFE", "hook"))
 
 	// Session=A + Decision=SAFE.
-	events, err := d.ListEvents(EventFilter{Session: "sess-A", Decision: "SAFE"})
+	events, err := d.ListEvents(&EventFilter{Session: "sess-A", Decision: "SAFE"})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -243,7 +253,7 @@ func TestListEvents_CombinedFilters(t *testing.T) {
 	}
 
 	// Session=A + Source=hook.
-	events, err = d.ListEvents(EventFilter{Session: "sess-A", Source: "hook"})
+	events, err = d.ListEvents(&EventFilter{Session: "sess-A", Source: "hook"})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -252,7 +262,7 @@ func TestListEvents_CombinedFilters(t *testing.T) {
 	}
 
 	// Session=A + Source=hook + Decision=SAFE.
-	events, err = d.ListEvents(EventFilter{Session: "sess-A", Source: "hook", Decision: "SAFE"})
+	events, err = d.ListEvents(&EventFilter{Session: "sess-A", Source: "hook", Decision: "SAFE"})
 	if err != nil {
 		t.Fatalf("ListEvents: %v", err)
 	}
@@ -261,43 +271,35 @@ func TestListEvents_CombinedFilters(t *testing.T) {
 	}
 }
 
-func TestSummarizeEvents_SessionFilter(t *testing.T) {
+func TestSummarizeEvents_AggregatesAll(t *testing.T) {
 	d := openTestDB(t)
 
-	// Session A: 10 SAFE hook events.
+	// 10 SAFE hook events + 5 BLOCKED codex events.
 	for i := 0; i < 10; i++ {
-		_ = d.LogEvent("sess-A", fmt.Sprintf("cmd-%d", i), "SAFE", "", "", 0, "hook")
+		_ = d.LogEvent(testEvent("sess-A", fmt.Sprintf("cmd-%d", i), "SAFE", "hook"))
 	}
-	// Session B: 5 BLOCKED codex events.
 	for i := 0; i < 5; i++ {
-		_ = d.LogEvent("sess-B", fmt.Sprintf("cmd-%d", i), "BLOCKED", "", "", 0, "codex")
+		_ = d.LogEvent(testEvent("sess-B", fmt.Sprintf("cmd-%d", i), "BLOCKED", "codex"))
 	}
 
-	// Summarize sess-A only.
-	summaries, total, err := d.SummarizeEvents(EventFilter{Session: "sess-A"})
+	summary, err := d.SummarizeEvents()
 	if err != nil {
-		t.Fatalf("SummarizeEvents sess-A: %v", err)
+		t.Fatalf("SummarizeEvents: %v", err)
 	}
-	if total != 10 {
-		t.Fatalf("sess-A total = %d, want 10", total)
+	if summary.Total != 15 {
+		t.Fatalf("total = %d, want 15", summary.Total)
 	}
-	if len(summaries) != 1 {
-		t.Fatalf("sess-A summary groups = %d, want 1", len(summaries))
+	if summary.ByDecision["SAFE"] != 10 {
+		t.Errorf("ByDecision[SAFE] = %d, want 10", summary.ByDecision["SAFE"])
 	}
-	if summaries[0].Decision != "SAFE" || summaries[0].Count != 10 {
-		t.Errorf("sess-A summary = {%s, %d}, want {SAFE, 10}", summaries[0].Decision, summaries[0].Count)
+	if summary.ByDecision["BLOCKED"] != 5 {
+		t.Errorf("ByDecision[BLOCKED] = %d, want 5", summary.ByDecision["BLOCKED"])
 	}
-
-	// Summarize all.
-	summaries, total, err = d.SummarizeEvents(EventFilter{})
-	if err != nil {
-		t.Fatalf("SummarizeEvents all: %v", err)
+	if summary.BySource["hook"] != 10 {
+		t.Errorf("BySource[hook] = %d, want 10", summary.BySource["hook"])
 	}
-	if total != 15 {
-		t.Fatalf("total = %d, want 15", total)
-	}
-	if len(summaries) != 2 {
-		t.Fatalf("summary groups = %d, want 2", len(summaries))
+	if summary.BySource["codex"] != 5 {
+		t.Errorf("BySource[codex] = %d, want 5", summary.BySource["codex"])
 	}
 }
 
@@ -306,16 +308,43 @@ func TestSummarizeEvents_FullTable(t *testing.T) {
 
 	// Insert more events than any reasonable limit.
 	for i := 0; i < 200; i++ {
-		_ = d.LogEvent("s", fmt.Sprintf("cmd-%d", i), "SAFE", "", "", 0, "hook")
+		_ = d.LogEvent(testEvent("s", fmt.Sprintf("cmd-%d", i), "SAFE", "hook"))
 	}
 
 	// SummarizeEvents must aggregate ALL events, not a capped subset.
-	_, total, err := d.SummarizeEvents(EventFilter{})
+	summary, err := d.SummarizeEvents()
 	if err != nil {
 		t.Fatalf("SummarizeEvents: %v", err)
 	}
-	if total != 200 {
-		t.Fatalf("total = %d, want 200 (aggregation must cover full table)", total)
+	if summary.Total != 200 {
+		t.Fatalf("total = %d, want 200 (aggregation must cover full table)", summary.Total)
+	}
+}
+
+func TestSummarizeEvents_Empty(t *testing.T) {
+	d := openTestDB(t)
+	summary, err := d.SummarizeEvents()
+	if err != nil {
+		t.Fatalf("SummarizeEvents: %v", err)
+	}
+	if summary.Total != 0 {
+		t.Fatalf("total = %d, want 0", summary.Total)
+	}
+}
+
+func TestSummarizeEvents_NullFields(t *testing.T) {
+	d := openTestDB(t)
+	// Log event with empty agent/source to test COALESCE paths.
+	_ = d.LogEvent(&EventRecord{Command: "test", Decision: "SAFE"})
+	summary, err := d.SummarizeEvents()
+	if err != nil {
+		t.Fatalf("SummarizeEvents: %v", err)
+	}
+	if summary.Total != 1 {
+		t.Fatalf("total = %d, want 1", summary.Total)
+	}
+	if summary.ByAgent["(unknown)"] != 1 {
+		t.Errorf("ByAgent[(unknown)] = %d, want 1", summary.ByAgent["(unknown)"])
 	}
 }
 

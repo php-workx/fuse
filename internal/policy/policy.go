@@ -15,6 +15,7 @@ type PolicyConfig struct {
 	Version          string       `yaml:"version"`
 	Rules            []PolicyRule `yaml:"rules"`
 	DisabledBuiltins []string     `yaml:"disabled_builtins"`
+	DisabledTags     []string     `yaml:"disabled_tags"`
 }
 
 // PolicyRule represents a single user-defined rule in policy.yaml.
@@ -95,6 +96,18 @@ func EvaluateUserRules(classNorm string, policy *PolicyConfig) (core.Decision, s
 	}
 
 	return bestDecision, bestReason
+}
+
+// DisabledTagSet returns a map for quick lookup of disabled tags.
+func DisabledTagSet(policy *PolicyConfig) map[string]bool {
+	if policy == nil || len(policy.DisabledTags) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(policy.DisabledTags))
+	for _, tag := range policy.DisabledTags {
+		m[tag] = true
+	}
+	return m
 }
 
 // DisabledBuiltinSet returns a map for quick lookup of disabled builtin rule IDs.

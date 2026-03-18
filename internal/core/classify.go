@@ -306,10 +306,17 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	}
 
 	// Step 9: Evaluate rules in order (most restrictive wins within each layer).
+
 	if evaluator != nil {
-		// Layer 2: User policy rules.
+		// Layer 2: User policy rules (always evaluated first — user can override anything).
 		if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
 			return d, reason, ""
+		}
+
+		// Layer 2.5: Safe build directory cleanup (rm -rf node_modules, dist, etc.)
+		// After user rules so project policies can still block/approve if needed.
+		if IsSafeBuildCleanup(cmd) {
+			return DecisionSafe, "safe build directory cleanup", ""
 		}
 
 		// Layer 3: Built-in preset rules.
@@ -345,6 +352,31 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	return DecisionSafe, "no matching rule (default safe)", ""
 }
 
+// Patterns that indicate dangerous inline Python code.
+var dangerousPythonInline = regexp.MustCompile(
+	`(?i)\b(subprocess|os\s*\.\s*(system|exec|popen|remove|unlink|rmdir|rename|makedirs)|` +
+		`shutil\s*\.\s*(rmtree|move|copy)|` +
+		`pathlib\s*\..*\.\s*(unlink|rmdir|rename|write_text|write_bytes|mkdir)|` +
+		`__import__|eval\s*\(|exec\s*\(|compile\s*\(|getattr\s*\(|` +
+		`open\s*\([^)]*,\s*['"][wa]|` +
+		`requests\s*\.|urllib\s*\.|http\.client|socket\s*\.|` +
+		`ctypes|cffi|pty\s*\.\s*spawn|multiprocessing|` +
+		`importlib\s*\.\s*import_module|` +
+		`code\s*\.\s*interact|codeop|` +
+		`pip\s*\.\s*main|setuptools|pkg_resources\s*\.\s*require|` +
+		`boto3|google\.cloud|azure\.)`,
+)
+
+// Safe Python modules commonly used by agents for read-only introspection.
+// Excludes os.path (allows os.remove via import os.path; os.remove),
+// pip/setuptools/pkg_resources (can install/remove packages).
+var safePythonInline = regexp.MustCompile(
+	`\bpython[23]?\s+-c\s+.*\bimport\s+(ast|json|sys|pathlib|` +
+		`collections|re|math|hashlib|base64|struct|textwrap|inspect|tokenize|` +
+		`configparser|tomllib|typing|dataclasses|enum|functools|itertools|operator|string|` +
+		`platform|sysconfig|site)\b`,
+)
+
 // detectInlineScript checks for inline script/heredoc patterns (§5.4).
 // Returns the decision and reason if a pattern matches, or empty strings if none.
 func detectInlineScript(cmd string) (Decision, string) {
@@ -353,6 +385,11 @@ func detectInlineScript(cmd string) (Decision, string) {
 
 	for _, p := range inlineScriptPatterns {
 		if p.re.MatchString(cmd) {
+			// Check if this is a safe python -c pattern.
+			if p.re == reInlinePythonC && isSafePythonInline(cmd) {
+				continue
+			}
+
 			var d Decision
 			if p.approval {
 				d = DecisionApproval
@@ -373,6 +410,15 @@ func detectInlineScript(cmd string) (Decision, string) {
 	}
 
 	return bestDecision, bestReason
+}
+
+// isSafePythonInline returns true if a python -c command uses only safe,
+// read-only modules and contains no dangerous patterns.
+func isSafePythonInline(cmd string) bool {
+	if !safePythonInline.MatchString(cmd) {
+		return false
+	}
+	return !dangerousPythonInline.MatchString(cmd)
 }
 
 // escalateDecision applies the sudo/doas escalation modifier.

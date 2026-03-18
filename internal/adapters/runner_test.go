@@ -225,6 +225,44 @@ func TestExecuteCommand_SafeCommand(t *testing.T) {
 	}
 }
 
+func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
+	withFuseHome(t)
+	enableDryRunForTest(t)
+	exitCode, err := ExecuteCommand("printf dryrun", t.TempDir(), time.Minute)
+	if err != nil {
+		t.Fatalf("ExecuteCommand in dry-run returned error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exit code = %d, want 0 in dry-run", exitCode)
+	}
+}
+
+func TestExecuteCommand_DisabledPassesThrough(t *testing.T) {
+	withFuseHome(t)
+	// Neither enabled nor dry-run — fully disabled.
+
+	exitCode, err := ExecuteCommand("printf disabled", t.TempDir(), time.Minute)
+	if err != nil {
+		t.Fatalf("ExecuteCommand when disabled returned error: %v", err)
+	}
+	if exitCode != 0 {
+		t.Errorf("exit code = %d, want 0 when disabled", exitCode)
+	}
+}
+
+func TestExecuteCommand_EnabledBlockedCommand(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	exitCode, err := ExecuteCommand("rm -rf /", t.TempDir(), time.Minute)
+	if err != nil {
+		t.Fatalf("ExecuteCommand returned error: %v", err)
+	}
+	if exitCode != 1 {
+		t.Errorf("exit code = %d, want 1 for blocked command", exitCode)
+	}
+}
+
 func TestReverifyDecisionKeyDetectsChangedScript(t *testing.T) {
 	tmpDir := t.TempDir()
 	scriptPath := filepath.Join(tmpDir, "task.py")

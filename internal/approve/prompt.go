@@ -10,14 +10,28 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
+
 // PromptUser shows a TUI approval prompt on /dev/tty.
 // Returns the user's decision (approved bool), chosen scope, and any error.
 // hookMode: true = 25s timeout, false = 5min timeout.
-func PromptUser(command, reason string, hookMode bool) (approved bool, scope string, err error) {
-	// Open /dev/tty directly — in hook mode, stdin carries JSON data.
+// openTTY opens /dev/tty for interactive prompts.
+// Returns errNonInteractive if FUSE_NON_INTERACTIVE is set or /dev/tty is unavailable.
+func openTTY(nonInteractive bool) (*os.File, error) {
+	if nonInteractive || os.Getenv("FUSE_NON_INTERACTIVE") != "" {
+		return nil, errNonInteractive
+	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
-		return false, "", fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
+		return nil, errNonInteractive
+	}
+	return tty, nil
+}
+
+func PromptUser(command, reason string, hookMode, nonInteractive bool) (approved bool, scope string, err error) {
+	tty, err := openTTY(nonInteractive)
+	if err != nil {
+		return false, "", err
 	}
 	defer func() { _ = tty.Close() }()
 

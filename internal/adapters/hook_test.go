@@ -93,6 +93,7 @@ func TestRunHook_MCP(t *testing.T) {
 }
 
 func TestRunHook_MCP_DestructiveAction(t *testing.T) {
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 	// MCP tool with a destructive-prefix action should trigger caution/approval path.
 	input := `{"tool_name":"mcp__server__delete_items","tool_input":{"id":"123"},"session_id":"test","cwd":"/tmp"}`
 	stdin := strings.NewReader(input)
@@ -131,6 +132,54 @@ func TestRunHook_MissingToolInput(t *testing.T) {
 
 	if exitCode != 2 {
 		t.Errorf("expected exit code 2 for missing tool_input, got %d", exitCode)
+	}
+}
+
+func TestRunHook_DryRunAllowsBlockedCommand(t *testing.T) {
+	withFuseHome(t)
+	enableDryRunForTest(t)
+
+	input := `{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"dry-run-test","cwd":"/tmp"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := RunHook(stdin, stderr)
+
+	// In dry-run mode, even BLOCKED commands return exit 0 (allow).
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0 in dry-run mode, got %d; stderr: %s", exitCode, stderr.String())
+	}
+}
+
+func TestRunHook_DryRunAllowsApprovalCommand(t *testing.T) {
+	withFuseHome(t)
+	enableDryRunForTest(t)
+
+	input := `{"tool_name":"mcp__server__delete_items","tool_input":{"id":"123"},"session_id":"dry-run-test","cwd":"/tmp"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := RunHook(stdin, stderr)
+
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0 in dry-run mode for MCP approval, got %d; stderr: %s", exitCode, stderr.String())
+	}
+}
+
+func TestRunHook_DisabledPassesThrough(t *testing.T) {
+	withFuseHome(t)
+	// Neither enabled nor dry-run — fully disabled.
+
+	input := `{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"disabled-test","cwd":"/tmp"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := RunHook(stdin, stderr)
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0 when disabled, got %d", exitCode)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("expected no stderr when disabled, got: %s", stderr.String())
 	}
 }
 

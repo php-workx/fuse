@@ -60,7 +60,7 @@ func TestHardcoded_MatchExamples(t *testing.T) {
 		{"sed -i 's/a/b/' ~/.fuse/config/policy.yaml", "modifying fuse config should be blocked"},
 		{"rm -rf ~/.fuse/", "deleting fuse directory should be blocked"},
 		{"rm .claude/settings.json", "deleting claude settings should be blocked"},
-		{"sqlite3 fuse.db", "direct access to fuse db should be blocked"},
+		{"sqlite3 fuse.db \"DROP TABLE events\"", "destructive sqlite3 on fuse db should be blocked"},
 		{"python -c 'import os' ~/.fuse/config", "python eval touching fuse files should be blocked"},
 		{"node -e 'code' .claude/settings.json", "node eval touching claude settings should be blocked"},
 		{"bash -c 'cat fuse.db'", "bash eval touching fuse db should be blocked"},
@@ -282,7 +282,8 @@ func TestEvaluateBuiltins_Empty(t *testing.T) {
 	BuiltinRules = nil
 	defer func() { BuiltinRules = saved }()
 
-	dec, reason, id := EvaluateBuiltins("rm -rf /", nil)
+	idx := BuildRuleIndex(BuiltinRules)
+	dec, reason, id := EvaluateBuiltins("rm -rf /", nil, nil, idx)
 	if dec != "" || reason != "" || id != "" {
 		t.Errorf("expected no match with empty builtins, got dec=%q reason=%q id=%q", dec, reason, id)
 	}
@@ -303,8 +304,10 @@ func TestEvaluateBuiltins_WithRule(t *testing.T) {
 		},
 	}
 
+	idx := BuildRuleIndex(BuiltinRules)
+
 	// Should match
-	dec, reason, id := EvaluateBuiltins("run test now", nil)
+	dec, reason, id := EvaluateBuiltins("run test now", nil, nil, idx)
 	if dec != core.DecisionCaution {
 		t.Errorf("expected CAUTION, got %q", dec)
 	}
@@ -317,7 +320,7 @@ func TestEvaluateBuiltins_WithRule(t *testing.T) {
 
 	// Should be skipped when disabled
 	disabled := map[string]bool{"test:rule1": true}
-	dec, reason, id = EvaluateBuiltins("run test now", disabled)
+	dec, reason, id = EvaluateBuiltins("run test now", disabled, nil, idx)
 	if dec != "" || reason != "" || id != "" {
 		t.Errorf("expected no match when disabled, got dec=%q reason=%q id=%q", dec, reason, id)
 	}

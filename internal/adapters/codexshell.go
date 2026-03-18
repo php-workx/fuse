@@ -223,10 +223,12 @@ func handleCodexShellToolCall(msg jsonRPCMessage, sessionID string) (jsonRPCMess
 
 func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Duration) (string, string, int, error) {
 	cfg := loadRuntimeConfig()
-	if config.IsDisabled() {
+	mode := config.Mode()
+	if mode == config.ModeDisabled {
 		execResult, err := executeCapturedShellCommand(command, cwd, timeout)
 		return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
 	}
+	dryRun := mode == config.ModeDryRun
 
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
 	evaluator := policy.NewEvaluator(policyCfg)
@@ -252,44 +254,56 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 
 	switch result.Decision {
 	case core.DecisionBlocked:
-		logEvent(database, sessionID, command, result, "codex")
+		logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "blocked"))
 		cleanupExecutionState(database, cfg)
-		return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
+		if !dryRun {
+			return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
+		}
 	case core.DecisionSafe, core.DecisionCaution:
 		// Execute directly.
 	case core.DecisionApproval:
-		if database == nil {
-			return "", "", 0, fmt.Errorf("database unavailable for approval")
-		}
-		secret, secretErr := db.EnsureSecret(config.SecretPath())
-		if secretErr != nil {
-			return "", "", 0, secretErr
-		}
+		if !dryRun {
+			if database == nil {
+				return "", "", 0, fmt.Errorf("database unavailable for approval")
+			}
+			secret, secretErr := db.EnsureSecret(config.SecretPath())
+			if secretErr != nil {
+				return "", "", 0, secretErr
+			}
 
-		mgr, mgrErr := approve.NewManager(database, secret)
-		if mgrErr != nil {
-			return "", "", 0, mgrErr
-		}
-		decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, sessionID, false)
-		if promptErr != nil {
-			return "", "", 0, promptErr
-		}
-		if decision == core.DecisionBlocked {
-			logEvent(database, sessionID, command, result, "codex")
-			cleanupExecutionState(database, cfg)
-			return "", "", 0, errApprovalDenied
+			mgr, mgrErr := approve.NewManager(database, secret)
+			if mgrErr != nil {
+				return "", "", 0, mgrErr
+			}
+			decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, sessionID, false, dryRun)
+			if promptErr != nil {
+				return "", "", 0, promptErr
+			}
+			if decision == core.DecisionBlocked {
+				logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "denied"))
+				cleanupExecutionState(database, cfg)
+				return "", "", 0, errApprovalDenied
+			}
+		} else {
+			logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "dry-run"))
 		}
 
 	default:
 		// Unknown decision — execute directly (safe fallback).
 	}
 
-	if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
-		return "", "", 0, verifyErr
+	if !dryRun {
+		if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
+			return "", "", 0, verifyErr
+		}
 	}
 
 	execResult, err := executeCapturedShellCommand(command, cwd, timeout)
-	logEvent(database, sessionID, command, result, "codex")
+	outcome := "executed"
+	if err != nil {
+		outcome = "error"
+	}
+	logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, outcome))
 	cleanupExecutionState(database, cfg)
 	return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
 }

@@ -60,7 +60,9 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 		return err
 	}
 
-	cmd := exec.Command(proxyCfg.Command, proxyCfg.Args...)
+	cmd := exec.Command( // nosemgrep: dangerous-exec-command
+		proxyCfg.Command, proxyCfg.Args...,
+	)
 	cmd.Env = buildProxyEnv(proxyCfg.Env)
 	cmd.Stderr = stderr
 
@@ -214,6 +216,17 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 }
 
 func interceptProxyRequest(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
+	mode := config.Mode()
+	if mode == config.ModeDisabled {
+		return true, nil, nil // fully disabled: zero processing
+	}
+	if mode == config.ModeDryRun {
+		// Dry-run: classify for logging but always pass through.
+		if method, _ := msg["method"].(string); method == "tools/call" {
+			_, _, _ = interceptToolCall(msg)
+		}
+		return true, nil, nil
+	}
 	method, _ := msg["method"].(string)
 	switch method {
 	case "tools/call":
@@ -277,7 +290,7 @@ func requestMCPApproval(name string, arguments map[string]interface{}) (bool, er
 		},
 	}
 
-	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, "", false)
+	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, "", false, false)
 	if err != nil {
 		return false, err
 	}

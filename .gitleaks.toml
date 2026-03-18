@@ -1,0 +1,16 @@
+# gitleaks configuration for fuse
+# Extend the bundled rules — only add repo-specific allowlists.
+[extend]
+  useDefault = true
+
+[allowlist]
+  description = "Allowed patterns"
+
+  # SonarQube default credentials used in sonar-setup recipe (well-known defaults, not real secrets).
+  paths = [
+    '''justfile''',
+  ]
+  regexTarget = "match"
+  regexes = [
+    '''admin:admin''',
+  ]

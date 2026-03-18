@@ -54,6 +54,13 @@ func enableFuseForTest(t *testing.T) {
 	}
 }
 
+func enableDryRunForTest(t *testing.T) {
+	t.Helper()
+	if err := os.WriteFile(config.DryRunMarkerPath(), []byte("1"), 0o600); err != nil {
+		t.Fatalf("write dry-run marker: %v", err)
+	}
+}
+
 func runCodexShellServerRequests(t *testing.T, requests ...jsonRPCMessage) []jsonRPCMessage {
 	t.Helper()
 
@@ -261,6 +268,7 @@ func TestExecuteCodexShellCommand_EnabledBlockedCommand(t *testing.T) {
 func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
 	_, _, exitCode, err := executeCodexShellCommand("python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
@@ -468,6 +476,7 @@ func TestRunCodexShellServer_ToolCallBlocked(t *testing.T) {
 func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
 	responses := runCodexShellServerRequests(t, jsonRPCMessage{
 		"jsonrpc": "2.0",
@@ -533,8 +542,8 @@ func TestExecuteCodexShellCommand_SessionIDAttribution(t *testing.T) {
 	if storedDecision != "SAFE" {
 		t.Errorf("decision = %q, want %q", storedDecision, "SAFE")
 	}
-	if storedSource != "codex" {
-		t.Errorf("source = %q, want %q", storedSource, "codex")
+	if storedSource != "codex-shell" {
+		t.Errorf("source = %q, want %q", storedSource, "codex-shell")
 	}
 }
 
