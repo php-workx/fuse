@@ -122,7 +122,8 @@ func classifyNativeFilePath(path, cwd string) (core.Decision, string) {
 		return core.DecisionBlocked, fmt.Sprintf("access to Claude settings path %s is blocked", path)
 	case info.isCodexConfigPath():
 		return core.DecisionBlocked, fmt.Sprintf("access to Codex config path %s is blocked", path)
-	case (info.hasBase("fuse.db") || info.hasBase("secret.key")) && info.isUnder(filepath.Join(info.homeDir, ".fuse")):
+	case (info.hasBase("fuse.db") || info.hasBase("secret.key")) &&
+		(info.isUnder(config.BaseDir()) || info.isUnder(filepath.Join(info.homeDir, ".fuse"))):
 		return core.DecisionBlocked, fmt.Sprintf("access to protected fuse state file %s is blocked", path)
 	case info.isGitHookPath():
 		return core.DecisionBlocked, fmt.Sprintf("access to git hooks path %s is blocked", path)
@@ -185,17 +186,40 @@ func nativeFilePathInfo(path, cwd string) filePathInfo {
 	}
 	// Resolve symlinks to prevent bypass via symlinked paths
 	// (e.g., safe.txt -> ~/.fuse/state/secret.key).
-	if evalResolved, err := filepath.EvalSymlinks(resolved); err == nil {
-		resolved = evalResolved
-	}
+	// If the target doesn't exist yet, resolve the nearest existing parent
+	// and recompose the path so containment checks use the real target.
+	resolved = evalSymlinksWithFallback(resolved)
 	return filePathInfo{
 		raw:      path,
 		cleanRaw: cleanRaw,
 		abs:      filepath.Clean(resolved),
 		slashRaw: filepath.ToSlash(cleanRaw),
 		slashAbs: filepath.ToSlash(filepath.Clean(resolved)),
-		homeDir:  filepath.Clean(homeDir),
+		homeDir:  evalSymlinksWithFallback(filepath.Clean(homeDir)),
 		cwd:      cleanCwd,
+	}
+}
+
+// evalSymlinksWithFallback resolves symlinks on the given path. If the target
+// doesn't exist, it walks up to the nearest existing parent, resolves that,
+// and recomposes the path with the remaining suffix.
+func evalSymlinksWithFallback(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	// Walk up to the nearest existing parent.
+	current := path
+	var suffix string
+	for {
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path // reached root without finding existing dir
+		}
+		suffix = filepath.Join(filepath.Base(current), suffix)
+		if resolved, err := filepath.EvalSymlinks(parent); err == nil {
+			return filepath.Join(resolved, suffix)
+		}
+		current = parent
 	}
 }
 
@@ -267,11 +291,12 @@ func (p *filePathInfo) isEnvFile() bool {
 }
 
 func (p *filePathInfo) hasSensitiveExtension() bool {
-	ext := strings.ToLower(filepath.Ext(p.cleanRaw))
-	switch ext {
-	case ".pem", ".key", ".crt", ".p12", ".pfx", ".jks", ".keystore":
-		return true
-	default:
-		return false
+	// Check both the raw path and the resolved target (for symlinks).
+	for _, path := range []string{p.cleanRaw, p.abs} {
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".pem", ".key", ".crt", ".p12", ".pfx", ".jks", ".keystore":
+			return true
+		}
 	}
+	return false
 }
