@@ -655,6 +655,50 @@ func mustClaudeSettings(t *testing.T, entries []map[string]interface{}) map[stri
 	return settings
 }
 
+// defaultFuseHookEntries returns the standard Bash + mcp__ hook entries
+// used across most doctor tests.
+func defaultFuseHookEntries() []map[string]interface{} {
+	return []map[string]interface{}{
+		{
+			"matcher": "Bash",
+			"hooks": []map[string]interface{}{
+				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
+			},
+		},
+		{
+			"matcher": "mcp__.*",
+			"hooks": []map[string]interface{}{
+				{"type": "command", "command": "fuse hook evaluate", "timeout": float64(30)},
+			},
+		},
+	}
+}
+
+func TestMergeClaudeSecureSettings_UpgradesExplicitFalse(t *testing.T) {
+	settings := mustClaudeSettings(t, defaultFuseHookEntries())
+
+	// Pre-seed sandbox.enabled=false — the secure upgrade should flip it to true.
+	settings["sandbox"] = map[string]interface{}{
+		"enabled": false,
+	}
+
+	if err := mergeClaudeSecureSettings(settings); err != nil {
+		t.Fatalf("mergeClaudeSecureSettings: %v", err)
+	}
+
+	sandbox, ok := settings["sandbox"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected sandbox map")
+	}
+	enabled, ok := sandbox["enabled"]
+	if !ok {
+		t.Fatal("expected sandbox.enabled key")
+	}
+	if enabled != true {
+		t.Fatalf("mergeClaudeSecureSettings did not upgrade sandbox.enabled from false to true, got %v", enabled)
+	}
+}
+
 func writeJSONForTest(t *testing.T, path string, data map[string]interface{}) {
 	t.Helper()
 

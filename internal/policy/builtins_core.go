@@ -287,6 +287,12 @@ func init() {
 			Reason:  "Deletes CloudFormation stack set (multi-account/region)",
 		},
 		BuiltinRule{
+			ID:      "builtin:aws:delete-stack-instances",
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack-instances\b.*--no-retain-stacks\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Deletes stack set instances and their underlying stacks",
+		},
+		BuiltinRule{
 			ID:      "builtin:aws:delete-change-set",
 			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-change-set\b`),
 			Action:  core.DecisionApproval,

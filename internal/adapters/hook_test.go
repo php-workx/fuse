@@ -241,6 +241,7 @@ func TestRunHook_NativeFileReadSafe(t *testing.T) {
 
 func TestRunHook_NativeFileReadSecretRequiresApproval(t *testing.T) {
 	enableHookForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 

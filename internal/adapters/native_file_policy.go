@@ -137,6 +137,14 @@ func classifyNativeFilePath(path, cwd string) (core.Decision, string) {
 		return core.DecisionApproval, fmt.Sprintf("access to Azure config path %s requires approval", path)
 	case info.hasBase("kubeconfig") || info.matchesAbsolute(filepath.Join(info.homeDir, ".kube", "config")):
 		return core.DecisionApproval, fmt.Sprintf("access to Kubernetes config path %s requires approval", path)
+	case info.isUnder(filepath.Join(info.homeDir, ".gnupg")):
+		return core.DecisionApproval, fmt.Sprintf("access to GPG path %s requires approval", path)
+	case info.isUnder(filepath.Join(info.homeDir, ".docker")):
+		return core.DecisionApproval, fmt.Sprintf("access to Docker config path %s requires approval", path)
+	case info.hasBase(".npmrc") || info.matchesAbsolute(filepath.Join(info.homeDir, ".npmrc")):
+		return core.DecisionApproval, fmt.Sprintf("access to npm credentials %s requires approval", path)
+	case info.hasBase(".pypirc") || info.matchesAbsolute(filepath.Join(info.homeDir, ".pypirc")):
+		return core.DecisionApproval, fmt.Sprintf("access to PyPI credentials %s requires approval", path)
 	case info.hasSensitiveExtension():
 		return core.DecisionApproval, fmt.Sprintf("access to certificate or key file %s requires approval", path)
 	default:

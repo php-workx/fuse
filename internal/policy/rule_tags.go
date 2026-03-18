@@ -6,7 +6,7 @@ func init() {
 	applyRuleMetadata(builtinRuleTags())
 }
 
-func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen // tag registry is intentionally large
+func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag registry is intentionally large
 	return map[string]ruleMetadata{
 		// === Git ===
 		"builtin:git:reset-hard":       {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
@@ -54,6 +54,7 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen // tag registry
 		"builtin:aws:delete-ses-identity":            {tags: []string{"aws", "cloud", "ses"}, keywords: []string{"aws"}},
 		"builtin:aws:delete-stack":                   {tags: []string{"aws", "cloud", "cloudformation"}, keywords: []string{"aws"}},
 		"builtin:aws:delete-stack-set":               {tags: []string{"aws", "cloud", "cloudformation"}, keywords: []string{"aws"}},
+		"builtin:aws:delete-stack-instances":         {tags: []string{"aws", "cloud", "cloudformation"}, keywords: []string{"aws"}},
 		"builtin:aws:delete-change-set":              {tags: []string{"aws", "cloud", "cloudformation"}, keywords: []string{"aws"}},
 		"builtin:aws:cancel-update-stack":            {tags: []string{"aws", "cloud", "cloudformation"}, keywords: []string{"aws"}},
 		"builtin:aws:disable-termination-protection": {tags: []string{"aws", "cloud", "cloudformation"}, keywords: []string{"aws"}},
@@ -193,6 +194,102 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen // tag registry
 		// === Ansible ===
 		"builtin:ansible:playbook":      {tags: []string{"ansible", "iac"}, keywords: []string{"ansible"}},
 		"builtin:ansible:galaxy-remove": {tags: []string{"ansible", "iac"}, keywords: []string{"ansible"}},
+
+		// === PaaS (additional) ===
+		"builtin:paas:vercel-rm":      {tags: []string{"paas", "vercel"}, keywords: []string{"vercel"}},
+		"builtin:paas:netlify-delete": {tags: []string{"paas", "netlify"}, keywords: []string{"netlify"}},
+
+		// === Filesystem ===
+		"builtin:fs:rm-rf":        {tags: []string{"filesystem"}, keywords: []string{"rm"}},
+		"builtin:fs:rm-split-rf":  {tags: []string{"filesystem"}, keywords: []string{"rm"}},
+		"builtin:fs:rm-long-rf":   {tags: []string{"filesystem"}, keywords: []string{"rm"}},
+		"builtin:fs:find-delete":  {tags: []string{"filesystem"}, keywords: []string{"find"}},
+		"builtin:fs:find-exec-rm": {tags: []string{"filesystem"}, keywords: []string{"find"}},
+		"builtin:fs:shred":        {tags: []string{"filesystem"}, keywords: []string{"shred"}},
+
+		// === Interpreters ===
+		"builtin:interp:python-file": {tags: []string{"interpreter", "python"}, keywords: []string{"python"}},
+		"builtin:interp:node-file":   {tags: []string{"interpreter", "node"}, keywords: []string{"node"}},
+		"builtin:interp:bash-file":   {tags: []string{"interpreter", "bash"}, keywords: []string{"bash", "sh"}},
+
+		// === Credential access ===
+		"builtin:cred:env-dump":        {tags: []string{"credential"}, keywords: []string{"env", "printenv"}},
+		"builtin:cred:cat-credentials": {tags: []string{"credential"}, keywords: []string{"cat"}},
+		"builtin:cred:cat-cloud-creds": {tags: []string{"credential"}, keywords: []string{"cat"}},
+		"builtin:cred:ssh-key-read":    {tags: []string{"credential", "ssh"}, keywords: []string{"cat", "ssh"}},
+		"builtin:cred:history-read":    {tags: []string{"credential"}, keywords: []string{"history", "cat"}},
+		"builtin:cred:docker-config":   {tags: []string{"credential", "docker"}, keywords: []string{"cat", "docker"}},
+		"builtin:cred:npm-token":       {tags: []string{"credential", "npm"}, keywords: []string{"cat", "npmrc"}},
+		"builtin:cred:copy-creds":      {tags: []string{"credential"}, keywords: []string{"cp", "scp"}},
+		"builtin:cred:base64-key":      {tags: []string{"credential"}, keywords: []string{"base64"}},
+
+		// === Exfiltration ===
+		"builtin:exfil:curl-post":    {tags: []string{"exfiltration"}, keywords: []string{"curl"}},
+		"builtin:exfil:curl-upload":  {tags: []string{"exfiltration"}, keywords: []string{"curl"}},
+		"builtin:exfil:wget-post":    {tags: []string{"exfiltration"}, keywords: []string{"wget"}},
+		"builtin:exfil:tar-create":   {tags: []string{"exfiltration"}, keywords: []string{"tar"}},
+		"builtin:exfil:zip-create":   {tags: []string{"exfiltration"}, keywords: []string{"zip"}},
+		"builtin:exfil:nc-connect":   {tags: []string{"exfiltration"}, keywords: []string{"nc", "ncat", "netcat"}},
+		"builtin:exfil:scp-out":      {tags: []string{"exfiltration"}, keywords: []string{"scp"}},
+		"builtin:exfil:dns-exfil":    {tags: []string{"exfiltration"}, keywords: []string{"dig", "nslookup"}},
+		"builtin:exfil:redirect-tcp": {tags: []string{"exfiltration"}, keywords: []string{"/dev/tcp"}},
+
+		// === Reverse shells ===
+		"builtin:revshell:bash-tcp": {tags: []string{"revshell", "security"}, keywords: []string{"/dev/tcp"}},
+		"builtin:revshell:python":   {tags: []string{"revshell", "security"}, keywords: []string{"python"}},
+		"builtin:revshell:nc-exec":  {tags: []string{"revshell", "security"}, keywords: []string{"nc", "ncat", "netcat"}},
+		"builtin:revshell:mkfifo":   {tags: []string{"revshell", "security"}, keywords: []string{"mkfifo"}},
+		"builtin:revshell:socat":    {tags: []string{"revshell", "security"}, keywords: []string{"socat"}},
+
+		// === Persistence ===
+		"builtin:persist:crontab-edit":    {tags: []string{"persistence"}, keywords: []string{"crontab"}},
+		"builtin:persist:cron-write":      {tags: []string{"persistence"}, keywords: []string{"cron"}},
+		"builtin:persist:systemd-enable":  {tags: []string{"persistence"}, keywords: []string{"systemctl"}},
+		"builtin:persist:launchd-load":    {tags: []string{"persistence"}, keywords: []string{"launchctl"}},
+		"builtin:persist:profile-write":   {tags: []string{"persistence"}, keywords: []string{"bashrc", "zshrc", "profile"}},
+		"builtin:persist:sudoers-write":   {tags: []string{"persistence"}, keywords: []string{"sudoers"}},
+		"builtin:persist:authorized-keys": {tags: []string{"persistence", "ssh"}, keywords: []string{"authorized_keys"}},
+
+		// === Container security ===
+		"builtin:container:privileged": {tags: []string{"container", "security"}, keywords: []string{"docker", "podman"}},
+		"builtin:container:host-pid":   {tags: []string{"container", "security"}, keywords: []string{"docker", "podman"}},
+		"builtin:container:host-net":   {tags: []string{"container", "security"}, keywords: []string{"docker", "podman"}},
+		"builtin:container:mount-sock": {tags: []string{"container", "security"}, keywords: []string{"docker", "podman"}},
+		"builtin:container:mount-root": {tags: []string{"container", "security"}, keywords: []string{"docker", "podman"}},
+		"builtin:container:nsenter":    {tags: []string{"container", "security"}, keywords: []string{"nsenter"}},
+		"builtin:container:unshare":    {tags: []string{"container", "security"}, keywords: []string{"unshare"}},
+
+		// === Privilege escalation ===
+		"builtin:privesc:setuid":  {tags: []string{"privesc", "security"}, keywords: []string{"chmod"}},
+		"builtin:privesc:cap-add": {tags: []string{"privesc", "security"}, keywords: []string{"cap-add", "docker"}},
+
+		// === Obfuscation ===
+		"builtin:obfusc:base64-exec": {tags: []string{"obfuscation", "security"}, keywords: []string{"base64"}},
+		"builtin:obfusc:xxd-exec":    {tags: []string{"obfuscation", "security"}, keywords: []string{"xxd"}},
+		"builtin:obfusc:printf-exec": {tags: []string{"obfuscation", "security"}, keywords: []string{"printf"}},
+		"builtin:obfusc:rev-exec":    {tags: []string{"obfuscation", "security"}, keywords: []string{"rev"}},
+		"builtin:obfusc:curl-exec":   {tags: []string{"obfuscation", "security"}, keywords: []string{"curl"}},
+		"builtin:obfusc:wget-exec":   {tags: []string{"obfuscation", "security"}, keywords: []string{"wget"}},
+
+		// === Indirect execution ===
+		"builtin:indirect:xargs-exec": {tags: []string{"indirect", "security"}, keywords: []string{"xargs"}},
+		"builtin:indirect:find-exec":  {tags: []string{"indirect", "security"}, keywords: []string{"find"}},
+
+		// === Package managers ===
+		"builtin:pkg:npm-global":      {tags: []string{"package", "npm"}, keywords: []string{"npm"}},
+		"builtin:pkg:pip-install":     {tags: []string{"package", "pip"}, keywords: []string{"pip"}},
+		"builtin:pkg:pip-install-url": {tags: []string{"package", "pip"}, keywords: []string{"pip"}},
+		"builtin:pkg:gem-install":     {tags: []string{"package", "gem"}, keywords: []string{"gem"}},
+		"builtin:pkg:cargo-install":   {tags: []string{"package", "cargo"}, keywords: []string{"cargo"}},
+		"builtin:pkg:go-install":      {tags: []string{"package", "go"}, keywords: []string{"go"}},
+		"builtin:pkg:brew-uninstall":  {tags: []string{"package", "brew"}, keywords: []string{"brew"}},
+		"builtin:pkg:apt-remove":      {tags: []string{"package", "apt"}, keywords: []string{"apt"}},
+
+		// === Recon ===
+		"builtin:recon:nmap":     {tags: []string{"recon", "security"}, keywords: []string{"nmap"}},
+		"builtin:recon:masscan":  {tags: []string{"recon", "security"}, keywords: []string{"masscan"}},
+		"builtin:recon:nikto":    {tags: []string{"recon", "security"}, keywords: []string{"nikto"}},
+		"builtin:recon:gobuster": {tags: []string{"recon", "security"}, keywords: []string{"gobuster"}},
 	}
 }
 
