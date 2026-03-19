@@ -18,6 +18,12 @@ const (
 
 	maxBoxWidth = 72
 	minBoxWidth = 40
+
+	// ANSI SGR escape codes.
+	ansiReset    = "\033[0m"
+	ansiBold     = "\033[1m"
+	ansiDim      = "\033[2m"
+	ansiBoldCyan = "\033[1;36m"
 )
 
 // groupCommandOrder defines the display order for commands within each group.
@@ -68,79 +74,80 @@ func (r helpRenderer) dim(s string) string {
 	if !r.color {
 		return s
 	}
-	return "\033[2m" + s + "\033[0m"
+	return ansiDim + s + ansiReset
 }
 
 func (r helpRenderer) bold(s string) string {
 	if !r.color {
 		return s
 	}
-	return "\033[1m" + s + "\033[0m"
+	return ansiBold + s + ansiReset
 }
 
 func (r helpRenderer) titleStyle(s string) string {
 	if !r.color {
 		return s
 	}
-	return "\033[1;36m" + s + "\033[0m"
+	return ansiBoldCyan + s + ansiReset
+}
+
+// boxTopFill computes the number of fill characters for a box top border.
+func boxTopFill(title string, width int) int {
+	inner := width - 2
+	titleW := utf8.RuneCountInString(title)
+	fill := inner - 3 - titleW // prefix "─ " + title + " " is 3 + titleW cols
+	if fill < 0 {
+		fill = 0
+	}
+	return fill
 }
 
 // top renders a box top border: ╭─ Title ────────╮
 func (r helpRenderer) top(title string, width int) string {
-	if !r.color {
-		return boxTop(title, width)
-	}
+	fill := boxTopFill(title, width)
+	filling := " " + strings.Repeat("─", fill) + "╮"
+	return r.dim("╭─ ") + r.titleStyle(title) + r.dim(filling)
+}
+
+// boxRowLayout computes the display content and padding for a box row.
+// Returns the formatted name field, possibly-truncated description, and padding count.
+func boxRowLayout(name, short string, namePad, width int) (nameField, desc string, pad int) {
 	inner := width - 2
-	titleW := utf8.RuneCountInString(title)
-	fill := inner - 3 - titleW // prefix is 3 display cols plus the title
-	if fill < 0 {
-		fill = 0
+	available := inner - 1 // 1 space before closing │
+
+	nameField = fmt.Sprintf("%-*s", namePad, name)
+	prefixW := 2 + utf8.RuneCountInString(nameField) + 1 // "  " + nameField + " "
+	maxDescW := available - prefixW
+
+	desc = short
+	if utf8.RuneCountInString(short) > maxDescW {
+		switch {
+		case maxDescW > 3:
+			desc = string([]rune(short)[:maxDescW-3]) + "..."
+		case maxDescW > 0:
+			desc = string([]rune(short)[:maxDescW])
+		default:
+			desc = ""
+		}
 	}
-	return r.dim("╭─ ") + r.titleStyle(title) + r.dim(" "+strings.Repeat("─", fill)+"╮")
+
+	contentW := prefixW + utf8.RuneCountInString(desc)
+	pad = available - contentW
+	if pad < 0 {
+		pad = 0
+	}
+	return nameField, desc, pad
 }
 
 // row renders a box row: │  name     description   │
 func (r helpRenderer) row(name, short string, namePad, width int) string {
-	if !r.color {
-		line := fmt.Sprintf("%-*s %s", namePad, name, short)
-		return boxRow(line, width)
-	}
-	inner := width - 2
-	available := inner - 1 // 1 space before closing │
-
-	nameField := fmt.Sprintf("%-*s", namePad, name)
-	prefixW := 2 + utf8.RuneCountInString(nameField) + 1 // "  " + name + " "
-	maxDescW := available - prefixW
-
-	displayShort := short
-	if utf8.RuneCountInString(short) > maxDescW {
-		switch {
-		case maxDescW > 3:
-			runes := []rune(short)
-			displayShort = string(runes[:maxDescW-3]) + "..."
-		case maxDescW > 0:
-			runes := []rune(short)
-			displayShort = string(runes[:maxDescW])
-		default:
-			displayShort = ""
-		}
-	}
-
-	contentW := prefixW + utf8.RuneCountInString(displayShort)
-	pad := available - contentW
-	if pad < 0 {
-		pad = 0
-	}
-
+	nameField, desc, pad := boxRowLayout(name, short, namePad, width)
 	return r.dim("│") + "  " + r.bold(nameField) + " " +
-		r.dim(displayShort+strings.Repeat(" ", pad)+" │")
+		r.dim(desc+strings.Repeat(" ", pad)+" │")
 }
 
 // bottom renders a box bottom border: ╰──────────╯
 func (r helpRenderer) bottom(width int) string {
-	if !r.color {
-		return boxBottom(width)
-	}
 	inner := width - 2
 	return r.dim("╰" + strings.Repeat("─", inner) + "╯")
 }
@@ -206,17 +213,11 @@ func groupedHelp(cmd *cobra.Command) string {
 }
 
 // boxTop, boxRow, boxBottom are the plain (no-color) structural helpers.
-// They are used by helpRenderer when color is off and directly by unit tests.
+// Used directly by unit tests to verify display-width invariants.
 
 func boxTop(title string, width int) string {
-	inner := width - 2
-	prefix := "─ " + title + " "
-	prefixW := utf8.RuneCountInString(prefix)
-	fill := inner - prefixW
-	if fill < 0 {
-		fill = 0
-	}
-	return "╭" + prefix + strings.Repeat("─", fill) + "╮"
+	fill := boxTopFill(title, width)
+	return "╭─ " + title + " " + strings.Repeat("─", fill) + "╮"
 }
 
 func boxRow(text string, width int) string {
@@ -243,7 +244,7 @@ func boxBottom(width int) string {
 }
 
 func boxWidth() int {
-	w := termWidthFunc() - 2
+	w := termWidthFunc() - 2 // leave 2-column margin so boxes don't touch terminal edge
 	if w > maxBoxWidth {
 		w = maxBoxWidth
 	}
