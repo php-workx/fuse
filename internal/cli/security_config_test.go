@@ -188,11 +188,6 @@ func TestMergeClaudeSecureSettingsPreservesExistingDenyListsAlongsideManagedEntr
 	if !containsString(denyWrite, "~/backups") {
 		t.Fatalf("expected unrelated denyWrite entry preserved, got %v", denyWrite)
 	}
-	for _, want := range managedClaudeSandboxDenyRead {
-		if !containsString(denyRead, want) {
-			t.Fatalf("expected managed denyRead entry %q present, got %v", want, denyRead)
-		}
-	}
 	for _, want := range managedClaudeSandboxDenyWrite {
 		if !containsString(denyWrite, want) {
 			t.Fatalf("expected managed denyWrite entry %q present, got %v", want, denyWrite)
@@ -237,17 +232,6 @@ func TestMergeClaudeSecureSettingsRejectsUnexpectedShapes(t *testing.T) {
 				},
 			},
 			wantErr: "permissions.deny",
-		},
-		{
-			name: "denyRead has wrong shape",
-			settings: map[string]interface{}{
-				"sandbox": map[string]interface{}{
-					"filesystem": map[string]interface{}{
-						"denyRead": map[string]interface{}{},
-					},
-				},
-			},
-			wantErr: "sandbox.filesystem.denyRead",
 		},
 	}
 
@@ -375,24 +359,18 @@ func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, e
 	if sandbox["enabled"] != true {
 		t.Fatalf("sandbox.enabled = %#v, want true", sandbox["enabled"])
 	}
-	if sandbox["autoAllowBashIfSandboxed"] != false {
-		t.Fatalf("sandbox.autoAllowBashIfSandboxed = %#v, want false", sandbox["autoAllowBashIfSandboxed"])
+	if sandbox["autoAllowBashIfSandboxed"] != true {
+		t.Fatalf("sandbox.autoAllowBashIfSandboxed = %#v, want true", sandbox["autoAllowBashIfSandboxed"])
 	}
-	if sandbox["allowUnsandboxedCommands"] != false {
-		t.Fatalf("sandbox.allowUnsandboxedCommands = %#v, want false", sandbox["allowUnsandboxedCommands"])
+	if sandbox["allowUnsandboxedCommands"] != true {
+		t.Fatalf("sandbox.allowUnsandboxedCommands = %#v, want true", sandbox["allowUnsandboxedCommands"])
 	}
 
 	filesystem, ok := sandbox["filesystem"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected sandbox.filesystem map, got %#v", sandbox["filesystem"])
 	}
-	denyRead := stringsFromValue(t, filesystem["denyRead"])
 	denyWrite := stringsFromValue(t, filesystem["denyWrite"])
-	for _, want := range managedClaudeSandboxDenyRead {
-		if !containsString(denyRead, want) {
-			t.Fatalf("expected managed denyRead entry %q present, got %v", want, denyRead)
-		}
-	}
 	for _, want := range managedClaudeSandboxDenyWrite {
 		if !containsString(denyWrite, want) {
 			t.Fatalf("expected managed denyWrite entry %q present, got %v", want, denyWrite)

@@ -61,7 +61,7 @@ func TestRunDoctorSecurity_WarnsWhenClaudeHookExistsWithoutSecureSettings(t *tes
 	if stderr != "" {
 		t.Fatalf("expected no stderr, got %q", stderr)
 	}
-	for _, want := range []string{"Claude security posture", "missing or weaker", "permissions.defaultMode"} {
+	for _, want := range []string{"Claude security posture", "missing or weaker", "permissions block"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected doctor --security output to include %q, got:\n%s", want, stdout)
 		}

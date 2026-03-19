@@ -35,16 +35,25 @@ var doctorCmd = &cobra.Command{
 	},
 }
 
+var (
+	doctorVerbose bool
+	doctorFix     bool
+)
+
 func init() {
 	doctorCmd.Flags().BoolVar(&doctorLive, "live", false, "Run a live classification test")
 	doctorCmd.Flags().BoolVar(&doctorSecurity, "security", false, "Run additional security posture diagnostics")
+	doctorCmd.Flags().BoolVar(&doctorVerbose, "verbose", false, "Show full detail for all checks")
+	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "Automatically fix warnings where possible")
 	rootCmd.AddCommand(doctorCmd)
 }
 
 type checkResult struct {
-	name   string
-	status string // "PASS", "FAIL", "WARN"
-	detail string
+	name    string
+	status  string // "PASS", "FAIL", "WARN"
+	detail  string
+	fixHint string       // human-readable fix suggestion (e.g., "run: fuse install claude --secure")
+	fixFunc func() error // auto-fix function; nil if not auto-fixable
 }
 
 func runDoctor(live, security bool) error {
@@ -82,6 +91,7 @@ func runDoctor(live, security bool) error {
 	fails := 0
 	warns := 0
 
+	var fixed int
 	for _, r := range results {
 		icon := "[ PASS ]"
 		switch r.status {
@@ -96,12 +106,39 @@ func runDoctor(live, security bool) error {
 		}
 		fmt.Printf("  %s  %s\n", icon, r.name)
 		if r.detail != "" {
-			fmt.Printf("           %s\n", r.detail)
+			detail := r.detail
+			if !doctorVerbose && len(detail) > 120 {
+				// Count semicolons as a proxy for number of items.
+				items := strings.Count(detail, ";") + 1
+				if items > 2 {
+					// Truncate: show first item + count.
+					first := strings.SplitN(detail, ";", 2)[0]
+					detail = fmt.Sprintf("%s (and %d more — use --verbose for full list)", strings.TrimSpace(first), items-1)
+				}
+			}
+			fmt.Printf("           %s\n", detail)
+		}
+		if r.fixHint != "" && r.status == "WARN" {
+			if doctorFix && r.fixFunc != nil {
+				fmt.Printf("           fixing: %s\n", r.fixHint)
+				if err := r.fixFunc(); err != nil {
+					fmt.Printf("           fix failed: %v\n", err)
+				} else {
+					fmt.Printf("           fixed.\n")
+					fixed++
+				}
+			} else if !doctorFix {
+				fmt.Printf("           fix: %s\n", r.fixHint)
+			}
 		}
 	}
 
 	fmt.Println()
-	fmt.Printf("Results: %d passed, %d warnings, %d failed\n", passes, warns, fails)
+	summary := fmt.Sprintf("Results: %d passed, %d warnings, %d failed", passes, warns, fails)
+	if fixed > 0 {
+		summary += fmt.Sprintf(", %d auto-fixed", fixed)
+	}
+	fmt.Println(summary)
 
 	if fails > 0 {
 		return fmt.Errorf("%d check(s) failed", fails)
@@ -341,9 +378,11 @@ func checkClaudeSecurityPosture() checkResult {
 	}
 	if len(warnings) > 0 {
 		return checkResult{
-			name:   "Claude security posture",
-			status: "WARN",
-			detail: "missing or weaker secure settings: " + strings.Join(warnings, "; "),
+			name:    "Claude security posture",
+			status:  "WARN",
+			detail:  "missing or weaker secure settings: " + strings.Join(warnings, "; "),
+			fixHint: "fuse install claude --secure",
+			fixFunc: func() error { return installClaude(true) },
 		}
 	}
 	return checkResult{
@@ -531,9 +570,11 @@ func checkCodexSecurityPosture() checkResult {
 	warnings := codexSecurityWarnings(string(data))
 	if len(warnings) > 0 {
 		return checkResult{
-			name:   "Codex security posture",
-			status: "WARN",
-			detail: strings.Join(warnings, "; "),
+			name:    "Codex security posture",
+			status:  "WARN",
+			detail:  strings.Join(warnings, "; "),
+			fixHint: "fuse install codex",
+			fixFunc: func() error { return installCodex() },
 		}
 	}
 	return checkResult{

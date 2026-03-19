@@ -6,26 +6,19 @@ import (
 	"strings"
 )
 
+// managedClaudePermissionDeny lists paths that agents should not edit without approval.
+// Read access to .env is allowed (agents need it for context).
 var managedClaudePermissionDeny = []string{
-	"Read(./.env)",
-	"Read(./.env.*)",
 	"Read(./secrets/**)",
 	"Edit(./.env)",
 	"Edit(./.env.*)",
 	"Edit(./secrets/**)",
 }
 
-var managedClaudeSandboxDenyRead = []string{
-	"~/.fuse",
-	"~/.ssh",
-	"~/.aws",
-	"~/.config/gcloud",
-}
-
+// managedClaudeSandboxDenyWrite protects critical config files from agent writes.
+// No denyRead list — agents need read access for normal development workflows.
 var managedClaudeSandboxDenyWrite = []string{
-	"~/.fuse",
 	"~/.claude",
-	"~/.codex",
 	"~/.ssh",
 }
 
@@ -49,11 +42,11 @@ func mergeClaudeSecureSettings(settings map[string]interface{}) error {
 	if err != nil {
 		return err
 	}
-	sandbox["autoAllowBashIfSandboxed"], err = upgradedBool("sandbox.autoAllowBashIfSandboxed", sandbox["autoAllowBashIfSandboxed"], false)
+	sandbox["autoAllowBashIfSandboxed"], err = upgradedBool("sandbox.autoAllowBashIfSandboxed", sandbox["autoAllowBashIfSandboxed"], true)
 	if err != nil {
 		return err
 	}
-	sandbox["allowUnsandboxedCommands"], err = upgradedBool("sandbox.allowUnsandboxedCommands", sandbox["allowUnsandboxedCommands"], false)
+	sandbox["allowUnsandboxedCommands"], err = upgradedBool("sandbox.allowUnsandboxedCommands", sandbox["allowUnsandboxedCommands"], true)
 	if err != nil {
 		return err
 	}
@@ -61,10 +54,6 @@ func mergeClaudeSecureSettings(settings map[string]interface{}) error {
 	filesystem, err := ensureOptionalObject(sandbox, "filesystem")
 	if err != nil {
 		return fmt.Errorf("sandbox.filesystem: %w", err)
-	}
-	filesystem["denyRead"], err = mergeManagedStringList("sandbox.filesystem.denyRead", filesystem["denyRead"], managedClaudeSandboxDenyRead)
-	if err != nil {
-		return err
 	}
 	filesystem["denyWrite"], err = mergeManagedStringList("sandbox.filesystem.denyWrite", filesystem["denyWrite"], managedClaudeSandboxDenyWrite)
 	if err != nil {
@@ -118,26 +107,20 @@ func claudeSecurityWarnings(settings map[string]interface{}) ([]string, error) {
 	autoAllow, err := readBool("sandbox.autoAllowBashIfSandboxed", sandbox["autoAllowBashIfSandboxed"])
 	if err != nil {
 		warnings = append(warnings, err.Error())
-	} else if autoAllow {
-		warnings = append(warnings, "sandbox.autoAllowBashIfSandboxed should be false")
+	} else if !autoAllow {
+		warnings = append(warnings, "sandbox.autoAllowBashIfSandboxed should be true")
 	}
 
 	allowUnsandboxed, err := readBool("sandbox.allowUnsandboxedCommands", sandbox["allowUnsandboxedCommands"])
 	if err != nil {
 		warnings = append(warnings, err.Error())
-	} else if allowUnsandboxed {
-		warnings = append(warnings, "sandbox.allowUnsandboxedCommands should be false")
+	} else if !allowUnsandboxed {
+		warnings = append(warnings, "sandbox.allowUnsandboxedCommands should be true")
 	}
 
 	if !filesystemPresent {
 		warnings = append(warnings, "sandbox.filesystem block is missing")
 	}
-	denyReadWarnings, err := missingManagedEntriesWarning("sandbox.filesystem.denyRead", filesystem["denyRead"], managedClaudeSandboxDenyRead)
-	if err != nil {
-		return nil, err
-	}
-	warnings = append(warnings, denyReadWarnings...)
-
 	denyWriteWarnings, err := missingManagedEntriesWarning("sandbox.filesystem.denyWrite", filesystem["denyWrite"], managedClaudeSandboxDenyWrite)
 	if err != nil {
 		return nil, err
