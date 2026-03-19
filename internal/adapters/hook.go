@@ -216,6 +216,13 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 		return 2 // fail-closed
 	}
 
+	// Log per-tag dryrun matches for observability.
+	for i := range result.DryRunMatches {
+		m := &result.DryRunMatches[i]
+		logHookEventFields(req.SessionID, input.Command, req.Cwd,
+			string(m.Decision), m.RuleID, m.Reason+" (dryrun-override)")
+	}
+
 	switch result.Decision {
 	case core.DecisionSafe:
 		logHookEvent(req.SessionID, input.Command, req.Cwd, result)

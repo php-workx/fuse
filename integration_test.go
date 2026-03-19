@@ -575,7 +575,7 @@ func TestIntegration_CompoundCommandClassification(t *testing.T) {
 // 10. TestIntegration_CrossCompilation — verify builds succeed
 // ---------------------------------------------------------------------------
 
-// Cross-compilation is tested via shell commands in the Makefile / CI.
+// Cross-compilation is tested via the justfile (just build-all) and CI.
 // See acceptance criteria: the build commands are run separately after tests.
 
 // ---------------------------------------------------------------------------
