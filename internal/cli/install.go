@@ -17,9 +17,12 @@ var installCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]
+		if installClaudeSecure && target != "claude" {
+			return fmt.Errorf("--secure is only supported for the 'claude' target")
+		}
 		switch target {
 		case "claude":
-			return installClaude()
+			return installClaude(installClaudeSecure)
 		case "codex":
 			return installCodex()
 		default:
@@ -28,7 +31,10 @@ var installCmd = &cobra.Command{
 	},
 }
 
+var installClaudeSecure bool
+
 func init() {
+	installCmd.Flags().BoolVar(&installClaudeSecure, "secure", false, "merge recommended secure Claude settings during install")
 	rootCmd.AddCommand(installCmd)
 }
 
@@ -54,9 +60,46 @@ func claudeSettingsPath() string {
 	return filepath.Join(home, ".claude", "settings.json")
 }
 
+func rejectSymlinkedClaudeSettingsPath(settingsPath string) error {
+	// Walk ancestors from settingsPath up to (but not including) the user's
+	// home directory. System-level symlinks (e.g., /var -> /private/var on
+	// macOS) are normal and should not be flagged.
+	homeDir, _ := os.UserHomeDir()
+	for candidate := filepath.Clean(settingsPath); ; {
+		// Stop at home directory — system paths above it may have normal symlinks.
+		if homeDir != "" && candidate == filepath.Clean(homeDir) {
+			break
+		}
+		info, err := os.Lstat(candidate)
+		if err != nil {
+			if os.IsNotExist(err) {
+				parent := filepath.Dir(candidate)
+				if parent == candidate {
+					break
+				}
+				candidate = parent
+				continue
+			}
+			return fmt.Errorf("inspect %s: %w", candidate, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to use symlinked Claude settings path %s", candidate)
+		}
+		parent := filepath.Dir(candidate)
+		if parent == candidate {
+			break
+		}
+		candidate = parent
+	}
+	return nil
+}
+
 // installClaude installs fuse as a Claude Code PreToolUse hook.
-func installClaude() error {
+func installClaude(secure bool) error {
 	settingsPath := claudeSettingsPath()
+	if err := rejectSymlinkedClaudeSettingsPath(settingsPath); err != nil {
+		return err
+	}
 
 	// Read existing settings or start with empty object.
 	settings, err := readJSONFile(settingsPath)
@@ -67,8 +110,17 @@ func installClaude() error {
 		settings = make(map[string]interface{})
 	}
 
+	if secure {
+		if err := mergeClaudeSecureSettings(settings); err != nil {
+			return fmt.Errorf("merge secure Claude settings: %w", err)
+		}
+	}
+
 	// Merge the fuse hook into settings.
 	mergeFuseHook(settings)
+	if secure {
+		mergeFuseSecureNativeFileHooks(settings)
+	}
 
 	// Ensure the directory exists.
 	dir := filepath.Dir(settingsPath)
@@ -89,6 +141,14 @@ func installClaude() error {
 // mergeFuseHook adds or updates the fuse hook entries in the settings map.
 // It preserves all existing settings and non-fuse hooks.
 func mergeFuseHook(settings map[string]interface{}) {
+	mergeFuseHookMatchers(settings, []string{"Bash", "mcp__.*"})
+}
+
+func mergeFuseSecureNativeFileHooks(settings map[string]interface{}) {
+	mergeFuseHookMatchers(settings, []string{"Read", "Write", "Edit", "MultiEdit"})
+}
+
+func mergeFuseHookMatchers(settings map[string]interface{}, matchers []string) {
 	// Ensure hooks object exists.
 	hooksObj, _ := settings["hooks"].(map[string]interface{})
 	if hooksObj == nil {
@@ -104,20 +164,14 @@ func mergeFuseHook(settings map[string]interface{}) {
 		}
 	}
 
-	// The matchers we want to install.
-	wantedMatchers := []fuseMatcherEntry{
-		{
-			Matcher: "Bash",
+	wantedMatchers := make([]fuseMatcherEntry, 0, len(matchers))
+	for _, matcher := range matchers {
+		wantedMatchers = append(wantedMatchers, fuseMatcherEntry{
+			Matcher: matcher,
 			Hooks: []fuseHookEntry{
 				{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
 			},
-		},
-		{
-			Matcher: "mcp__.*",
-			Hooks: []fuseHookEntry{
-				{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
-			},
-		},
+		})
 	}
 
 	for _, wanted := range wantedMatchers {

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if command -v pre-commit >/dev/null 2>&1 && [ -f .pre-commit-config.yaml ]; then
+  staged_files=()
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    staged_files+=("$path")
+  done <<EOF
+$(git diff --cached --name-only --diff-filter=ACMR)
+EOF
+  if [ "${#staged_files[@]}" -eq 0 ]; then
+    exit 0
+  fi
+  exec pre-commit run --hook-stage pre-commit --files "${staged_files[@]}"
+fi
+
+exec bash ./scripts/check-fast.sh

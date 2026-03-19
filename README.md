@@ -19,7 +19,7 @@ Most users should think of `fuse` as integration infrastructure, not as a daily 
 
 The lower-level runtime surfaces still exist:
 
-- `fuse hook evaluate`: Claude Code pre-tool hook entrypoint for Bash and mediated MCP tools
+- `fuse hook evaluate`: Claude Code pre-tool hook entrypoint for Bash, mediated MCP tools, and narrow secure-install file-path checks for `Read`/`Write`/`Edit`/`MultiEdit`
 - `fuse proxy mcp --downstream-name <name>`: stdio MCP proxy with tool-call interception
 - `fuse proxy codex-shell`: Codex shell MCP server exposing `run_command`
 - `fuse run -- <command>`: manual debug/admin wrapper for classify/prompt/execute
@@ -33,6 +33,12 @@ fuse install claude
 ```
 
 This merges `fuse hook evaluate` into `~/.claude/settings.json` for both `Bash` and `mcp__.*` `PreToolUse` matchers.
+
+```bash
+fuse install claude --secure
+```
+
+`--secure` keeps the Bash and MCP hooks, merges the recommended Claude secure settings, and adds explicit `Read`, `Write`, `Edit`, and `MultiEdit` hook matchers. Those native file-tool checks are intentionally narrow and path-only: fuse blocks self-protection paths such as `~/.fuse`, `.claude/settings.json`, `.codex/config.toml`, `fuse.db`, `secret.key`, and `.git/hooks/**`, and requires approval for obvious secret-bearing locations such as `.env`, `./secrets/**`, cloud credential directories, kubeconfig paths, and common certificate/key file extensions.
 
 ### Codex
 
@@ -106,8 +112,20 @@ fuse run --timeout 5m -- "terraform destroy prod"
 - If `/dev/tty` is unavailable, approval-required actions are denied with `fuse:NON_INTERACTIVE_MODE`.
 - Approval records are stored in `~/.fuse/state/fuse.db` and signed with an HMAC backed by `~/.fuse/state/secret.key`.
 
+## Development
+
+```bash
+just setup       # install tools + configure git hooks
+just dev         # run full local quality gate
+just pre-commit  # fast checks only
+just check       # full gate including sonar
+```
+
+See `just --list` for all available recipes.
+
 ## Limitations
 
 - Hook mode still has a TOCTOU window because Claude Code executes natively after `fuse` allows the call.
 - Classification is heuristic and regex-based; it is a guardrail, not a sandbox.
+- Secure Claude native file-tool protection is path-based only; it does not inspect file contents or attempt full semantic mediation of every Claude tool.
 - `fuse run` is a secondary debug/admin surface and a foreground wrapper, not a full job-control shell.

@@ -97,8 +97,10 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 		exitCode = handleMCPTool(req, stderr, cfg, dryRun)
 	case req.ToolName == "Bash":
 		exitCode = handleBashTool(req, stderr, cfg, dryRun)
+	case isNativeClaudeFileTool(req.ToolName):
+		exitCode = handleNativeFileTool(req, stderr, cfg, dryRun)
 	default:
-		// Non-Bash, non-MCP tool: allow (fuse only mediates shell commands and MCP).
+		// Non-Bash, non-MCP, non-native-file tool: allow.
 		return 0
 	}
 

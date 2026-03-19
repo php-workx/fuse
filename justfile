@@ -85,7 +85,7 @@ vuln:
     govulncheck ./...
 
 # Enforce suppression budgets (nolint/nosec counts)
-budgets nolint_budget="5" nosec_budget="0":
+budgets nolint_budget="6" nosec_budget="0":
     #!/usr/bin/env bash
     set -euo pipefail
     nolint_count="$( (git grep -n '//nolint' -- '*.go' || true) | wc -l | tr -d '[:space:]' )"

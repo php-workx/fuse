@@ -276,9 +276,45 @@ func init() {
 		// §6.3.2 AWS — Infrastructure & networking
 		BuiltinRule{
 			ID:      "builtin:aws:delete-stack",
-			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack\b`),
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack(?:\s|$)`),
 			Action:  core.DecisionApproval,
 			Reason:  "Deletes CloudFormation stack",
+		},
+		BuiltinRule{
+			ID:      "builtin:aws:delete-stack-set",
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack-set\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Deletes CloudFormation stack set (multi-account/region)",
+		},
+		BuiltinRule{
+			ID:      "builtin:aws:delete-stack-instances",
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack-instances\b.*--no-retain-stacks\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Deletes stack set instances and their underlying stacks",
+		},
+		BuiltinRule{
+			ID:      "builtin:aws:delete-change-set",
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-change-set\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Deletes CloudFormation change set",
+		},
+		BuiltinRule{
+			ID:      "builtin:aws:cancel-update-stack",
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+cancel-update-stack\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Cancels in-progress stack update (can leave stack in broken state)",
+		},
+		BuiltinRule{
+			ID:      "builtin:aws:disable-termination-protection",
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+update-termination-protection\s+.*--no-enable-termination-protection\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Disables stack termination protection",
+		},
+		BuiltinRule{
+			ID:      "builtin:aws:set-stack-policy",
+			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+set-stack-policy\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Modifies stack policy (can weaken resource protections)",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-cloudfront",

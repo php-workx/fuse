@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -129,4 +131,186 @@ func TestInstallCodex_RejectsSymlinkedLocalConfig(t *testing.T) {
 	if string(data) != "original\n" {
 		t.Fatalf("expected symlink target to remain unchanged, got %q", string(data))
 	}
+}
+
+func TestInstallClaudePreservesCurrentBehaviorByDefault(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	if err := installClaude(false); err != nil {
+		t.Fatalf("installClaude(false): %v", err)
+	}
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	data, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read settings: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal(data, &settings); err != nil {
+		t.Fatalf("unmarshal settings: %v", err)
+	}
+
+	if _, ok := settings["permissions"]; ok {
+		t.Fatalf("expected plain install to avoid secure permissions config, got %#v", settings["permissions"])
+	}
+	if _, ok := settings["sandbox"]; ok {
+		t.Fatalf("expected plain install to avoid secure sandbox config, got %#v", settings["sandbox"])
+	}
+
+	hooksObj, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected hooks object, got %#v", settings["hooks"])
+	}
+	if _, ok := hooksObj["PreToolUse"]; !ok {
+		t.Fatalf("expected PreToolUse hook configuration, got %#v", hooksObj)
+	}
+	preToolUse, ok := hooksObj["PreToolUse"].([]interface{})
+	if !ok {
+		t.Fatalf("expected PreToolUse array, got %#v", hooksObj["PreToolUse"])
+	}
+	matchers := claudeMatchersFromHooks(t, preToolUse)
+	want := []string{"Bash", "mcp__.*"}
+	if strings.Join(matchers, ",") != strings.Join(want, ",") {
+		t.Fatalf("plain install matchers = %v, want %v", matchers, want)
+	}
+}
+
+func TestInstallClaude_RejectsSymlinkedSettingsPath(t *testing.T) {
+	tmpHome := t.TempDir()
+	targetPath := filepath.Join(t.TempDir(), "target.json")
+	if err := os.WriteFile(targetPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write target: %v", err)
+	}
+	t.Setenv("HOME", tmpHome)
+
+	claudeDir := filepath.Join(tmpHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0o755); err != nil {
+		t.Fatalf("mkdir .claude: %v", err)
+	}
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+	if err := os.Symlink(targetPath, settingsPath); err != nil {
+		t.Fatalf("symlink settings: %v", err)
+	}
+
+	err := installClaude(false)
+	if err == nil {
+		t.Fatal("expected installClaude to reject symlinked settings path")
+	}
+	if !strings.Contains(err.Error(), "symlinked") {
+		t.Fatalf("expected symlink rejection error, got %v", err)
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		t.Fatalf("read target: %v", err)
+	}
+	if string(data) != "{}\n" {
+		t.Fatalf("expected symlink target unchanged, got %q", string(data))
+	}
+}
+
+func TestInstallCommand_RejectsSecureFlagForCodex(t *testing.T) {
+	prevSecure := installClaudeSecure
+	installClaudeSecure = true
+	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Cleanup(func() {
+		installClaudeSecure = prevSecure
+	})
+
+	err := installCmd.RunE(installCmd, []string{"codex"})
+	if err == nil {
+		t.Fatal("expected install command to reject codex --secure")
+	}
+	if !strings.Contains(err.Error(), "--secure") || !strings.Contains(err.Error(), "claude") {
+		t.Fatalf("expected secure-flag rejection, got %v", err)
+	}
+}
+
+func TestInstallClaudeSecureMergesHooksAndSecureSettingsOnDisk(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+
+	existing := map[string]interface{}{
+		"permissions": map[string]interface{}{
+			"defaultMode": "askUser",
+			"deny": []interface{}{
+				"Read(./customer-secrets/**)",
+			},
+		},
+		"sandbox": map[string]interface{}{
+			"enabled": true,
+			"filesystem": map[string]interface{}{
+				"denyRead": []interface{}{
+					"~/private",
+				},
+			},
+		},
+		"theme": "light",
+	}
+	data, err := json.Marshal(existing)
+	if err != nil {
+		t.Fatalf("marshal existing settings: %v", err)
+	}
+	if err := os.WriteFile(settingsPath, append(data, '\n'), 0o644); err != nil {
+		t.Fatalf("write settings: %v", err)
+	}
+
+	if err := installClaude(true); err != nil {
+		t.Fatalf("installClaude(true): %v", err)
+	}
+
+	updatedData, err := os.ReadFile(settingsPath)
+	if err != nil {
+		t.Fatalf("read updated settings: %v", err)
+	}
+
+	var settings map[string]interface{}
+	if err := json.Unmarshal(updatedData, &settings); err != nil {
+		t.Fatalf("unmarshal updated settings: %v", err)
+	}
+
+	if settings["theme"] != "light" {
+		t.Fatalf("expected unrelated theme preserved, got %#v", settings["theme"])
+	}
+	assertClaudeSecureDefaults(t, settings, "askUser")
+
+	hooksObj, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected hooks object, got %#v", settings["hooks"])
+	}
+	preToolUse, ok := hooksObj["PreToolUse"].([]interface{})
+	if !ok || len(preToolUse) == 0 {
+		t.Fatalf("expected PreToolUse hooks after secure install, got %#v", hooksObj["PreToolUse"])
+	}
+	matchers := claudeMatchersFromHooks(t, preToolUse)
+	want := []string{"Bash", "Edit", "MultiEdit", "Read", "Write", "mcp__.*"}
+	if strings.Join(matchers, ",") != strings.Join(want, ",") {
+		t.Fatalf("secure install matchers = %v, want %v", matchers, want)
+	}
+}
+
+func claudeMatchersFromHooks(t *testing.T, preToolUse []interface{}) []string {
+	t.Helper()
+
+	matchers := make([]string, 0, len(preToolUse))
+	for _, raw := range preToolUse {
+		entry, ok := raw.(map[string]interface{})
+		if !ok {
+			t.Fatalf("expected matcher entry object, got %#v", raw)
+		}
+		matcher, ok := entry["matcher"].(string)
+		if !ok {
+			t.Fatalf("expected matcher string, got %#v", entry["matcher"])
+		}
+		matchers = append(matchers, matcher)
+	}
+	sort.Strings(matchers)
+	return matchers
 }
