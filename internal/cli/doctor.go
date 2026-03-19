@@ -27,9 +27,10 @@ var (
 )
 
 var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Run diagnostic checks on fuse setup",
-	Long:  "Checks configuration, directory structure, hook installation, and optionally runs a live test.",
+	Use:     "doctor",
+	Short:   "Run diagnostic checks on fuse setup",
+	Long:    "Checks configuration, directory structure, hook installation, and optionally runs a live test.",
+	GroupID: groupObserve,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runDoctor(doctorLive, doctorSecurity)
 	},

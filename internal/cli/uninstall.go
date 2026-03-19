@@ -14,8 +14,9 @@ import (
 var uninstallPurge bool
 
 var uninstallCmd = &cobra.Command{
-	Use:   "uninstall",
-	Short: "Remove fuse hooks and optionally purge all data",
+	Use:     "uninstall",
+	Short:   "Remove fuse hooks and optionally purge all data",
+	GroupID: groupSetup,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Step 1: Remove fuse hook entries from Claude Code settings.json.
 		if err := uninstallClaude(); err != nil {

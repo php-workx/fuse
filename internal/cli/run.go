@@ -15,9 +15,10 @@ const defaultRunTimeout = 30 * time.Minute
 var runTimeout time.Duration
 
 var runCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Classify and execute a command with safety controls",
-	Long:  "Classify a shell command, prompt for approval if needed, then execute with environment sanitization.",
+	Use:     "run",
+	Short:   "Classify and execute a command with safety controls",
+	Long:    "Classify a shell command, prompt for approval if needed, then execute with environment sanitization.",
+	GroupID: groupRuntime,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		command, err := parseSingleCommandArg(args)
 		if err != nil {

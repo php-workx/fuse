@@ -10,8 +10,9 @@ import (
 )
 
 var enableCmd = &cobra.Command{
-	Use:   "enable",
-	Short: "Enable fuse enforcement (classify, block, prompt)",
+	Use:     "enable",
+	Short:   "Enable fuse enforcement (classify, block, prompt)",
+	GroupID: groupSetup,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := os.MkdirAll(config.StateDir(), 0o700); err != nil {
 			return fmt.Errorf("creating state directory: %w", err)
