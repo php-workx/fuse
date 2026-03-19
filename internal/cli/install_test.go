@@ -279,7 +279,7 @@ func TestInstallClaudeSecureMergesHooksAndSecureSettingsOnDisk(t *testing.T) {
 	if settings["theme"] != "light" {
 		t.Fatalf("expected unrelated theme preserved, got %#v", settings["theme"])
 	}
-	assertClaudeSecureDefaults(t, settings, "askUser")
+	assertClaudeSecureDefaults(t, settings, "askUser", "disable")
 
 	hooksObj, ok := settings["hooks"].(map[string]interface{})
 	if !ok {

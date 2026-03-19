@@ -47,7 +47,7 @@ func TestMergeClaudeSecureSettingsMergesWithoutClobberingUnrelatedValues(t *test
 	}
 	mergeFuseHook(settings)
 
-	assertClaudeSecureDefaults(t, settings, "askUser")
+	assertClaudeSecureDefaults(t, settings, "askUser", "disable")
 
 	if settings["theme"] != "dark" {
 		t.Fatalf("expected unrelated top-level setting preserved, got %#v", settings["theme"])
@@ -123,7 +123,7 @@ func TestMergeClaudeSecureSettingsUpgradesInsecureManagedValues(t *testing.T) {
 		t.Fatalf("mergeClaudeSecureSettings: %v", err)
 	}
 
-	assertClaudeSecureDefaults(t, settings, "acceptEdits")
+	assertClaudeSecureDefaults(t, settings, "bypassPermissions", "allow")
 }
 
 func TestMergeClaudeSecureSettingsPreservesStricterDefaultMode(t *testing.T) {
@@ -331,7 +331,7 @@ func containsWarning(warnings []string, want string) bool {
 	return false
 }
 
-func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, expectedDefaultMode string) {
+func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, expectedDefaultMode, expectedDisableBypass string) {
 	t.Helper()
 
 	permissions, ok := settings["permissions"].(map[string]interface{})
@@ -341,8 +341,8 @@ func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, e
 	if permissions["defaultMode"] != expectedDefaultMode {
 		t.Fatalf("permissions.defaultMode = %#v, want %q", permissions["defaultMode"], expectedDefaultMode)
 	}
-	if permissions["disableBypassPermissionsMode"] != "disable" {
-		t.Fatalf("permissions.disableBypassPermissionsMode = %#v, want %q", permissions["disableBypassPermissionsMode"], "disable")
+	if permissions["disableBypassPermissionsMode"] != expectedDisableBypass {
+		t.Fatalf("permissions.disableBypassPermissionsMode = %#v, want %q", permissions["disableBypassPermissionsMode"], expectedDisableBypass)
 	}
 
 	deny := stringsFromValue(t, permissions["deny"])

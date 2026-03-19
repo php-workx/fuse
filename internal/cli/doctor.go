@@ -574,7 +574,7 @@ func checkCodexSecurityPosture() checkResult {
 			status:  "WARN",
 			detail:  strings.Join(warnings, "; "),
 			fixHint: "fuse install codex",
-			fixFunc: func() error { return installCodex() },
+			fixFunc: installCodex,
 		}
 	}
 	return checkResult{

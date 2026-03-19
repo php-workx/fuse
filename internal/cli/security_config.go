@@ -342,15 +342,13 @@ func upgradedDefaultMode(existing interface{}) interface{} {
 	switch typed := existing.(type) {
 	case string:
 		switch typed {
-		case "bypassPermissions":
-			return "acceptEdits"
-		case "acceptEdits", "askUser":
-			return typed
+		case "bypassPermissions", "acceptEdits", "askUser":
+			return typed // preserve user's choice; fuse provides the safety net
 		default:
 			return typed
 		}
 	case nil:
-		return "acceptEdits"
+		return "bypassPermissions" // fuse monitors file tools, so bypass is safe
 	default:
 		return existing
 	}
@@ -359,9 +357,7 @@ func upgradedDefaultMode(existing interface{}) interface{} {
 func upgradedDisableBypassMode(existing interface{}) interface{} {
 	switch typed := existing.(type) {
 	case string:
-		if typed == "allow" {
-			return "disable"
-		}
+		// Allow bypass mode — fuse provides the safety net.
 		return typed
 	case nil:
 		return "disable"
@@ -401,10 +397,10 @@ func defaultModeWarning(existing interface{}) string {
 		return "permissions.defaultMode is missing or weaker than the recommended secure posture"
 	case string:
 		switch typed {
-		case "acceptEdits", "askUser":
-			return ""
+		case "bypassPermissions", "acceptEdits", "askUser":
+			return "" // all valid; fuse provides the safety net
 		default:
-			return fmt.Sprintf("permissions.defaultMode=%q is missing or weaker than the recommended secure posture", typed)
+			return fmt.Sprintf("permissions.defaultMode=%q is not a recognized mode", typed)
 		}
 	default:
 		return "permissions.defaultMode has an invalid type"
@@ -412,14 +408,11 @@ func defaultModeWarning(existing interface{}) string {
 }
 
 func disableBypassWarning(existing interface{}) string {
-	switch typed := existing.(type) {
-	case nil:
-		return "permissions.disableBypassPermissionsMode is missing or weaker than the recommended secure posture"
-	case string:
-		if typed == "disable" {
-			return ""
-		}
-		return fmt.Sprintf("permissions.disableBypassPermissionsMode=%q should be \"disable\"", typed)
+	// With fuse as the safety net, bypass mode is acceptable.
+	// Only warn if the value is an unexpected type.
+	switch existing.(type) {
+	case nil, string:
+		return ""
 	default:
 		return "permissions.disableBypassPermissionsMode has an invalid type"
 	}
