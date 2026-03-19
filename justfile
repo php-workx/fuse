@@ -120,13 +120,9 @@ mod-tidy:
         if [ -f go.sum.bak ]; then mv go.sum.bak go.sum; elif [ -f go.sum ]; then rm go.sum; fi; \
         if [ "$$DIRTY" = "1" ]; then echo "go.mod/go.sum not tidy — run 'go mod tidy'" && exit 1; fi
 
-# Run all tests with race detector
+# Run all tests with race detector and coverage
 test:
-    go test -race -count=1 ./...
-
-# Run tests with coverage report
-cover:
-    go test -race -coverprofile=coverage.out -covermode=atomic ./...
+    go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
     go tool cover -html=coverage.out -o coverage.html
     @echo "Coverage report: coverage.html"
 
@@ -154,10 +150,7 @@ sonar:
     fi
     AUTH=(-H "Authorization: Bearer $TOKEN")
 
-    # 1. Generate coverage for SonarQube
-    just cover
-
-    # 2. Run sonar-scanner (allow non-zero exit — we check the gate ourselves)
+    # 1. Run sonar-scanner (coverage.out produced by `just test` in check-local)
     printf '\n=== SonarQube Scan ===\n'
     SONAR_TOKEN="$TOKEN" sonar-scanner -Dsonar.qualitygate.wait=true || true
 
