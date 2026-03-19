@@ -5,7 +5,7 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"text/template"
+	"text/template" // nosemgrep: import-text-template -- CLI terminal output, not HTML
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
