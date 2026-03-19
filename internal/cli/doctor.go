@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -63,6 +64,7 @@ func runDoctor(live, security bool) error {
 		results = append(results, checkCodexSecurityPosture())
 		results = append(results, checkMCPMediationPosture())
 		results = append(results, checkApprovalTerminalTrust())
+		results = append(results, checkTagOverrides())
 	}
 
 	if live {
@@ -261,6 +263,45 @@ func checkClaudeSettings() checkResult {
 		name:   "Claude Code hook",
 		status: "WARN",
 		detail: fmt.Sprintf("fuse hook not found in %s (run 'fuse install claude')", settingsPath),
+	}
+}
+
+func checkTagOverrides() checkResult {
+	policyCfg, err := policy.LoadPolicy(config.PolicyPath())
+	if err != nil {
+		return checkResult{
+			name:   "Tag overrides",
+			status: "PASS",
+			detail: "no policy file (no tag overrides configured)",
+		}
+	}
+
+	overrides, parseErr := policy.ParseTagOverrides(policyCfg)
+	if parseErr != nil {
+		return checkResult{
+			name:   "Tag overrides",
+			status: "FAIL",
+			detail: fmt.Sprintf("invalid tag_overrides in policy.yaml: %v", parseErr),
+		}
+	}
+
+	if len(overrides) == 0 {
+		return checkResult{
+			name:   "Tag overrides",
+			status: "PASS",
+			detail: "no tag overrides configured (all rules follow global mode)",
+		}
+	}
+
+	var details []string
+	for tag, mode := range policyCfg.TagOverrides {
+		details = append(details, fmt.Sprintf("%s=%s", tag, mode))
+	}
+	sort.Strings(details)
+	return checkResult{
+		name:   "Tag overrides",
+		status: "PASS",
+		detail: fmt.Sprintf("%d tag override(s): %s", len(details), strings.Join(details, ", ")),
 	}
 }
 
