@@ -33,6 +33,15 @@ func MaxDecision(a, b Decision) Decision {
 	return b
 }
 
+// BuiltinMatch holds the result of a builtin rule evaluation,
+// including whether the match should be enforced or only logged.
+type BuiltinMatch struct {
+	Decision Decision
+	Reason   string
+	RuleID   string
+	DryRun   bool // true if this match should be logged but not enforced
+}
+
 // ShellRequest represents an incoming command to classify.
 type ShellRequest struct {
 	RawCommand string

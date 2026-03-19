@@ -283,9 +283,9 @@ func TestEvaluateBuiltins_Empty(t *testing.T) {
 	defer func() { BuiltinRules = saved }()
 
 	idx := BuildRuleIndex(BuiltinRules)
-	dec, reason, id := EvaluateBuiltins("rm -rf /", nil, nil, idx)
-	if dec != "" || reason != "" || id != "" {
-		t.Errorf("expected no match with empty builtins, got dec=%q reason=%q id=%q", dec, reason, id)
+	match := EvaluateBuiltins("rm -rf /", nil, nil, nil, idx)
+	if match != nil {
+		t.Errorf("expected no match with empty builtins, got %+v", match)
 	}
 }
 
@@ -307,21 +307,130 @@ func TestEvaluateBuiltins_WithRule(t *testing.T) {
 	idx := BuildRuleIndex(BuiltinRules)
 
 	// Should match
-	dec, reason, id := EvaluateBuiltins("run test now", nil, nil, idx)
-	if dec != core.DecisionCaution {
-		t.Errorf("expected CAUTION, got %q", dec)
+	match := EvaluateBuiltins("run test now", nil, nil, nil, idx)
+	if match == nil {
+		t.Fatal("expected a match")
 	}
-	if reason != "test rule" {
-		t.Errorf("expected 'test rule', got %q", reason)
+	if match.Decision != core.DecisionCaution {
+		t.Errorf("expected CAUTION, got %q", match.Decision)
 	}
-	if id != "test:rule1" {
-		t.Errorf("expected 'test:rule1', got %q", id)
+	if match.Reason != "test rule" {
+		t.Errorf("expected 'test rule', got %q", match.Reason)
+	}
+	if match.RuleID != "test:rule1" {
+		t.Errorf("expected 'test:rule1', got %q", match.RuleID)
 	}
 
 	// Should be skipped when disabled
 	disabled := map[string]bool{"test:rule1": true}
-	dec, reason, id = EvaluateBuiltins("run test now", disabled, nil, idx)
-	if dec != "" || reason != "" || id != "" {
-		t.Errorf("expected no match when disabled, got dec=%q reason=%q id=%q", dec, reason, id)
+	match = EvaluateBuiltins("run test now", disabled, nil, nil, idx)
+	if match != nil {
+		t.Errorf("expected no match when disabled, got %+v", match)
+	}
+}
+
+func TestEvaluateBuiltins_TagOverrideDryRun(t *testing.T) {
+	saved := BuiltinRules
+	defer func() { BuiltinRules = saved }()
+
+	BuiltinRules = []BuiltinRule{
+		{
+			ID:      "test:git:push",
+			Pattern: regexp.MustCompile(`\bgit\s+push\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "git push",
+			Tags:    []string{"git"},
+		},
+	}
+
+	idx := BuildRuleIndex(BuiltinRules)
+	overrides := map[string]TagOverrideMode{"git": TagOverrideDryRun}
+
+	match := EvaluateBuiltins("git push origin main", nil, nil, overrides, idx)
+	if match == nil {
+		t.Fatal("expected match")
+	}
+	if !match.DryRun {
+		t.Error("expected DryRun=true for tag override dryrun")
+	}
+	if match.Decision != core.DecisionCaution {
+		t.Errorf("expected CAUTION, got %q", match.Decision)
+	}
+}
+
+func TestEvaluateBuiltins_TagOverrideDisabled(t *testing.T) {
+	saved := BuiltinRules
+	defer func() { BuiltinRules = saved }()
+
+	BuiltinRules = []BuiltinRule{
+		{
+			ID:      "test:git:push",
+			Pattern: regexp.MustCompile(`\bgit\s+push\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "git push",
+			Tags:    []string{"git"},
+		},
+	}
+
+	idx := BuildRuleIndex(BuiltinRules)
+	overrides := map[string]TagOverrideMode{"git": TagOverrideDisabled}
+
+	match := EvaluateBuiltins("git push origin main", nil, nil, overrides, idx)
+	if match != nil {
+		t.Errorf("expected no match when tag override is disabled, got %+v", match)
+	}
+}
+
+func TestEvaluateBuiltins_TagOverrideEnabled(t *testing.T) {
+	saved := BuiltinRules
+	defer func() { BuiltinRules = saved }()
+
+	BuiltinRules = []BuiltinRule{
+		{
+			ID:      "test:git:push",
+			Pattern: regexp.MustCompile(`\bgit\s+push\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "git push",
+			Tags:    []string{"git"},
+		},
+	}
+
+	idx := BuildRuleIndex(BuiltinRules)
+	overrides := map[string]TagOverrideMode{"git": TagOverrideEnabled}
+
+	match := EvaluateBuiltins("git push origin main", nil, nil, overrides, idx)
+	if match == nil {
+		t.Fatal("expected match")
+	}
+	if match.DryRun {
+		t.Error("expected DryRun=false for tag override enabled")
+	}
+}
+
+func TestEffectiveTagMode_MostRestrictiveWins(t *testing.T) {
+	// Rule has tags ["aws", "cloudformation"]
+	// aws=enabled, cloudformation=dryrun → enabled wins (most restrictive)
+	overrides := map[string]TagOverrideMode{
+		"aws":            TagOverrideEnabled,
+		"cloudformation": TagOverrideDryRun,
+	}
+	mode := effectiveTagMode([]string{"aws", "cloudformation"}, overrides)
+	if mode != TagOverrideEnabled {
+		t.Errorf("expected TagOverrideEnabled, got %d", mode)
+	}
+}
+
+func TestEffectiveTagMode_NoOverrides(t *testing.T) {
+	mode := effectiveTagMode([]string{"aws", "cloud"}, nil)
+	if mode != TagOverrideEnabled {
+		t.Errorf("expected TagOverrideEnabled when no overrides, got %d", mode)
+	}
+}
+
+func TestEffectiveTagMode_UnmatchedTags(t *testing.T) {
+	overrides := map[string]TagOverrideMode{"payment": TagOverrideDisabled}
+	mode := effectiveTagMode([]string{"aws", "cloud"}, overrides)
+	if mode != TagOverrideEnabled {
+		t.Errorf("expected TagOverrideEnabled for unmatched tags, got %d", mode)
 	}
 }

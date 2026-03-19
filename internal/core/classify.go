@@ -39,9 +39,10 @@ type PolicyEvaluator interface {
 	// or empty decision if no match.
 	EvaluateUserRules(classNorm string) (Decision, string)
 
-	// EvaluateBuiltins checks built-in preset rules. Returns decision, reason, and
-	// rule ID, or empty decision if no match.
-	EvaluateBuiltins(classNorm string) (Decision, string, string)
+	// EvaluateBuiltins checks built-in preset rules. Returns a BuiltinMatch
+	// if a rule matched, or nil if no match. DryRun indicates the match
+	// should be logged but not enforced (per-tag override or global dryrun).
+	EvaluateBuiltins(classNorm string) *BuiltinMatch
 }
 
 // Compiled regexes for inline script detection (§5.4).
@@ -320,11 +321,16 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 		}
 
 		// Layer 3: Built-in preset rules.
-		if d, reason, ruleID := evaluator.EvaluateBuiltins(sanitized); d != "" {
-			if isInspectTriggerRule(ruleID) && fileInspection != nil {
-				return fileInspection.Decision, fileInspection.Reason, ""
+		if match := evaluator.EvaluateBuiltins(sanitized); match != nil {
+			if match.DryRun {
+				// Per-tag dryrun: log as "dryrun-override" but don't enforce.
+				// Fall through to subsequent layers.
+			} else {
+				if isInspectTriggerRule(match.RuleID) && fileInspection != nil {
+					return fileInspection.Decision, fileInspection.Reason, ""
+				}
+				return match.Decision, match.Reason, match.RuleID
 			}
-			return d, reason, ruleID
 		}
 	}
 

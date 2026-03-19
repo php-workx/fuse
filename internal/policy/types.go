@@ -8,6 +8,20 @@ import (
 	"github.com/runger/fuse/internal/core"
 )
 
+// TagOverrideMode represents a per-tag enforcement mode override.
+type TagOverrideMode int
+
+const (
+	// TagOverrideNone means no override — use global mode.
+	TagOverrideNone TagOverrideMode = iota
+	// TagOverrideDisabled means skip the rule entirely (no log, no match).
+	TagOverrideDisabled
+	// TagOverrideDryRun means evaluate and log, but don't enforce.
+	TagOverrideDryRun
+	// TagOverrideEnabled means enforce regardless of global mode.
+	TagOverrideEnabled
+)
+
 // HardcodedRule represents a non-overridable safety rule compiled into the binary.
 // These rules cannot be disabled by user policy.
 type HardcodedRule struct {
@@ -103,7 +117,14 @@ func EvaluateHardcoded(classNorm string) (core.Decision, string) {
 
 // EvaluateBuiltins checks built-in rules using progressive activation.
 // Only rules whose keywords match the command are evaluated (plus rules with no keywords).
-func EvaluateBuiltins(classNorm string, disabledIDs, disabledTags map[string]bool, index *RuleIndex) (core.Decision, string, string) {
+// Returns a BuiltinMatch if a rule matched, or nil if no match.
+// The DryRun field indicates the match should be logged but not enforced.
+func EvaluateBuiltins(
+	classNorm string,
+	disabledIDs, disabledTags map[string]bool,
+	tagOverrides map[string]TagOverrideMode,
+	index *RuleIndex,
+) *core.BuiltinMatch {
 	candidates := index.CandidateRules(classNorm)
 
 	for _, i := range candidates {
@@ -114,14 +135,48 @@ func EvaluateBuiltins(classNorm string, disabledIDs, disabledTags map[string]boo
 		if isTagDisabled(r.Tags, disabledTags) {
 			continue
 		}
+		// Check tag override — disabled overrides skip entirely.
+		mode := effectiveTagMode(r.Tags, tagOverrides)
+		if mode == TagOverrideDisabled {
+			continue
+		}
 		if r.Pattern.MatchString(classNorm) {
 			if r.Predicate != nil && !r.Predicate(classNorm) {
 				continue
 			}
-			return r.Action, r.Reason, r.ID
+			return &core.BuiltinMatch{
+				Decision: r.Action,
+				Reason:   r.Reason,
+				RuleID:   r.ID,
+				DryRun:   mode == TagOverrideDryRun,
+			}
 		}
 	}
-	return "", "", "" // no match
+	return nil // no match
+}
+
+// effectiveTagMode determines the enforcement mode for a rule based on its tags.
+// Most restrictive tag override wins (enabled > dryrun > disabled).
+// If no override applies, returns enabled (rule fires normally —
+// global dryrun is handled by the adapter layer, not here).
+func effectiveTagMode(tags []string, overrides map[string]TagOverrideMode) TagOverrideMode {
+	if len(overrides) == 0 {
+		return TagOverrideEnabled
+	}
+
+	best := TagOverrideNone
+	for _, tag := range tags {
+		if m, ok := overrides[tag]; ok {
+			if m > best { // enabled > dryrun > disabled > none
+				best = m
+			}
+		}
+	}
+
+	if best != TagOverrideNone {
+		return best
+	}
+	return TagOverrideEnabled
 }
 
 // isTagDisabled returns true if any of the rule's tags are in the disabled set.
