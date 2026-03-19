@@ -341,12 +341,7 @@ func missingManagedEntriesWarning(path string, value interface{}, managed []stri
 func upgradedDefaultMode(existing interface{}) interface{} {
 	switch typed := existing.(type) {
 	case string:
-		switch typed {
-		case "bypassPermissions", "acceptEdits", "askUser":
-			return typed // preserve user's choice; fuse provides the safety net
-		default:
-			return typed
-		}
+		return typed // preserve user's choice; fuse provides the safety net
 	case nil:
 		return "bypassPermissions" // fuse monitors file tools, so bypass is safe
 	default:

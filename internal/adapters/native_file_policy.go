@@ -296,6 +296,8 @@ func (p *filePathInfo) hasSensitiveExtension() bool {
 		switch strings.ToLower(filepath.Ext(path)) {
 		case ".pem", ".key", ".crt", ".p12", ".pfx", ".jks", ".keystore":
 			return true
+		default:
+			// Not a sensitive extension; continue checking.
 		}
 	}
 	return false
