@@ -304,12 +304,20 @@ func checkClaudeSettings() checkResult {
 }
 
 func checkTagOverrides() checkResult {
-	policyCfg, err := policy.LoadPolicy(config.PolicyPath())
-	if err != nil {
+	policyPath := config.PolicyPath()
+	if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
 		return checkResult{
 			name:   "Tag overrides",
 			status: "PASS",
 			detail: "no policy file (no tag overrides configured)",
+		}
+	}
+	policyCfg, err := policy.LoadPolicy(policyPath)
+	if err != nil {
+		return checkResult{
+			name:   "Tag overrides",
+			status: "FAIL",
+			detail: fmt.Sprintf("cannot load policy.yaml: %v", err),
 		}
 	}
 

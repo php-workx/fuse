@@ -113,8 +113,8 @@ func TestMergeClaudeSecureSettingsUpgradesInsecureManagedValues(t *testing.T) {
 		},
 		"sandbox": map[string]interface{}{
 			"enabled":                  false,
-			"autoAllowBashIfSandboxed": true,
-			"allowUnsandboxedCommands": true,
+			"autoAllowBashIfSandboxed": false,
+			"allowUnsandboxedCommands": false,
 			"filesystem":               map[string]interface{}{},
 		},
 	}

@@ -63,6 +63,10 @@ func LoadPolicy(path string) (*PolicyConfig, error) {
 		}
 	}
 
+	if _, err := ParseTagOverrides(&cfg); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
 }
 

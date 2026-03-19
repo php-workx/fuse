@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/runger/fuse/internal/db"
 )
 
 func TestRunDoctor_ReportsMCPProxyChecks(t *testing.T) {
@@ -594,6 +596,346 @@ func TestMergeClaudeSecureSettings_UpgradesExplicitFalse(t *testing.T) {
 	}
 	if enabled != true {
 		t.Fatalf("mergeClaudeSecureSettings did not upgrade sandbox.enabled from false to true, got %v", enabled)
+	}
+}
+
+func TestCheckTagOverrides_ReportsConfiguredOverrides(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	policyPath := filepath.Join(fuseHome, "config", "policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	policyYAML := "version: \"1\"\ntag_overrides:\n  terraform: enabled\n  cdk: dryrun\n"
+	if err := os.WriteFile(policyPath, []byte(policyYAML), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	got := checkTagOverrides()
+	if got.status != "PASS" {
+		t.Fatalf("checkTagOverrides() status = %q, want PASS", got.status)
+	}
+	if !strings.Contains(got.detail, "2 tag override") {
+		t.Fatalf("expected 2 tag overrides in detail, got %q", got.detail)
+	}
+	for _, want := range []string{"terraform=enabled", "cdk=dryrun"} {
+		if !strings.Contains(got.detail, want) {
+			t.Fatalf("expected detail to contain %q, got %q", want, got.detail)
+		}
+	}
+}
+
+func TestCheckTagOverrides_PassesWithNoPolicyFile(t *testing.T) {
+	t.Setenv("FUSE_HOME", t.TempDir())
+
+	got := checkTagOverrides()
+	if got.status != "PASS" {
+		t.Fatalf("checkTagOverrides() status = %q, want PASS", got.status)
+	}
+	if !strings.Contains(got.detail, "no policy file") {
+		t.Fatalf("expected 'no policy file' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckTagOverrides_PassesWithNoOverrides(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	policyPath := filepath.Join(fuseHome, "config", "policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	if err := os.WriteFile(policyPath, []byte("version: \"1\"\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	got := checkTagOverrides()
+	if got.status != "PASS" {
+		t.Fatalf("checkTagOverrides() status = %q, want PASS", got.status)
+	}
+	if !strings.Contains(got.detail, "no tag overrides configured") {
+		t.Fatalf("expected 'no tag overrides configured' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckTagOverrides_FailsOnInvalidOverride(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	policyPath := filepath.Join(fuseHome, "config", "policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	policyYAML := "version: \"1\"\ntag_overrides:\n  terraform: invalid_mode\n"
+	if err := os.WriteFile(policyPath, []byte(policyYAML), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	got := checkTagOverrides()
+	if got.status != "FAIL" {
+		t.Fatalf("checkTagOverrides() status = %q, want FAIL", got.status)
+	}
+	if !strings.Contains(got.detail, "invalid") {
+		t.Fatalf("expected 'invalid' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckSQLiteDB_PassesWhenDBNotCreated(t *testing.T) {
+	t.Setenv("FUSE_HOME", t.TempDir())
+
+	got := checkSQLiteDB()
+	if got.status != "PASS" {
+		t.Fatalf("checkSQLiteDB() status = %q, want PASS", got.status)
+	}
+	if !strings.Contains(got.detail, "not yet created") {
+		t.Fatalf("expected 'not yet created' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckSQLiteDB_PassesWhenDBExists(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	stateDir := filepath.Join(fuseHome, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	dbPath := filepath.Join(stateDir, "fuse.db")
+	database, err := db.OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("create test DB: %v", err)
+	}
+	_ = database.Close()
+
+	got := checkSQLiteDB()
+	if got.status != "PASS" {
+		t.Fatalf("checkSQLiteDB() status = %q, want PASS", got.status)
+	}
+	if !strings.Contains(got.detail, dbPath) {
+		t.Fatalf("expected DB path in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckSQLiteDB_FailsWhenDBCorrupt(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	stateDir := filepath.Join(fuseHome, "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatalf("mkdir state dir: %v", err)
+	}
+	dbPath := filepath.Join(stateDir, "fuse.db")
+	if err := os.WriteFile(dbPath, []byte("not a sqlite database"), 0o644); err != nil {
+		t.Fatalf("write corrupt DB: %v", err)
+	}
+
+	got := checkSQLiteDB()
+	if got.status != "FAIL" {
+		t.Fatalf("checkSQLiteDB() status = %q, want FAIL", got.status)
+	}
+}
+
+func TestCheckFuseInPath_WarnWhenNotInPath(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+
+	got := checkFuseInPath()
+	if got.status != "WARN" {
+		t.Fatalf("checkFuseInPath() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "not found in PATH") {
+		t.Fatalf("expected 'not found in PATH' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckApprovalTerminalTrust_WarnsInCI(t *testing.T) {
+	t.Setenv("CI", "true")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("TERM", "xterm")
+
+	got := checkApprovalTerminalTrust()
+	if got.status != "WARN" {
+		t.Fatalf("checkApprovalTerminalTrust() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "CI") {
+		t.Fatalf("expected 'CI' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckApprovalTerminalTrust_WarnsOnSSH(t *testing.T) {
+	t.Setenv("CI", "")
+	t.Setenv("SSH_CONNECTION", "10.0.0.1 12345 10.0.0.2 22")
+	t.Setenv("TERM", "xterm")
+
+	got := checkApprovalTerminalTrust()
+	if got.status != "WARN" {
+		t.Fatalf("checkApprovalTerminalTrust() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "SSH") {
+		t.Fatalf("expected 'SSH' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckApprovalTerminalTrust_WarnsOnDumbTerminal(t *testing.T) {
+	t.Setenv("CI", "")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("TERM", "dumb")
+
+	got := checkApprovalTerminalTrust()
+	if got.status != "WARN" {
+		t.Fatalf("checkApprovalTerminalTrust() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "dumb") {
+		t.Fatalf("expected 'dumb' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckApprovalTerminalTrust_PassesNormally(t *testing.T) {
+	t.Setenv("CI", "")
+	t.Setenv("SSH_CONNECTION", "")
+	t.Setenv("SSH_TTY", "")
+	t.Setenv("TERM", "xterm-256color")
+
+	got := checkApprovalTerminalTrust()
+	if got.status != "PASS" {
+		t.Fatalf("checkApprovalTerminalTrust() status = %q, want PASS", got.status)
+	}
+}
+
+func TestCheckPolicyYAML_PassesWithValidPolicy(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	policyPath := filepath.Join(fuseHome, "config", "policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	policyYAML := `version: "1"
+rules:
+  - pattern: "echo hello"
+    action: allow
+    reason: "test"
+`
+	if err := os.WriteFile(policyPath, []byte(policyYAML), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	got := checkPolicyYAML()
+	if got.status != "PASS" {
+		t.Fatalf("checkPolicyYAML() status = %q, want PASS", got.status)
+	}
+	if !strings.Contains(got.detail, "1 rules loaded") {
+		t.Fatalf("expected '1 rules loaded' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckPolicyYAML_PassesWhenMissing(t *testing.T) {
+	t.Setenv("FUSE_HOME", t.TempDir())
+
+	got := checkPolicyYAML()
+	if got.status != "PASS" {
+		t.Fatalf("checkPolicyYAML() status = %q, want PASS", got.status)
+	}
+	if !strings.Contains(got.detail, "not present") {
+		t.Fatalf("expected 'not present' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckDirectoryStructure_WarnsWhenMissing(t *testing.T) {
+	t.Setenv("FUSE_HOME", filepath.Join(t.TempDir(), "nonexistent"))
+
+	got := checkDirectoryStructure()
+	if got.status != "WARN" {
+		t.Fatalf("checkDirectoryStructure() status = %q, want WARN", got.status)
+	}
+	if !strings.Contains(got.detail, "does not exist") {
+		t.Fatalf("expected 'does not exist' in detail, got %q", got.detail)
+	}
+}
+
+func TestCheckDirectoryStructure_FailsWhenNotADirectory(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	// Create config as a file instead of a directory.
+	configDir := filepath.Join(fuseHome, "config")
+	if err := os.WriteFile(configDir, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+
+	got := checkDirectoryStructure()
+	if got.status != "FAIL" {
+		t.Fatalf("checkDirectoryStructure() status = %q, want FAIL", got.status)
+	}
+	if !strings.Contains(got.detail, "not a directory") {
+		t.Fatalf("expected 'not a directory' in detail, got %q", got.detail)
+	}
+}
+
+func TestRunDoctor_VerboseShowsFullDetail(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	// Create a policy with many tag overrides to produce a long detail string.
+	policyPath := filepath.Join(fuseHome, "config", "policy.yaml")
+	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
+		t.Fatalf("mkdir policy dir: %v", err)
+	}
+	policyYAML := "version: \"1\"\ntag_overrides:\n  a: enabled\n  b: enabled\n  c: dryrun\n  d: disabled\n  e: enabled\n  f: dryrun\n"
+	if err := os.WriteFile(policyPath, []byte(policyYAML), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
+
+	// Run with --verbose to capture full detail.
+	origVerbose := doctorVerbose
+	doctorVerbose = true
+	defer func() { doctorVerbose = origVerbose }()
+
+	stdout, _, err := captureDoctorOutput(t, func() error {
+		return runDoctor(false, true)
+	})
+	_ = err // don't care about pass/fail, just checking output
+
+	// With verbose, all overrides should be visible.
+	for _, tag := range []string{"a=enabled", "b=enabled", "c=dryrun", "d=disabled"} {
+		if !strings.Contains(stdout, tag) {
+			t.Fatalf("expected verbose output to contain %q, got:\n%s", tag, stdout)
+		}
+	}
+}
+
+func TestRunDoctor_FixAppliesAutoFixes(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("CODEX_HOME", filepath.Join(t.TempDir(), ".codex"))
+
+	// Create Claude settings with the hook but without secure settings
+	// so --fix has something to fix.
+	settingsPath := filepath.Join(tmpHome, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatalf("mkdir settings dir: %v", err)
+	}
+	settings := mustClaudeSettings(t, defaultFuseHookEntries())
+	writeJSONForTest(t, settingsPath, settings)
+
+	origFix := doctorFix
+	doctorFix = true
+	defer func() { doctorFix = origFix }()
+
+	stdout, _, err := captureDoctorOutput(t, func() error {
+		return runDoctor(false, true)
+	})
+	_ = err
+
+	if !strings.Contains(stdout, "fixing:") || !strings.Contains(stdout, "fixed.") {
+		t.Fatalf("expected --fix output to show 'fixing:' and 'fixed.', got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "auto-fixed") {
+		t.Fatalf("expected summary to mention 'auto-fixed', got:\n%s", stdout)
 	}
 }
 
