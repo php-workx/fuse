@@ -63,6 +63,12 @@ func (m EventsModel) Update(msg tea.Msg) (EventsModel, tea.Cmd) {
 		return m.updateSearch(msg)
 	}
 
+	// When the detail panel is open, delegate scroll keys to the viewport
+	// and only handle Enter/Esc to close it.
+	if m.showDetail {
+		return m.updateDetail(msg)
+	}
+
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		k := msg.Key()
 		switch {
@@ -91,15 +97,30 @@ func (m EventsModel) Update(msg tea.Msg) (EventsModel, tea.Cmd) {
 		case key.Matches(k, keys.Enter):
 			m.toggleDetail()
 		case key.Matches(k, keys.Escape):
-			if m.showDetail {
-				m.showDetail = false
-			} else if m.searchInput.Value() != "" {
+			if m.searchInput.Value() != "" {
 				m.searchInput.SetValue("")
 				m.applyFilters()
 			}
 		}
 	}
 	return m, nil
+}
+
+// updateDetail handles messages when the detail panel is focused.
+// j/k/PgUp/PgDn scroll the viewport; Enter/Esc close the panel.
+func (m EventsModel) updateDetail(msg tea.Msg) (EventsModel, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		k := msg.Key()
+		switch {
+		case key.Matches(k, keys.Enter), key.Matches(k, keys.Escape):
+			m.showDetail = false
+			return m, nil
+		}
+	}
+	// Delegate all other messages (including scroll keys) to the viewport.
+	var cmd tea.Cmd
+	m.detailView, cmd = m.detailView.Update(msg)
+	return m, cmd
 }
 
 func (m EventsModel) updateSearch(msg tea.Msg) (EventsModel, tea.Cmd) {
@@ -178,9 +199,9 @@ func (m EventsModel) View() string {
 		}
 	}
 
-	// Detail panel.
-	if m.showDetail && m.cursor >= 0 && m.cursor < len(m.filtered) {
-		b.WriteString(m.renderDetail(&m.filtered[m.cursor]))
+	// Detail panel (rendered via viewport for scrolling).
+	if m.showDetail {
+		b.WriteString(m.detailView.View())
 	}
 
 	return b.String()
@@ -289,6 +310,18 @@ func (m *EventsModel) moveCursor(delta int) {
 
 func (m *EventsModel) toggleDetail() {
 	m.showDetail = !m.showDetail
+	if m.showDetail && m.cursor >= 0 && m.cursor < len(m.filtered) {
+		// Set viewport content and size for scrolling.
+		content := m.renderDetail(&m.filtered[m.cursor])
+		m.detailView.SetContent(content)
+		detailH := m.height * 40 / 100
+		if detailH < 3 {
+			detailH = 3
+		}
+		m.detailView.SetHeight(detailH)
+		m.detailView.SetWidth(m.width - 4)
+		m.detailView.GotoTop()
+	}
 }
 
 func (m EventsModel) tableHeight() int {
@@ -328,7 +361,7 @@ func formatTime(ts string) string {
 		// Try without milliseconds.
 		t, err = time.Parse("2006-01-02T15:04:05Z", ts)
 		if err != nil {
-			return ts[:8] // fallback: first 8 chars
+			return shorten(ts, 8) // fallback: first 8 chars
 		}
 	}
 	return t.Local().Format("15:04:05")

@@ -67,6 +67,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.fetching {
 			return m, nil // skip — previous fetch still in-flight
 		}
+		// Pause polling while the detail panel is open to avoid
+		// disrupting the user's reading (spec §6 cursor anchoring).
+		if m.activeView == viewEvents && m.events.showDetail {
+			return m, tickCmd(m.activeView) // reschedule without fetching
+		}
 		m.fetching = true
 		return m, m.fetchData()
 
