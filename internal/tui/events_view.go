@@ -223,13 +223,25 @@ func (m EventsModel) FilterInfo() string {
 }
 
 func (m EventsModel) renderDetail(e *db.EventRecord) string {
+	// Available content width inside the detail border (border + padding = ~4 chars).
+	contentWidth := m.width - 6
+	if contentWidth < 40 {
+		contentWidth = 40
+	}
+
+	const labelCol = 15 // "  Command:     " = 15 chars
+	valueWidth := contentWidth - labelCol
+	if valueWidth < 20 {
+		valueWidth = 20
+	}
+
 	var b strings.Builder
 	fmt.Fprintf(&b, "  ID:          %d\n", e.ID)
 	fmt.Fprintf(&b, "  Time:        %s\n", e.Timestamp)
 	fmt.Fprintf(&b, "  Decision:    %s\n", decisionStyle(e.Decision).Render(e.Decision))
-	fmt.Fprintf(&b, "  Command:     %s\n", sanitize(e.Command))
+	writeWrapped(&b, "  Command:     ", sanitize(e.Command), valueWidth)
 	fmt.Fprintf(&b, "  Rule ID:     %s\n", fallbackValue(e.RuleID))
-	fmt.Fprintf(&b, "  Reason:      %s\n", sanitize(fallbackValue(e.Reason)))
+	writeWrapped(&b, "  Reason:      ", sanitize(fallbackValue(e.Reason)), valueWidth)
 	fmt.Fprintf(&b, "  Agent:       %s\n", fallbackValue(e.Agent))
 	fmt.Fprintf(&b, "  Source:      %s\n", fallbackValue(e.Source))
 	fmt.Fprintf(&b, "  Session:     %s\n", fallbackValue(e.SessionID))
@@ -245,6 +257,49 @@ func (m EventsModel) renderDetail(e *db.EventRecord) string {
 		b.WriteString("  Exit Code:   -\n")
 	}
 	return styleDetail.Render(b.String())
+}
+
+// writeWrapped writes a labeled value, wrapping long values to fit within maxWidth.
+// Continuation lines are indented to align with the value start.
+func writeWrapped(b *strings.Builder, label, value string, maxWidth int) {
+	if len(value) <= maxWidth {
+		b.WriteString(label + value + "\n")
+		return
+	}
+
+	indent := strings.Repeat(" ", len(label))
+	first := true
+	for value != "" {
+		chunk := value
+		if len(chunk) > maxWidth {
+			// Try to break at a space.
+			cut := maxWidth
+			for cut > maxWidth/2 {
+				if chunk[cut] == ' ' {
+					break
+				}
+				cut--
+			}
+			if cut <= maxWidth/2 {
+				cut = maxWidth // no good break point — hard wrap
+			}
+			chunk = value[:cut]
+			value = value[cut:]
+			// Skip leading space on next line.
+			if value != "" && value[0] == ' ' {
+				value = value[1:]
+			}
+		} else {
+			value = ""
+		}
+
+		if first {
+			b.WriteString(label + chunk + "\n")
+			first = false
+		} else {
+			b.WriteString(indent + chunk + "\n")
+		}
+	}
 }
 
 func (m *EventsModel) applyFilters() {
