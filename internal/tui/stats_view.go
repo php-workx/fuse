@@ -69,10 +69,14 @@ func (m StatsModel) View() string {
 	b.WriteString("\n")
 
 	// By Source + By Workspace side by side.
-	// Shorten workspace paths to last 2 components for readability.
+	// Shorten workspace paths and cap to top 8 — workspaces are long-tail.
 	shortWorkspaces := shortenWorkspacePaths(m.summary.ByWorkspace)
+	wsMaxRows := maxRows
+	if wsMaxRows > 8 {
+		wsMaxRows = 8
+	}
 	left = renderSection("By Source", m.summary.BySource, colWidth, maxRows, labelWidthShort, false)
-	right = renderSection("By Workspace", shortWorkspaces, colWidth, maxRows, labelWidthWide, false)
+	right = renderSection("By Workspace", shortWorkspaces, colWidth, wsMaxRows, labelWidthWide, false)
 	b.WriteString(sideBySide(left, right, colWidth))
 
 	return b.String()
