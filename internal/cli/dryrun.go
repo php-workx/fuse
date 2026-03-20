@@ -10,8 +10,9 @@ import (
 )
 
 var dryrunCmd = &cobra.Command{
-	Use:   "dryrun",
-	Short: "Classify and log commands without blocking or prompting",
+	Use:     "dryrun",
+	Short:   "Classify and log commands without blocking or prompting",
+	GroupID: groupSetup,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := os.MkdirAll(config.StateDir(), 0o700); err != nil {
 			return fmt.Errorf("creating state directory: %w", err)

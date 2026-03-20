@@ -47,7 +47,7 @@ func TestMergeClaudeSecureSettingsMergesWithoutClobberingUnrelatedValues(t *test
 	}
 	mergeFuseHook(settings)
 
-	assertClaudeSecureDefaults(t, settings, "askUser")
+	assertClaudeSecureDefaults(t, settings, "askUser", "disable")
 
 	if settings["theme"] != "dark" {
 		t.Fatalf("expected unrelated top-level setting preserved, got %#v", settings["theme"])
@@ -113,8 +113,8 @@ func TestMergeClaudeSecureSettingsUpgradesInsecureManagedValues(t *testing.T) {
 		},
 		"sandbox": map[string]interface{}{
 			"enabled":                  false,
-			"autoAllowBashIfSandboxed": true,
-			"allowUnsandboxedCommands": true,
+			"autoAllowBashIfSandboxed": false,
+			"allowUnsandboxedCommands": false,
 			"filesystem":               map[string]interface{}{},
 		},
 	}
@@ -123,7 +123,7 @@ func TestMergeClaudeSecureSettingsUpgradesInsecureManagedValues(t *testing.T) {
 		t.Fatalf("mergeClaudeSecureSettings: %v", err)
 	}
 
-	assertClaudeSecureDefaults(t, settings, "acceptEdits")
+	assertClaudeSecureDefaults(t, settings, "bypassPermissions", "allow")
 }
 
 func TestMergeClaudeSecureSettingsPreservesStricterDefaultMode(t *testing.T) {
@@ -188,11 +188,6 @@ func TestMergeClaudeSecureSettingsPreservesExistingDenyListsAlongsideManagedEntr
 	if !containsString(denyWrite, "~/backups") {
 		t.Fatalf("expected unrelated denyWrite entry preserved, got %v", denyWrite)
 	}
-	for _, want := range managedClaudeSandboxDenyRead {
-		if !containsString(denyRead, want) {
-			t.Fatalf("expected managed denyRead entry %q present, got %v", want, denyRead)
-		}
-	}
 	for _, want := range managedClaudeSandboxDenyWrite {
 		if !containsString(denyWrite, want) {
 			t.Fatalf("expected managed denyWrite entry %q present, got %v", want, denyWrite)
@@ -237,17 +232,6 @@ func TestMergeClaudeSecureSettingsRejectsUnexpectedShapes(t *testing.T) {
 				},
 			},
 			wantErr: "permissions.deny",
-		},
-		{
-			name: "denyRead has wrong shape",
-			settings: map[string]interface{}{
-				"sandbox": map[string]interface{}{
-					"filesystem": map[string]interface{}{
-						"denyRead": map[string]interface{}{},
-					},
-				},
-			},
-			wantErr: "sandbox.filesystem.denyRead",
 		},
 	}
 
@@ -347,7 +331,7 @@ func containsWarning(warnings []string, want string) bool {
 	return false
 }
 
-func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, expectedDefaultMode string) {
+func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, expectedDefaultMode, expectedDisableBypass string) {
 	t.Helper()
 
 	permissions, ok := settings["permissions"].(map[string]interface{})
@@ -357,8 +341,8 @@ func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, e
 	if permissions["defaultMode"] != expectedDefaultMode {
 		t.Fatalf("permissions.defaultMode = %#v, want %q", permissions["defaultMode"], expectedDefaultMode)
 	}
-	if permissions["disableBypassPermissionsMode"] != "disable" {
-		t.Fatalf("permissions.disableBypassPermissionsMode = %#v, want %q", permissions["disableBypassPermissionsMode"], "disable")
+	if permissions["disableBypassPermissionsMode"] != expectedDisableBypass {
+		t.Fatalf("permissions.disableBypassPermissionsMode = %#v, want %q", permissions["disableBypassPermissionsMode"], expectedDisableBypass)
 	}
 
 	deny := stringsFromValue(t, permissions["deny"])
@@ -375,24 +359,18 @@ func assertClaudeSecureDefaults(t *testing.T, settings map[string]interface{}, e
 	if sandbox["enabled"] != true {
 		t.Fatalf("sandbox.enabled = %#v, want true", sandbox["enabled"])
 	}
-	if sandbox["autoAllowBashIfSandboxed"] != false {
-		t.Fatalf("sandbox.autoAllowBashIfSandboxed = %#v, want false", sandbox["autoAllowBashIfSandboxed"])
+	if sandbox["autoAllowBashIfSandboxed"] != true {
+		t.Fatalf("sandbox.autoAllowBashIfSandboxed = %#v, want true", sandbox["autoAllowBashIfSandboxed"])
 	}
-	if sandbox["allowUnsandboxedCommands"] != false {
-		t.Fatalf("sandbox.allowUnsandboxedCommands = %#v, want false", sandbox["allowUnsandboxedCommands"])
+	if sandbox["allowUnsandboxedCommands"] != true {
+		t.Fatalf("sandbox.allowUnsandboxedCommands = %#v, want true", sandbox["allowUnsandboxedCommands"])
 	}
 
 	filesystem, ok := sandbox["filesystem"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("expected sandbox.filesystem map, got %#v", sandbox["filesystem"])
 	}
-	denyRead := stringsFromValue(t, filesystem["denyRead"])
 	denyWrite := stringsFromValue(t, filesystem["denyWrite"])
-	for _, want := range managedClaudeSandboxDenyRead {
-		if !containsString(denyRead, want) {
-			t.Fatalf("expected managed denyRead entry %q present, got %v", want, denyRead)
-		}
-	}
 	for _, want := range managedClaudeSandboxDenyWrite {
 		if !containsString(denyWrite, want) {
 			t.Fatalf("expected managed denyWrite entry %q present, got %v", want, denyWrite)

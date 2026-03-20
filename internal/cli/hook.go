@@ -9,8 +9,9 @@ import (
 )
 
 var hookCmd = &cobra.Command{
-	Use:   "hook",
-	Short: "Hook commands for AI agent integration",
+	Use:     "hook",
+	Short:   "Hook commands for AI agent integration",
+	GroupID: groupRuntime,
 }
 
 var hookEvaluateCmd = &cobra.Command{

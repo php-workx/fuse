@@ -12,9 +12,10 @@ import (
 )
 
 var installCmd = &cobra.Command{
-	Use:   "install [claude|codex]",
-	Short: "Install fuse as a hook for an AI coding agent",
-	Args:  cobra.ExactArgs(1),
+	Use:     "install [claude|codex]",
+	Short:   "Install fuse as a hook for an AI coding agent",
+	GroupID: groupSetup,
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		target := args[0]
 		if installClaudeSecure && target != "claude" {

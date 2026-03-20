@@ -12,19 +12,23 @@ const maxInputSize = 64 * 1024
 
 // ClassifyResult holds the full result of command classification.
 type ClassifyResult struct {
-	Decision    Decision
-	Reason      string
-	RuleID      string
-	DecisionKey string
-	SubResults  []SubCommandResult
+	Decision            Decision
+	Reason              string
+	RuleID              string
+	DecisionKey         string
+	SubResults          []SubCommandResult
+	DryRunMatches       []BuiltinMatch // rules that matched but were not enforced (per-tag dryrun)
+	TagOverrideEnforced bool           // true when the decision was enforced by a tag_override (should block even in dryrun)
 }
 
 // SubCommandResult holds the classification result for a single sub-command.
 type SubCommandResult struct {
-	Command  string
-	Decision Decision
-	Reason   string
-	RuleID   string
+	Command             string
+	Decision            Decision
+	Reason              string
+	RuleID              string
+	DryRunMatches       []BuiltinMatch
+	TagOverrideEnforced bool // true when a tag_override explicitly enforced this decision
 }
 
 // PolicyEvaluator abstracts policy evaluation to avoid circular imports
@@ -39,9 +43,10 @@ type PolicyEvaluator interface {
 	// or empty decision if no match.
 	EvaluateUserRules(classNorm string) (Decision, string)
 
-	// EvaluateBuiltins checks built-in preset rules. Returns decision, reason, and
-	// rule ID, or empty decision if no match.
-	EvaluateBuiltins(classNorm string) (Decision, string, string)
+	// EvaluateBuiltins checks built-in preset rules. Returns a BuiltinMatch
+	// if a rule matched, or nil if no match. DryRun indicates the match
+	// should be logged but not enforced (per-tag override or global dryrun).
+	EvaluateBuiltins(classNorm string) *BuiltinMatch
 }
 
 // Compiled regexes for inline script detection (§5.4).
@@ -103,7 +108,7 @@ var sensitiveEnvPrefixes = []string{
 // Classify runs the full classification pipeline on a shell request (§5.2).
 // The evaluator parameter provides policy rule evaluation; pass nil to skip
 // all policy/builtin rule checks (only safe-command heuristics will apply).
-func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, error) {
+func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, error) { //nolint:funlen // classify pipeline
 	result := &ClassifyResult{}
 
 	// Step 1: Input validation — oversized commands are fail-closed APPROVAL.
@@ -173,12 +178,18 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	for _, subCmd := range subCmds {
 		sub := classifySubCommand(subCmd, evaluator, req.Cwd)
 		result.SubResults = append(result.SubResults, sub)
+		result.DryRunMatches = append(result.DryRunMatches, sub.DryRunMatches...)
 
 		newOverall := MaxDecision(overallDecision, sub.Decision)
 		if newOverall != overallDecision {
 			overallDecision = newOverall
 			overallReason = sub.Reason
 			overallRuleID = sub.RuleID
+		}
+		// OR across all sub-commands: if ANY sub-command was tag-override-enforced,
+		// the overall result should be enforced even in dryrun mode.
+		if sub.TagOverrideEnforced {
+			result.TagOverrideEnforced = true
 		}
 
 		// Gather file hash if a referenced file was inspected.
@@ -234,19 +245,23 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	bestDecision := DecisionSafe
 	bestReason := "default safe"
 	bestRuleID := ""
+	var allDryRunMatches []BuiltinMatch
+	tagOverrideEnforced := false
 
 	for _, cmd := range allCmds {
 		if cmd == "" {
 			continue
 		}
 
-		d, reason, ruleID := classifySingleCommand(cmd, evaluator, cwd)
+		d, reason, ruleID, dryMatches, override := classifySingleCommand(cmd, evaluator, cwd)
 		combined := MaxDecision(bestDecision, d)
 		if combined != bestDecision {
 			bestDecision = combined
 			bestReason = reason
 			bestRuleID = ruleID
+			tagOverrideEnforced = override
 		}
+		allDryRunMatches = append(allDryRunMatches, dryMatches...)
 	}
 
 	// Step 10: Apply sudo/doas escalation modifier.
@@ -266,11 +281,17 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	sub.Decision = bestDecision
 	sub.Reason = bestReason
 	sub.RuleID = bestRuleID
+	sub.DryRunMatches = allDryRunMatches
+	sub.TagOverrideEnforced = tagOverrideEnforced
 	return sub
 }
 
 // classifySingleCommand classifies a single (already classification-normalized) command string.
-func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (Decision, string, string) {
+// classifySingleCommand returns (decision, reason, ruleID, dryRunMatches, tagOverrideEnforced).
+// tagOverrideEnforced is true when the decision was enforced by an explicit tag_override.
+func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (Decision, string, string, []BuiltinMatch, bool) {
+	var dryRunMatches []BuiltinMatch
+
 	// Step 5: Inline script detection (§5.4).
 	inlineDecision, inlineReason := detectInlineScript(cmd)
 
@@ -294,14 +315,14 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 
 	// Check for security-sensitive env var assignments at start of command.
 	if hasSensitiveEnvPrefix(cmd) {
-		return DecisionApproval, "security-sensitive environment variable assignment", ""
+		return DecisionApproval, "security-sensitive environment variable assignment", "", nil, false
 	}
 
 	// Hardcoded rules must see the unsanitized normalized command so inline
 	// self-protection patterns are not masked by quote sanitization.
 	if evaluator != nil {
 		if d, reason := evaluator.EvaluateHardcoded(cmd); d != "" {
-			return d, reason, ""
+			return d, reason, "", nil, false
 		}
 	}
 
@@ -310,46 +331,51 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	if evaluator != nil {
 		// Layer 2: User policy rules (always evaluated first — user can override anything).
 		if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
-			return d, reason, ""
+			return d, reason, "", nil, false
 		}
 
 		// Layer 2.5: Safe build directory cleanup (rm -rf node_modules, dist, etc.)
 		// After user rules so project policies can still block/approve if needed.
 		if IsSafeBuildCleanup(cmd) {
-			return DecisionSafe, "safe build directory cleanup", ""
+			return DecisionSafe, "safe build directory cleanup", "", nil, false
 		}
 
 		// Layer 3: Built-in preset rules.
-		if d, reason, ruleID := evaluator.EvaluateBuiltins(sanitized); d != "" {
-			if isInspectTriggerRule(ruleID) && fileInspection != nil {
-				return fileInspection.Decision, fileInspection.Reason, ""
+		if match := evaluator.EvaluateBuiltins(sanitized); match != nil {
+			if match.DryRun {
+				// Per-tag dryrun: collect for logging but don't enforce.
+				dryRunMatches = append(dryRunMatches, *match)
+			} else {
+				if isInspectTriggerRule(match.RuleID) && fileInspection != nil {
+					return fileInspection.Decision, fileInspection.Reason, "", dryRunMatches, match.TagOverrideEnforced
+				}
+				return match.Decision, match.Reason, match.RuleID, dryRunMatches, match.TagOverrideEnforced
 			}
-			return d, reason, ruleID
 		}
 	}
 
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
-		return DecisionSafe, "unconditionally safe command", ""
+		return DecisionSafe, "unconditionally safe command", "", dryRunMatches, false
 	}
 
 	// Layer 5: Conditionally safe commands.
 	if IsConditionallySafe(basename, cmd) {
-		return DecisionSafe, "conditionally safe command", ""
+		return DecisionSafe, "conditionally safe command", "", dryRunMatches, false
 	}
 
 	// Layer 6: File inspection result (if applicable).
 	if fileInspection != nil {
-		return fileInspection.Decision, fileInspection.Reason, ""
+		return fileInspection.Decision, fileInspection.Reason, "", dryRunMatches, false
 	}
 
 	// Check inline script detection result (deferred from step 5).
 	if inlineDecision != "" {
-		return inlineDecision, inlineReason, ""
+		return inlineDecision, inlineReason, "", dryRunMatches, false
 	}
 
 	// Fallback: SAFE (default-SAFE per spec §6.5).
-	return DecisionSafe, "no matching rule (default safe)", ""
+	return DecisionSafe, "no matching rule (default safe)", "", dryRunMatches, false
 }
 
 // Patterns that indicate dangerous inline Python code.
@@ -384,27 +410,34 @@ func detectInlineScript(cmd string) (Decision, string) {
 	bestReason := ""
 
 	for _, p := range inlineScriptPatterns {
-		if p.re.MatchString(cmd) {
-			// Check if this is a safe python -c pattern.
-			if p.re == reInlinePythonC && isSafePythonInline(cmd) {
-				continue
-			}
+		if !p.re.MatchString(cmd) {
+			continue
+		}
+		// Check if this is a safe python -c pattern.
+		if p.re == reInlinePythonC && isSafePythonInline(cmd) {
+			continue
+		}
+		// Skip heredoc detection for git commit / gh pr create — the heredoc
+		// is just a message body, not code execution. Do NOT skip $() detection:
+		// command substitutions in git commit -m ARE executed by the shell.
+		if p.re == reInlineHeredoc && isSafeHeredocUsage(cmd) {
+			continue
+		}
 
-			var d Decision
-			if p.approval {
-				d = DecisionApproval
-			} else {
-				d = DecisionCaution
-			}
-			if bestDecision == "" {
-				bestDecision = d
+		var d Decision
+		if p.approval {
+			d = DecisionApproval
+		} else {
+			d = DecisionCaution
+		}
+		if bestDecision == "" {
+			bestDecision = d
+			bestReason = "inline script detected: " + p.re.String()
+		} else {
+			combined := MaxDecision(bestDecision, d)
+			if combined != bestDecision {
+				bestDecision = combined
 				bestReason = "inline script detected: " + p.re.String()
-			} else {
-				combined := MaxDecision(bestDecision, d)
-				if combined != bestDecision {
-					bestDecision = combined
-					bestReason = "inline script detected: " + p.re.String()
-				}
 			}
 		}
 	}
@@ -414,6 +447,14 @@ func detectInlineScript(cmd string) (Decision, string) {
 
 // isSafePythonInline returns true if a python -c command uses only safe,
 // read-only modules and contains no dangerous patterns.
+// reSafeHeredocCmd matches commands that safely use heredocs for message bodies,
+// not for code execution. Covers git commit, gh pr create, and similar.
+var reSafeHeredocCmd = regexp.MustCompile(`^\s*(git\s+commit|git\s+tag|gh\s+pr\s+create|gh\s+issue\s+create)\b`)
+
+func isSafeHeredocUsage(cmd string) bool {
+	return reSafeHeredocCmd.MatchString(cmd)
+}
+
 func isSafePythonInline(cmd string) bool {
 	if !safePythonInline.MatchString(cmd) {
 		return false

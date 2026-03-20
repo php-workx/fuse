@@ -8,17 +8,20 @@ type Evaluator struct {
 	config       *PolicyConfig
 	disabledIDs  map[string]bool
 	disabledTags map[string]bool
+	tagOverrides map[string]TagOverrideMode
 	ruleIndex    *RuleIndex
 }
 
 // NewEvaluator creates a PolicyEvaluator from a PolicyConfig.
 // The config may be nil (no user rules, no disabled builtins/tags).
 // Builds a keyword index for progressive rule activation.
-func NewEvaluator(config *PolicyConfig) *Evaluator {
+func NewEvaluator(cfg *PolicyConfig) *Evaluator {
+	overrides, _ := ParseTagOverrides(cfg)
 	return &Evaluator{
-		config:       config,
-		disabledIDs:  DisabledBuiltinSet(config),
-		disabledTags: DisabledTagSet(config),
+		config:       cfg,
+		disabledIDs:  DisabledBuiltinSet(cfg),
+		disabledTags: DisabledTagSet(cfg),
+		tagOverrides: overrides,
 		ruleIndex:    BuildRuleIndex(BuiltinRules),
 	}
 }
@@ -33,7 +36,8 @@ func (e *Evaluator) EvaluateUserRules(classNorm string) (core.Decision, string) 
 	return EvaluateUserRules(classNorm, e.config)
 }
 
-// EvaluateBuiltins checks built-in preset rules with progressive activation.
-func (e *Evaluator) EvaluateBuiltins(classNorm string) (core.Decision, string, string) {
-	return EvaluateBuiltins(classNorm, e.disabledIDs, e.disabledTags, e.ruleIndex)
+// EvaluateBuiltins checks built-in preset rules with progressive activation
+// and per-tag enforcement mode. Returns a BuiltinMatch or nil.
+func (e *Evaluator) EvaluateBuiltins(classNorm string) *core.BuiltinMatch {
+	return EvaluateBuiltins(classNorm, e.disabledIDs, e.disabledTags, e.tagOverrides, e.ruleIndex)
 }

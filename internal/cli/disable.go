@@ -10,8 +10,9 @@ import (
 )
 
 var disableCmd = &cobra.Command{
-	Use:   "disable",
-	Short: "Fully disable fuse (zero processing, instant pass-through)",
+	Use:     "disable",
+	Short:   "Fully disable fuse (zero processing, instant pass-through)",
+	GroupID: groupSetup,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Remove both markers — fully disabled.
 		_ = os.Remove(config.EnabledMarkerPath())

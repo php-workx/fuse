@@ -25,6 +25,11 @@ func isNativeClaudeFileTool(toolName string) bool {
 }
 
 func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+	// Native file tools don't use tag_overrides — dryrun always allows.
+	if dryRun {
+		return 0
+	}
+
 	if len(req.ToolInput) == 0 {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Missing tool_input. Do not retry this exact command. Ask the user for guidance.")
 		return 2
@@ -47,9 +52,6 @@ func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config,
 	case core.DecisionBlocked:
 		fmt.Fprintf(stderr, "fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.\n", result.Reason)
 		logHookEvent(req.SessionID, extractCommandFromResult(result), req.Cwd, result)
-		if dryRun {
-			return 0
-		}
 		return 2
 	case core.DecisionApproval:
 		return handleApproval(req, result, stderr, cfg, dryRun)
@@ -296,6 +298,8 @@ func (p *filePathInfo) hasSensitiveExtension() bool {
 		switch strings.ToLower(filepath.Ext(path)) {
 		case ".pem", ".key", ".crt", ".p12", ".pfx", ".jks", ".keystore":
 			return true
+		default:
+			// Not a sensitive extension; continue checking.
 		}
 	}
 	return false

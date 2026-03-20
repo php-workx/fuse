@@ -28,16 +28,18 @@ var eventsOpts eventsOptions
 var statsJSON bool
 
 var eventsCmd = &cobra.Command{
-	Use:   "events",
-	Short: "Show recent local fuse events",
+	Use:     "events",
+	Short:   "Show recent local fuse events",
+	GroupID: groupObserve,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runEvents(&eventsOpts)
 	},
 }
 
 var statsCmd = &cobra.Command{
-	Use:   "stats",
-	Short: "Summarize local fuse activity",
+	Use:     "stats",
+	Short:   "Summarize local fuse activity",
+	GroupID: groupObserve,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runStats()
 	},

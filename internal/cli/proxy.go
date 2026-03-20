@@ -10,8 +10,9 @@ import (
 )
 
 var proxyCmd = &cobra.Command{
-	Use:   "proxy",
-	Short: "Proxy commands (MCP, Codex shell)",
+	Use:     "proxy",
+	Short:   "Proxy commands (MCP, Codex shell)",
+	GroupID: groupRuntime,
 }
 
 var proxyDownstreamName string

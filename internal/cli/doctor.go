@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -26,24 +27,34 @@ var (
 )
 
 var doctorCmd = &cobra.Command{
-	Use:   "doctor",
-	Short: "Run diagnostic checks on fuse setup",
-	Long:  "Checks configuration, directory structure, hook installation, and optionally runs a live test.",
+	Use:     "doctor",
+	Short:   "Run diagnostic checks on fuse setup",
+	Long:    "Checks configuration, directory structure, hook installation, and optionally runs a live test.",
+	GroupID: groupObserve,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runDoctor(doctorLive, doctorSecurity)
 	},
 }
 
+var (
+	doctorVerbose bool
+	doctorFix     bool
+)
+
 func init() {
 	doctorCmd.Flags().BoolVar(&doctorLive, "live", false, "Run a live classification test")
 	doctorCmd.Flags().BoolVar(&doctorSecurity, "security", false, "Run additional security posture diagnostics")
+	doctorCmd.Flags().BoolVar(&doctorVerbose, "verbose", false, "Show full detail for all checks")
+	doctorCmd.Flags().BoolVar(&doctorFix, "fix", false, "Automatically fix warnings where possible")
 	rootCmd.AddCommand(doctorCmd)
 }
 
 type checkResult struct {
-	name   string
-	status string // "PASS", "FAIL", "WARN"
-	detail string
+	name    string
+	status  string // "PASS", "FAIL", "WARN"
+	detail  string
+	fixHint string       // human-readable fix suggestion (e.g., "run: fuse install claude --secure")
+	fixFunc func() error // auto-fix function; nil if not auto-fixable
 }
 
 func runDoctor(live, security bool) error {
@@ -63,6 +74,7 @@ func runDoctor(live, security bool) error {
 		results = append(results, checkCodexSecurityPosture())
 		results = append(results, checkMCPMediationPosture())
 		results = append(results, checkApprovalTerminalTrust())
+		results = append(results, checkTagOverrides())
 	}
 
 	if live {
@@ -80,6 +92,7 @@ func runDoctor(live, security bool) error {
 	fails := 0
 	warns := 0
 
+	var fixed int
 	for _, r := range results {
 		icon := "[ PASS ]"
 		switch r.status {
@@ -94,12 +107,39 @@ func runDoctor(live, security bool) error {
 		}
 		fmt.Printf("  %s  %s\n", icon, r.name)
 		if r.detail != "" {
-			fmt.Printf("           %s\n", r.detail)
+			detail := r.detail
+			if !doctorVerbose && len(detail) > 120 {
+				// Count semicolons as a proxy for number of items.
+				items := strings.Count(detail, ";") + 1
+				if items > 2 {
+					// Truncate: show first item + count.
+					first := strings.SplitN(detail, ";", 2)[0]
+					detail = fmt.Sprintf("%s (and %d more — use --verbose for full list)", strings.TrimSpace(first), items-1)
+				}
+			}
+			fmt.Printf("           %s\n", detail)
+		}
+		if r.fixHint != "" && r.status == "WARN" {
+			if doctorFix && r.fixFunc != nil {
+				fmt.Printf("           fixing: %s\n", r.fixHint)
+				if err := r.fixFunc(); err != nil {
+					fmt.Printf("           fix failed: %v\n", err)
+				} else {
+					fmt.Printf("           fixed.\n")
+					fixed++
+				}
+			} else if !doctorFix {
+				fmt.Printf("           fix: %s\n", r.fixHint)
+			}
 		}
 	}
 
 	fmt.Println()
-	fmt.Printf("Results: %d passed, %d warnings, %d failed\n", passes, warns, fails)
+	summary := fmt.Sprintf("Results: %d passed, %d warnings, %d failed", passes, warns, fails)
+	if fixed > 0 {
+		summary += fmt.Sprintf(", %d auto-fixed", fixed)
+	}
+	fmt.Println(summary)
 
 	if fails > 0 {
 		return fmt.Errorf("%d check(s) failed", fails)
@@ -264,6 +304,53 @@ func checkClaudeSettings() checkResult {
 	}
 }
 
+func checkTagOverrides() checkResult {
+	policyPath := config.PolicyPath()
+	if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
+		return checkResult{
+			name:   "Tag overrides",
+			status: "PASS",
+			detail: "no policy file (no tag overrides configured)",
+		}
+	}
+	policyCfg, err := policy.LoadPolicy(policyPath)
+	if err != nil {
+		return checkResult{
+			name:   "Tag overrides",
+			status: "FAIL",
+			detail: fmt.Sprintf("cannot load policy.yaml: %v", err),
+		}
+	}
+
+	overrides, parseErr := policy.ParseTagOverrides(policyCfg)
+	if parseErr != nil {
+		return checkResult{
+			name:   "Tag overrides",
+			status: "FAIL",
+			detail: fmt.Sprintf("invalid tag_overrides in policy.yaml: %v", parseErr),
+		}
+	}
+
+	if len(overrides) == 0 {
+		return checkResult{
+			name:   "Tag overrides",
+			status: "PASS",
+			detail: "no tag overrides configured (all rules follow global mode)",
+		}
+	}
+
+	var details []string
+	for tag, mode := range policyCfg.TagOverrides {
+		details = append(details, fmt.Sprintf("%s=%s", tag, mode))
+	}
+	sort.Strings(details)
+	return checkResult{
+		name:   "Tag overrides",
+		status: "PASS",
+		detail: fmt.Sprintf("%d tag override(s): %s", len(details), strings.Join(details, ", ")),
+	}
+}
+
 func checkClaudeSecurityPosture() checkResult {
 	settingsPath := claudeSettingsPath()
 	settings, err := readJSONFile(settingsPath)
@@ -300,9 +387,11 @@ func checkClaudeSecurityPosture() checkResult {
 	}
 	if len(warnings) > 0 {
 		return checkResult{
-			name:   "Claude security posture",
-			status: "WARN",
-			detail: "missing or weaker secure settings: " + strings.Join(warnings, "; "),
+			name:    "Claude security posture",
+			status:  "WARN",
+			detail:  "missing or weaker secure settings: " + strings.Join(warnings, "; "),
+			fixHint: "fuse install claude --secure",
+			fixFunc: func() error { return installClaude(true) },
 		}
 	}
 	return checkResult{
@@ -490,9 +579,11 @@ func checkCodexSecurityPosture() checkResult {
 	warnings := codexSecurityWarnings(string(data))
 	if len(warnings) > 0 {
 		return checkResult{
-			name:   "Codex security posture",
-			status: "WARN",
-			detail: strings.Join(warnings, "; "),
+			name:    "Codex security posture",
+			status:  "WARN",
+			detail:  strings.Join(warnings, "; "),
+			fixHint: "fuse install codex",
+			fixFunc: installCodex,
 		}
 	}
 	return checkResult{

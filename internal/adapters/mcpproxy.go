@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -290,7 +291,7 @@ func requestMCPApproval(name string, arguments map[string]interface{}) (bool, er
 		},
 	}
 
-	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, "", false, false)
+	decision, err := mgr.RequestApproval(context.Background(), result.DecisionKey, extractCommandFromResult(result), result.Reason, "", false, false)
 	if err != nil {
 		return false, err
 	}

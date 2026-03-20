@@ -14,8 +14,9 @@ import (
 )
 
 var testCmd = &cobra.Command{
-	Use:   "test",
-	Short: "Test commands for dry-run classification and inspection",
+	Use:     "test",
+	Short:   "Test commands for dry-run classification and inspection",
+	GroupID: groupObserve,
 }
 
 var testClassifyCmd = &cobra.Command{

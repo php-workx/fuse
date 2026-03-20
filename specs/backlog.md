@@ -1,9 +1,9 @@
 # Backlog
 
-## Per-tag enforcement mode
+## ~~Per-tag enforcement mode~~ (DONE)
 
 **Priority**: Medium
-**Status**: Planned
+**Status**: Done (feat/enable-rules-by-tags branch)
 
 The three-state mode (enabled/dryrun/disabled) is global. Users need per-tag control:
 

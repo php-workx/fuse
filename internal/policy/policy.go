@@ -12,10 +12,11 @@ import (
 
 // PolicyConfig represents user-defined policy loaded from a YAML file.
 type PolicyConfig struct {
-	Version          string       `yaml:"version"`
-	Rules            []PolicyRule `yaml:"rules"`
-	DisabledBuiltins []string     `yaml:"disabled_builtins"`
-	DisabledTags     []string     `yaml:"disabled_tags"`
+	Version          string            `yaml:"version"`
+	Rules            []PolicyRule      `yaml:"rules"`
+	DisabledBuiltins []string          `yaml:"disabled_builtins"`
+	DisabledTags     []string          `yaml:"disabled_tags"`
+	TagOverrides     map[string]string `yaml:"tag_overrides"`
 }
 
 // PolicyRule represents a single user-defined rule in policy.yaml.
@@ -62,6 +63,10 @@ func LoadPolicy(path string) (*PolicyConfig, error) {
 		}
 	}
 
+	if _, err := ParseTagOverrides(&cfg); err != nil {
+		return nil, err
+	}
+
 	return &cfg, nil
 }
 
@@ -96,6 +101,28 @@ func EvaluateUserRules(classNorm string, policy *PolicyConfig) (core.Decision, s
 	}
 
 	return bestDecision, bestReason
+}
+
+// ParseTagOverrides converts string override values to FuseMode.
+// Returns an error if any value is invalid.
+func ParseTagOverrides(policy *PolicyConfig) (map[string]TagOverrideMode, error) {
+	if policy == nil || len(policy.TagOverrides) == 0 {
+		return nil, nil
+	}
+	m := make(map[string]TagOverrideMode, len(policy.TagOverrides))
+	for tag, mode := range policy.TagOverrides {
+		switch mode {
+		case "enabled":
+			m[tag] = TagOverrideEnabled
+		case "dryrun":
+			m[tag] = TagOverrideDryRun
+		case "disabled":
+			m[tag] = TagOverrideDisabled
+		default:
+			return nil, fmt.Errorf("invalid tag_override value %q for tag %q (must be enabled/dryrun/disabled)", mode, tag)
+		}
+	}
+	return m, nil
 }
 
 // DisabledTagSet returns a map for quick lookup of disabled tags.
