@@ -25,6 +25,11 @@ func isNativeClaudeFileTool(toolName string) bool {
 }
 
 func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+	// Native file tools don't use tag_overrides — dryrun always allows.
+	if dryRun {
+		return 0
+	}
+
 	if len(req.ToolInput) == 0 {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Missing tool_input. Do not retry this exact command. Ask the user for guidance.")
 		return 2

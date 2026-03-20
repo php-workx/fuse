@@ -12,21 +12,23 @@ const maxInputSize = 64 * 1024
 
 // ClassifyResult holds the full result of command classification.
 type ClassifyResult struct {
-	Decision      Decision
-	Reason        string
-	RuleID        string
-	DecisionKey   string
-	SubResults    []SubCommandResult
-	DryRunMatches []BuiltinMatch // rules that matched but were not enforced (per-tag dryrun)
+	Decision            Decision
+	Reason              string
+	RuleID              string
+	DecisionKey         string
+	SubResults          []SubCommandResult
+	DryRunMatches       []BuiltinMatch // rules that matched but were not enforced (per-tag dryrun)
+	TagOverrideEnforced bool           // true when the decision was enforced by a tag_override (should block even in dryrun)
 }
 
 // SubCommandResult holds the classification result for a single sub-command.
 type SubCommandResult struct {
-	Command       string
-	Decision      Decision
-	Reason        string
-	RuleID        string
-	DryRunMatches []BuiltinMatch
+	Command             string
+	Decision            Decision
+	Reason              string
+	RuleID              string
+	DryRunMatches       []BuiltinMatch
+	TagOverrideEnforced bool // true when a tag_override explicitly enforced this decision
 }
 
 // PolicyEvaluator abstracts policy evaluation to avoid circular imports
@@ -183,6 +185,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 			overallDecision = newOverall
 			overallReason = sub.Reason
 			overallRuleID = sub.RuleID
+			result.TagOverrideEnforced = sub.TagOverrideEnforced
 		}
 
 		// Gather file hash if a referenced file was inspected.
@@ -239,18 +242,20 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	bestReason := "default safe"
 	bestRuleID := ""
 	var allDryRunMatches []BuiltinMatch
+	tagOverrideEnforced := false
 
 	for _, cmd := range allCmds {
 		if cmd == "" {
 			continue
 		}
 
-		d, reason, ruleID, dryMatches := classifySingleCommand(cmd, evaluator, cwd)
+		d, reason, ruleID, dryMatches, override := classifySingleCommand(cmd, evaluator, cwd)
 		combined := MaxDecision(bestDecision, d)
 		if combined != bestDecision {
 			bestDecision = combined
 			bestReason = reason
 			bestRuleID = ruleID
+			tagOverrideEnforced = override
 		}
 		allDryRunMatches = append(allDryRunMatches, dryMatches...)
 	}
@@ -273,11 +278,14 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	sub.Reason = bestReason
 	sub.RuleID = bestRuleID
 	sub.DryRunMatches = allDryRunMatches
+	sub.TagOverrideEnforced = tagOverrideEnforced
 	return sub
 }
 
 // classifySingleCommand classifies a single (already classification-normalized) command string.
-func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (Decision, string, string, []BuiltinMatch) {
+// classifySingleCommand returns (decision, reason, ruleID, dryRunMatches, tagOverrideEnforced).
+// tagOverrideEnforced is true when the decision was enforced by an explicit tag_override.
+func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (Decision, string, string, []BuiltinMatch, bool) {
 	var dryRunMatches []BuiltinMatch
 
 	// Step 5: Inline script detection (§5.4).
@@ -303,14 +311,14 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 
 	// Check for security-sensitive env var assignments at start of command.
 	if hasSensitiveEnvPrefix(cmd) {
-		return DecisionApproval, "security-sensitive environment variable assignment", "", nil
+		return DecisionApproval, "security-sensitive environment variable assignment", "", nil, false
 	}
 
 	// Hardcoded rules must see the unsanitized normalized command so inline
 	// self-protection patterns are not masked by quote sanitization.
 	if evaluator != nil {
 		if d, reason := evaluator.EvaluateHardcoded(cmd); d != "" {
-			return d, reason, "", nil
+			return d, reason, "", nil, false
 		}
 	}
 
@@ -319,13 +327,13 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	if evaluator != nil {
 		// Layer 2: User policy rules (always evaluated first — user can override anything).
 		if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
-			return d, reason, "", nil
+			return d, reason, "", nil, false
 		}
 
 		// Layer 2.5: Safe build directory cleanup (rm -rf node_modules, dist, etc.)
 		// After user rules so project policies can still block/approve if needed.
 		if IsSafeBuildCleanup(cmd) {
-			return DecisionSafe, "safe build directory cleanup", "", nil
+			return DecisionSafe, "safe build directory cleanup", "", nil, false
 		}
 
 		// Layer 3: Built-in preset rules.
@@ -335,35 +343,35 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 				dryRunMatches = append(dryRunMatches, *match)
 			} else {
 				if isInspectTriggerRule(match.RuleID) && fileInspection != nil {
-					return fileInspection.Decision, fileInspection.Reason, "", dryRunMatches
+					return fileInspection.Decision, fileInspection.Reason, "", dryRunMatches, match.TagOverrideEnforced
 				}
-				return match.Decision, match.Reason, match.RuleID, dryRunMatches
+				return match.Decision, match.Reason, match.RuleID, dryRunMatches, match.TagOverrideEnforced
 			}
 		}
 	}
 
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
-		return DecisionSafe, "unconditionally safe command", "", dryRunMatches
+		return DecisionSafe, "unconditionally safe command", "", dryRunMatches, false
 	}
 
 	// Layer 5: Conditionally safe commands.
 	if IsConditionallySafe(basename, cmd) {
-		return DecisionSafe, "conditionally safe command", "", dryRunMatches
+		return DecisionSafe, "conditionally safe command", "", dryRunMatches, false
 	}
 
 	// Layer 6: File inspection result (if applicable).
 	if fileInspection != nil {
-		return fileInspection.Decision, fileInspection.Reason, "", dryRunMatches
+		return fileInspection.Decision, fileInspection.Reason, "", dryRunMatches, false
 	}
 
 	// Check inline script detection result (deferred from step 5).
 	if inlineDecision != "" {
-		return inlineDecision, inlineReason, "", dryRunMatches
+		return inlineDecision, inlineReason, "", dryRunMatches, false
 	}
 
 	// Fallback: SAFE (default-SAFE per spec §6.5).
-	return DecisionSafe, "no matching rule (default safe)", "", dryRunMatches
+	return DecisionSafe, "no matching rule (default safe)", "", dryRunMatches, false
 }
 
 // Patterns that indicate dangerous inline Python code.

@@ -104,10 +104,6 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 		return 0
 	}
 
-	// Dry-run mode: classify and log happened above, but always allow.
-	if dryRun {
-		return 0
-	}
 	return exitCode
 }
 
@@ -127,6 +123,12 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 	toolAction := extractMCPAction(req.ToolName)
 	decision := core.ClassifyMCPTool(toolAction, args)
 	mcpCommand := formatMCPCommand(req.ToolName, args)
+
+	// MCP tools don't use tag_overrides — dryrun always allows.
+	if dryRun {
+		logHookEventFields(req.SessionID, mcpCommand, "", string(decision), "", "")
+		return 0
+	}
 
 	switch decision {
 	case core.DecisionBlocked:
@@ -221,6 +223,16 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 		m := &result.DryRunMatches[i]
 		logHookEventFields(req.SessionID, input.Command, req.Cwd,
 			string(m.Decision), m.RuleID, m.Reason+" (dryrun-override)")
+	}
+
+	// In dryrun mode, only enforce decisions from tag_overrides.
+	// Without TagOverrideEnforced, log and allow all commands.
+	if dryRun && !result.TagOverrideEnforced {
+		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		if result.Decision == core.DecisionCaution {
+			fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
+		}
+		return 0
 	}
 
 	switch result.Decision {

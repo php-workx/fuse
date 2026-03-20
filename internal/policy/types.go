@@ -136,7 +136,7 @@ func EvaluateBuiltins(
 			continue
 		}
 		// Check tag override — disabled overrides skip entirely.
-		mode := effectiveTagMode(r.Tags, tagOverrides)
+		mode, explicit := effectiveTagMode(r.Tags, tagOverrides)
 		if mode == TagOverrideDisabled {
 			continue
 		}
@@ -145,10 +145,11 @@ func EvaluateBuiltins(
 				continue
 			}
 			return &core.BuiltinMatch{
-				Decision: r.Action,
-				Reason:   r.Reason,
-				RuleID:   r.ID,
-				DryRun:   mode == TagOverrideDryRun,
+				Decision:            r.Action,
+				Reason:              r.Reason,
+				RuleID:              r.ID,
+				DryRun:              mode == TagOverrideDryRun,
+				TagOverrideEnforced: explicit && mode == TagOverrideEnabled,
 			}
 		}
 	}
@@ -157,11 +158,12 @@ func EvaluateBuiltins(
 
 // effectiveTagMode determines the enforcement mode for a rule based on its tags.
 // Most restrictive tag override wins (enabled > dryrun > disabled).
-// If no override applies, returns enabled (rule fires normally —
-// global dryrun is handled by the adapter layer, not here).
-func effectiveTagMode(tags []string, overrides map[string]TagOverrideMode) TagOverrideMode {
+// If no override applies, returns (enabled, false) — rule fires normally,
+// global dryrun is handled by the adapter layer, not here.
+// The second return value indicates whether an explicit tag_override matched.
+func effectiveTagMode(tags []string, overrides map[string]TagOverrideMode) (TagOverrideMode, bool) {
 	if len(overrides) == 0 {
-		return TagOverrideEnabled
+		return TagOverrideEnabled, false
 	}
 
 	best := TagOverrideNone
@@ -174,9 +176,9 @@ func effectiveTagMode(tags []string, overrides map[string]TagOverrideMode) TagOv
 	}
 
 	if best != TagOverrideNone {
-		return best
+		return best, true
 	}
-	return TagOverrideEnabled
+	return TagOverrideEnabled, false
 }
 
 // isTagDisabled returns true if any of the rule's tags are in the disabled set.

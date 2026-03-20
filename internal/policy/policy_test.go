@@ -414,23 +414,32 @@ func TestEffectiveTagMode_MostRestrictiveWins(t *testing.T) {
 		"aws":            TagOverrideEnabled,
 		"cloudformation": TagOverrideDryRun,
 	}
-	mode := effectiveTagMode([]string{"aws", "cloudformation"}, overrides)
+	mode, explicit := effectiveTagMode([]string{"aws", "cloudformation"}, overrides)
 	if mode != TagOverrideEnabled {
 		t.Errorf("expected TagOverrideEnabled, got %d", mode)
+	}
+	if !explicit {
+		t.Error("expected explicit=true when override matches")
 	}
 }
 
 func TestEffectiveTagMode_NoOverrides(t *testing.T) {
-	mode := effectiveTagMode([]string{"aws", "cloud"}, nil)
+	mode, explicit := effectiveTagMode([]string{"aws", "cloud"}, nil)
 	if mode != TagOverrideEnabled {
 		t.Errorf("expected TagOverrideEnabled when no overrides, got %d", mode)
+	}
+	if explicit {
+		t.Error("expected explicit=false when no overrides")
 	}
 }
 
 func TestEffectiveTagMode_UnmatchedTags(t *testing.T) {
 	overrides := map[string]TagOverrideMode{"payment": TagOverrideDisabled}
-	mode := effectiveTagMode([]string{"aws", "cloud"}, overrides)
+	mode, explicit := effectiveTagMode([]string{"aws", "cloud"}, overrides)
 	if mode != TagOverrideEnabled {
 		t.Errorf("expected TagOverrideEnabled for unmatched tags, got %d", mode)
+	}
+	if explicit {
+		t.Error("expected explicit=false when no tag matches")
 	}
 }
