@@ -267,7 +267,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		return 2
 	}
 
-	decision, err := mgr.RequestApproval(result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
+	decision, err := mgr.RequestApproval(context.Background(), result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
 	if err != nil {
 		slog.Error("approval error", "error", err)
 		if msg := extractFuseDirective(err); msg != "" {

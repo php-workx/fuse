@@ -185,6 +185,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 				return 1, fmt.Errorf("create approval manager: %w", mgrErr)
 			}
 			decision, promptErr := mgr.RequestApproval(
+				context.Background(),
 				result.DecisionKey,
 				command,
 				result.Reason,
@@ -325,12 +326,11 @@ func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 	return 0, nil
 }
 
-func executeCapturedShellCommand(command, cwd string, timeout time.Duration) (commandExecution, error) {
-	return executeCapturedShellCommandWithStdin(command, cwd, timeout, nil)
+func executeCapturedShellCommand(ctx context.Context, command, cwd string, timeout time.Duration) (commandExecution, error) {
+	return executeCapturedShellCommandWithStdin(ctx, command, cwd, timeout, nil)
 }
 
-func executeCapturedShellCommandWithStdin(command, cwd string, timeout time.Duration, stdin io.Reader) (commandExecution, error) {
-	ctx := context.Background()
+func executeCapturedShellCommandWithStdin(ctx context.Context, command, cwd string, timeout time.Duration, stdin io.Reader) (commandExecution, error) {
 	if timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, timeout)
