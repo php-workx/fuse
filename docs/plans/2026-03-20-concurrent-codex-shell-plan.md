@@ -321,14 +321,14 @@ func processRequest(ctx context.Context, msg jsonRPCMessage, sessionID string, w
 
 ## File-Conflict Matrix
 
-| File | Issues |
-|------|--------|
+| File | Issues | Notes |
+|------|--------|-------|
 | `internal/adapters/codexshell.go` | Issue 1, Issue 3, Issue 4 | CONFLICT: serialize (Issue 1 → Issue 3 → Issue 4) |
-| `internal/approve/prompt.go` | Issue 2 only |
-| `internal/approve/manager.go` | Issue 3 only |
-| `internal/adapters/hook.go` | Issue 3 only |
-| `internal/adapters/runner.go` | Issue 3 only |
-| `internal/adapters/mcpproxy.go` | Issue 3 only |
+| `internal/approve/prompt.go` | Issue 2 only | |
+| `internal/approve/manager.go` | Issue 3 only | |
+| `internal/adapters/hook.go` | Issue 3 only | |
+| `internal/adapters/runner.go` | Issue 3 only | |
+| `internal/adapters/mcpproxy.go` | Issue 3 only | |
 | `internal/adapters/codexshell_test.go` | Issue 3, Issue 5 | CONFLICT: serialize (Issue 3 → Issue 5) |
 
 ## Cross-Wave Shared Files
