@@ -1,9 +1,11 @@
 package approve
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -12,24 +14,24 @@ import (
 
 var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
 
+// ttyMu serializes concurrent TTY approval prompts. Without this, two
+// goroutines could both open /dev/tty and fight over raw mode and keystrokes.
+var ttyMu sync.Mutex
+
 // PromptUser shows a TUI approval prompt on /dev/tty.
 // Returns the user's decision (approved bool), chosen scope, and any error.
 // hookMode: true = 25s timeout, false = 5min timeout.
-// openTTY opens /dev/tty for interactive prompts.
-// Returns errNonInteractive if FUSE_NON_INTERACTIVE is set or /dev/tty is unavailable.
-func openTTY(nonInteractive bool) (*os.File, error) {
+// The ctx is checked in the polling loop; cancellation denies immediately.
+func PromptUser(ctx context.Context, command, reason string, hookMode, nonInteractive bool) (approved bool, scope string, err error) {
+	// Fast path: non-interactive mode returns immediately without locking.
 	if nonInteractive || os.Getenv("FUSE_NON_INTERACTIVE") != "" {
-		return nil, errNonInteractive
+		return false, "", errNonInteractive
 	}
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		return nil, errNonInteractive
-	}
-	return tty, nil
-}
 
-func PromptUser(command, reason string, hookMode, nonInteractive bool) (approved bool, scope string, err error) {
-	tty, err := openTTY(nonInteractive)
+	ttyMu.Lock()
+	defer ttyMu.Unlock()
+
+	tty, err := openTTY(false) // already checked non-interactive above
 	if err != nil {
 		return false, "", err
 	}
@@ -80,23 +82,27 @@ func PromptUser(command, reason string, hookMode, nonInteractive bool) (approved
 		timeout = 25 * time.Second
 	}
 
-	// Render the prompt.
+	// Render the prompt and read the user's decision.
 	renderPrompt(tty, command, reason)
-
-	// Read approval decision.
 	deadline := time.Now().Add(timeout)
+	return readApprovalDecision(ctx, tty, fd, deadline, sigCh)
+}
+
+// readApprovalDecision polls the TTY for the user's approve/deny decision.
+func readApprovalDecision(ctx context.Context, tty *os.File, fd int, deadline time.Time, sigCh <-chan os.Signal) (bool, string, error) {
 	buf := make([]byte, 1)
 
 	for {
-		// Check for signals.
 		select {
+		case <-ctx.Done():
+			fmt.Fprintf(tty, "\n  Denied (shutdown).\n\n")
+			return false, "", nil
 		case <-sigCh:
 			fmt.Fprintf(tty, "\n  Denied (signal received).\n\n")
 			return false, "", nil
-		default:
+		default: // non-blocking: fall through to deadline + read
 		}
 
-		// Check timeout.
 		if time.Now().After(deadline) {
 			fmt.Fprintf(tty, "\n  Denied (timeout).\n")
 			fmt.Fprintf(tty, "  fuse:TIMEOUT_WAITING_FOR_USER STOP. The user did not approve this action in time. Do not retry this exact command.\n\n")
@@ -105,13 +111,12 @@ func PromptUser(command, reason string, hookMode, nonInteractive bool) (approved
 
 		n, err := tty.Read(buf)
 		if err != nil || n == 0 {
-			continue // VTIME timeout, retry.
+			continue
 		}
 
 		ch := buf[0]
 
-		// Ctrl-C.
-		if ch == 3 {
+		if ch == 3 { // Ctrl-C
 			fmt.Fprintf(tty, "\n  Denied (Ctrl-C).\n\n")
 			return false, "", nil
 		}
@@ -122,8 +127,7 @@ func PromptUser(command, reason string, hookMode, nonInteractive bool) (approved
 			fmt.Fprintf(tty, "    [o] once  |  [c] command  |  [s] session  |  [f] forever\n")
 			fmt.Fprintf(tty, "  > ")
 
-			// Read scope selection.
-			scopeResult, denied := readScope(tty, fd, deadline, sigCh)
+			scopeResult, denied := readScope(ctx, tty, fd, deadline, sigCh)
 			if denied {
 				return false, "", nil
 			}
@@ -140,12 +144,28 @@ func PromptUser(command, reason string, hookMode, nonInteractive bool) (approved
 	}
 }
 
+// openTTY opens /dev/tty for interactive prompts.
+// Returns errNonInteractive if FUSE_NON_INTERACTIVE is set or /dev/tty is unavailable.
+func openTTY(nonInteractive bool) (*os.File, error) {
+	if nonInteractive || os.Getenv("FUSE_NON_INTERACTIVE") != "" {
+		return nil, errNonInteractive
+	}
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return nil, errNonInteractive
+	}
+	return tty, nil
+}
+
 // readScope reads the scope selection from the user.
 // Returns the scope string and whether the user denied.
-func readScope(tty *os.File, fd int, deadline time.Time, sigCh <-chan os.Signal) (string, bool) {
+func readScope(ctx context.Context, tty *os.File, fd int, deadline time.Time, sigCh <-chan os.Signal) (string, bool) {
 	buf := make([]byte, 1)
 	for {
 		select {
+		case <-ctx.Done():
+			fmt.Fprintf(tty, "\n  Denied (shutdown).\n\n")
+			return "", true
 		case <-sigCh:
 			fmt.Fprintf(tty, "\n  Denied (signal received).\n\n")
 			return "", true
