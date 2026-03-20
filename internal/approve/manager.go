@@ -132,26 +132,22 @@ func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, rea
 	r := <-ch
 
 	if r.err != nil {
-		// Prompt failed (e.g., errNonInteractive). Keep polling briefly in case
-		// the TUI resolves the approval. Use the parent context's deadline if
-		// available, otherwise a short fallback to avoid hanging.
-		fallback := 2 * time.Second
-		if deadline, ok := ctx.Deadline(); ok {
-			remaining := time.Until(deadline)
-			if remaining > 0 && remaining < fallback {
-				fallback = remaining
-			}
+		// Prompt failed (e.g., non-interactive terminal). The TUI (fuse monitor)
+		// can still resolve this — keep polling until the context expires.
+		// Use the context deadline if available (hook's 25s timeout propagates
+		// via the outer RunHook select). If no deadline, use 25s as safety net
+		// for the hook timeout budget.
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var deadlineCancel context.CancelFunc
+			ctx, deadlineCancel = context.WithTimeout(ctx, 25*time.Second)
+			defer deadlineCancel()
 		}
-		timer := time.NewTimer(fallback)
-		defer timer.Stop()
 		select {
 		case r2 := <-ch:
 			cancel()
 			if r2.err == nil && r2.decision != "" {
 				return r2.decision, nil
 			}
-		case <-timer.C:
-			cancel()
 		case <-ctx.Done():
 			cancel()
 		}

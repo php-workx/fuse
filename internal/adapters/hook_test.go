@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunHook_SafeCommand(t *testing.T) {
@@ -121,8 +122,8 @@ func TestRunHook_MCP_DestructiveAction(t *testing.T) {
 	}
 
 	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") && !strings.Contains(stderrStr, "USER_DENIED") {
-		t.Errorf("expected NON_INTERACTIVE_MODE or USER_DENIED, got: %s", stderrStr)
+	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") && !strings.Contains(stderrStr, "USER_DENIED") && !strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
+		t.Errorf("expected NON_INTERACTIVE_MODE, USER_DENIED, or TIMEOUT_WAITING_FOR_USER, got: %s", stderrStr)
 	}
 }
 
@@ -255,10 +256,12 @@ func TestRunHook_NativeFileReadSecretRequiresApproval(t *testing.T) {
 		t.Fatalf("expected exit code 2 for approval-required file read without interactive tty, got %d", exitCode)
 	}
 	stderrStr := stderr.String()
-	if strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
-		t.Fatalf("expected immediate approval denial, got timeout directive %q", stderrStr)
-	}
-	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") && !strings.Contains(stderrStr, "USER_DENIED") {
+	// With TUI approval support, non-interactive hooks now wait for the TUI
+	// before timing out. All three outcomes are valid: immediate non-interactive
+	// denial, user denied, or timeout waiting for user.
+	if !strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") &&
+		!strings.Contains(stderrStr, "USER_DENIED") &&
+		!strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
 		t.Fatalf("expected approval denial directive, got %q", stderrStr)
 	}
 }
@@ -411,6 +414,11 @@ func TestRunHook_NativeFileParentTraversalSecretsRequiresApproval(t *testing.T) 
 
 func enableHookForTest(t *testing.T) {
 	t.Helper()
+
+	// Use a short hook timeout for tests so approval-waiting tests complete quickly.
+	old := hookTimeout
+	hookTimeout = 3 * time.Second
+	t.Cleanup(func() { hookTimeout = old })
 
 	fuseHome := t.TempDir()
 	t.Setenv("FUSE_HOME", fuseHome)

@@ -70,6 +70,8 @@ func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 	// any stragglers (kills child processes via exec.CommandContext).
 	waitGroupWithTimeout(&wg, 5*time.Second)
 	cancel()
+	// Brief extra drain after cancel to let goroutines finish writing responses.
+	waitGroupWithTimeout(&wg, 1*time.Second)
 	return nil
 }
 

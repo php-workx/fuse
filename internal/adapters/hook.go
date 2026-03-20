@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -18,7 +19,16 @@ import (
 )
 
 // hookTimeout is the internal timeout before Claude's 30s kill.
-const hookTimeout = 25 * time.Second
+// Overridable via FUSE_HOOK_TIMEOUT for testing.
+var hookTimeout = 25 * time.Second
+
+func init() {
+	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			hookTimeout = d
+		}
+	}
+}
 
 // HookRequest is the JSON input from Claude Code's PreToolUse hook.
 type HookRequest struct {
@@ -279,7 +289,12 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		return 2
 	}
 
-	decision, err := mgr.RequestApproval(context.Background(), result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
+	// Use the hook timeout (hookTimeout - 2s margin) as the approval context.
+	// This ensures the DB poll respects the hook's timeout budget and doesn't
+	// wait indefinitely with context.Background().
+	approvalCtx, approvalCancel := context.WithTimeout(context.Background(), hookTimeout-2*time.Second)
+	defer approvalCancel()
+	decision, err := mgr.RequestApproval(approvalCtx, result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
 	if err != nil {
 		slog.Error("approval error", "error", err)
 		if msg := extractFuseDirective(err); msg != "" {

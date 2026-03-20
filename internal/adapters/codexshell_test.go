@@ -273,7 +273,9 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
-	_, _, exitCode, err := executeCodexShellCommand(context.Background(), "python nonexistent_script.py", "", "test-session", time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _, exitCode, err := executeCodexShellCommand(ctx, "python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
 		t.Fatal("expected approval-required command without TTY to return an error")
 	}
