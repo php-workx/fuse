@@ -14,6 +14,8 @@ type keyMap struct {
 	Escape     key.Binding
 	Search     key.Binding
 	FilterDec  key.Binding
+	Delete     key.Binding
+	BulkPurge  key.Binding
 	PageUp     key.Binding
 	PageDown   key.Binding
 	Home       key.Binding
@@ -32,6 +34,8 @@ var keys = keyMap{
 	Escape:     key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
 	Search:     key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 	FilterDec:  key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "filter")),
+	Delete:     key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "revoke")),
+	BulkPurge:  key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "purge")),
 	PageUp:     key.NewBinding(key.WithKeys("pgup")),
 	PageDown:   key.NewBinding(key.WithKeys("pgdown")),
 	Home:       key.NewBinding(key.WithKeys("g")),

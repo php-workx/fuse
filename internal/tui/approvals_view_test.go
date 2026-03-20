@@ -48,7 +48,7 @@ func TestApprovalStatus_NilExpires(t *testing.T) {
 
 func TestApprovalStatus_InjectableClock(t *testing.T) {
 	// Verify the injectable clock is used.
-	m := NewApprovalsModel()
+	m := NewApprovalsModel(nil, nil)
 	fixedTime := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
 	m.clock = func() time.Time { return fixedTime }
 

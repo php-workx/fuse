@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/runger/fuse/internal/config"
+	"github.com/runger/fuse/internal/db"
 	"github.com/runger/fuse/internal/tui"
 )
 
@@ -51,7 +52,13 @@ func runMonitor() error {
 		modeStr = "disabled"
 	}
 
-	m := tui.NewModel(database, modeStr)
+	// Read HMAC secret for approval creation from the TUI.
+	secret, secretErr := db.EnsureSecret(config.SecretPath())
+	if secretErr != nil {
+		return fmt.Errorf("read secret: %w", secretErr)
+	}
+
+	m := tui.NewModel(database, modeStr, secret)
 	p := tea.NewProgram(m)
 	_, err = p.Run()
 	return err

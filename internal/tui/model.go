@@ -22,6 +22,7 @@ const (
 // Model is the top-level bubbletea model for the fuse TUI.
 type Model struct {
 	db         *db.DB
+	secret     []byte // HMAC secret for creating approvals from the TUI
 	mode       string
 	activeView viewMode
 	width      int
@@ -36,13 +37,14 @@ type Model struct {
 }
 
 // NewModel creates an initialized Model.
-func NewModel(database *db.DB, mode string) Model {
+func NewModel(database *db.DB, mode string, secret []byte) Model {
 	return Model{
 		db:        database,
+		secret:    secret,
 		mode:      mode,
 		events:    NewEventsModel(),
 		stats:     NewStatsModel(),
-		approvals: NewApprovalsModel(),
+		approvals: NewApprovalsModel(database, secret),
 	}
 }
 
@@ -92,6 +94,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stats.SetData(msg.summary)
 			case viewApprovals:
 				m.approvals.SetData(msg.approvals)
+				m.approvals.SetPending(msg.pending)
 			}
 		}
 		return m, tickCmd(m.activeView)
@@ -237,6 +240,7 @@ type dataMsg struct {
 	events    []db.EventRecord
 	summary   db.EventSummary
 	approvals []db.Approval
+	pending   []db.PendingRequest
 	err       error
 }
 
@@ -253,6 +257,8 @@ func (m Model) fetchData() tea.Cmd {
 			msg.summary, msg.err = database.SummarizeEvents()
 		case viewApprovals:
 			msg.approvals, msg.err = database.ListApprovals(50)
+			// Also fetch pending requests (fast, small table).
+			msg.pending, _ = database.ListPendingRequests()
 		}
 		return msg
 	}
