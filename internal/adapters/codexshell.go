@@ -3,10 +3,12 @@ package adapters
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/runger/fuse/internal/approve"
@@ -31,7 +33,6 @@ func generateSessionID() string {
 
 func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 	reader := bufio.NewReader(stdin)
-	writer := bufio.NewWriter(stdout)
 	sessionID := generateSessionID()
 	transport, err := detectCodexShellTransport(reader)
 	if err != nil {
@@ -41,36 +42,59 @@ func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 		return err
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &codexShellWriter{writer: bufio.NewWriter(stdout), transport: transport}
+	var wg sync.WaitGroup
+
 	for {
 		payload, err := readCodexShellPayload(reader, transport)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
+			break // EOF or read error — shut down
 		}
 
 		msg, err := decodeJSONRPC(payload)
 		if err != nil {
-			return err
-		}
-
-		response, respond, err := handleCodexShellMessage(msg, sessionID)
-		if err != nil {
-			return err
-		}
-		if !respond || response == nil {
+			_ = writer.writeResponse(jsonRPCErrorResponse(nil, -32700, err.Error()))
 			continue
 		}
 
-		data, err := encodeJSONRPC(response)
-		if err != nil {
-			return err
-		}
-		if err := writeCodexShellPayload(writer, data, transport); err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func(m jsonRPCMessage) {
+			defer wg.Done()
+			processRequest(ctx, m, sessionID, writer)
+		}(msg)
 	}
+
+	// Wait for in-flight requests to complete naturally, then cancel
+	// any stragglers (kills child processes via exec.CommandContext).
+	waitGroupWithTimeout(&wg, 5*time.Second)
+	cancel()
+	return nil
+}
+
+// processRequest handles a single MCP request in its own goroutine.
+// Errors are converted to JSON-RPC error responses (non-fatal to server).
+func processRequest(ctx context.Context, msg jsonRPCMessage, sessionID string, writer *codexShellWriter) {
+	defer func() {
+		if r := recover(); r != nil {
+			if id, ok := msg["id"]; ok {
+				_ = writer.writeResponse(jsonRPCErrorResponse(id, -32603, fmt.Sprintf("internal error: %v", r)))
+			}
+		}
+	}()
+
+	response, respond, err := handleCodexShellMessage(ctx, msg, sessionID)
+	if err != nil {
+		if id, ok := msg["id"]; ok {
+			_ = writer.writeResponse(jsonRPCErrorResponse(id, -32603, err.Error()))
+		}
+		return
+	}
+	if !respond || response == nil {
+		return
+	}
+	_ = writer.writeResponse(response)
 }
 
 func detectCodexShellTransport(reader *bufio.Reader) (codexShellTransport, error) {
@@ -128,7 +152,7 @@ func readJSONRPCLine(reader *bufio.Reader) ([]byte, error) {
 	}
 }
 
-func handleCodexShellMessage(msg jsonRPCMessage, sessionID string) (jsonRPCMessage, bool, error) {
+func handleCodexShellMessage(ctx context.Context, msg jsonRPCMessage, sessionID string) (jsonRPCMessage, bool, error) {
 	method, _ := msg["method"].(string)
 	switch method {
 	case "initialize":
@@ -176,7 +200,7 @@ func handleCodexShellMessage(msg jsonRPCMessage, sessionID string) (jsonRPCMessa
 			},
 		}, true, nil
 	case "tools/call":
-		return handleCodexShellToolCall(msg, sessionID)
+		return handleCodexShellToolCall(ctx, msg, sessionID)
 	default:
 		if _, ok := msg["id"]; ok {
 			return jsonRPCErrorResponse(msg["id"], -32601, fmt.Sprintf("method %s not found", method)), true, nil
@@ -185,7 +209,7 @@ func handleCodexShellMessage(msg jsonRPCMessage, sessionID string) (jsonRPCMessa
 	}
 }
 
-func handleCodexShellToolCall(msg jsonRPCMessage, sessionID string) (jsonRPCMessage, bool, error) {
+func handleCodexShellToolCall(ctx context.Context, msg jsonRPCMessage, sessionID string) (jsonRPCMessage, bool, error) {
 	params, _ := msg["params"].(map[string]interface{})
 	name, _ := params["name"].(string)
 	if name != "run_command" {
@@ -199,7 +223,7 @@ func handleCodexShellToolCall(msg jsonRPCMessage, sessionID string) (jsonRPCMess
 		return jsonRPCErrorResponse(msg["id"], -32602, "missing command"), true, nil
 	}
 
-	out, errOut, exitCode, err := executeCodexShellCommand(command, cwd, sessionID, 30*time.Minute)
+	out, errOut, exitCode, err := executeCodexShellCommand(ctx, command, cwd, sessionID, 30*time.Minute)
 	if err != nil {
 		return jsonRPCErrorResponse(msg["id"], -32000, err.Error()), true, nil
 	}
@@ -221,14 +245,18 @@ func handleCodexShellToolCall(msg jsonRPCMessage, sessionID string) (jsonRPCMess
 	}, true, nil
 }
 
-func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Duration) (string, string, int, error) {
+func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID string, timeout time.Duration) (string, string, int, error) {
 	cfg := loadRuntimeConfig()
 	mode := config.Mode()
 	if mode == config.ModeDisabled {
-		execResult, err := executeCapturedShellCommand(command, cwd, timeout)
+		execResult, err := executeCapturedShellCommand(ctx, command, cwd, timeout)
 		return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
 	}
 	dryRun := mode == config.ModeDryRun
+
+	if ctx.Err() != nil {
+		return "", "", 0, ctx.Err()
+	}
 
 	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
 	evaluator := policy.NewEvaluator(policyCfg)
@@ -242,6 +270,10 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 	result, err := core.Classify(req, evaluator)
 	if err != nil {
 		return "", "", 0, err
+	}
+
+	if ctx.Err() != nil {
+		return "", "", 0, ctx.Err()
 	}
 
 	database, dbErr := db.OpenDB(config.DBPath())
@@ -275,7 +307,7 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 			if mgrErr != nil {
 				return "", "", 0, mgrErr
 			}
-			decision, promptErr := mgr.RequestApproval(result.DecisionKey, command, result.Reason, sessionID, false, dryRun)
+			decision, promptErr := mgr.RequestApproval(ctx, result.DecisionKey, command, result.Reason, sessionID, false, dryRun)
 			if promptErr != nil {
 				return "", "", 0, promptErr
 			}
@@ -292,13 +324,17 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 		// Unknown decision — execute directly (safe fallback).
 	}
 
+	if ctx.Err() != nil {
+		return "", "", 0, ctx.Err()
+	}
+
 	if !dryRun {
 		if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
 			return "", "", 0, verifyErr
 		}
 	}
 
-	execResult, err := executeCapturedShellCommand(command, cwd, timeout)
+	execResult, err := executeCapturedShellCommand(ctx, command, cwd, timeout)
 	outcome := "executed"
 	if err != nil {
 		outcome = "error"
@@ -306,4 +342,34 @@ func executeCodexShellCommand(command, cwd, sessionID string, timeout time.Durat
 	logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, outcome))
 	cleanupExecutionState(database, cfg)
 	return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
+}
+
+// codexShellWriter serializes MCP response writes to stdout.
+// Encode + frame + flush happen under one mutex hold to prevent
+// frame interleaving from concurrent goroutines.
+type codexShellWriter struct {
+	mu        sync.Mutex
+	writer    *bufio.Writer
+	transport codexShellTransport
+}
+
+func (w *codexShellWriter) writeResponse(msg jsonRPCMessage) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	data, err := encodeJSONRPC(msg)
+	if err != nil {
+		return err
+	}
+	return writeCodexShellPayload(w.writer, data, w.transport)
+}
+
+// waitGroupWithTimeout blocks until all goroutines in wg finish or timeout
+// elapses. Used for bounded drain during shutdown.
+func waitGroupWithTimeout(wg *sync.WaitGroup, timeout time.Duration) {
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+	}
 }
