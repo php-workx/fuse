@@ -185,7 +185,11 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 			overallDecision = newOverall
 			overallReason = sub.Reason
 			overallRuleID = sub.RuleID
-			result.TagOverrideEnforced = sub.TagOverrideEnforced
+		}
+		// OR across all sub-commands: if ANY sub-command was tag-override-enforced,
+		// the overall result should be enforced even in dryrun mode.
+		if sub.TagOverrideEnforced {
+			result.TagOverrideEnforced = true
 		}
 
 		// Gather file hash if a referenced file was inspected.
@@ -413,9 +417,10 @@ func detectInlineScript(cmd string) (Decision, string) {
 		if p.re == reInlinePythonC && isSafePythonInline(cmd) {
 			continue
 		}
-		// Skip heredoc and command substitution detection for git commit /
-		// gh pr create — the heredoc/$() is just a message body, not code execution.
-		if (p.re == reInlineHeredoc || p.re == reInlineCmdSubst) && isSafeHeredocUsage(cmd) {
+		// Skip heredoc detection for git commit / gh pr create — the heredoc
+		// is just a message body, not code execution. Do NOT skip $() detection:
+		// command substitutions in git commit -m ARE executed by the shell.
+		if p.re == reInlineHeredoc && isSafeHeredocUsage(cmd) {
 			continue
 		}
 
