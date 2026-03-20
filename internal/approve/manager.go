@@ -46,10 +46,17 @@ func scopeExpiry(scope string) *time.Time {
 	}
 }
 
-// RequestApproval checks for an existing valid approval or prompts the user.
-// Returns the decision and any error.
+// RequestApproval checks for an existing valid approval, or resolves via
+// parallel TTY prompt + database polling. The TUI (fuse monitor) can create
+// approval records that the DB poll picks up, enabling centralized approval.
+//
+// Flow:
+//  1. Check for cached approval (ConsumeApproval)
+//  2. Write a pending request so the TUI can see it
+//  3. Run TTY prompt and DB poll in parallel — first to resolve wins
+//  4. Clean up pending request on exit
 func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, reason, sessionID string, hookMode, nonInteractive bool) (core.Decision, error) {
-	// First, check for an existing valid approval.
+	// Step 1: Check for an existing valid approval.
 	existing, err := m.ConsumeApproval(decisionKey, sessionID)
 	if err != nil {
 		return core.DecisionBlocked, fmt.Errorf("check existing approval: %w", err)
@@ -58,22 +65,94 @@ func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, rea
 		return existing, nil
 	}
 
-	// No existing approval — prompt the user.
-	approved, scope, err := PromptUser(ctx, command, reason, hookMode, nonInteractive)
-	if err != nil {
-		return core.DecisionBlocked, fmt.Errorf("prompt user: %w", err)
+	// Step 2: Write pending request for TUI visibility.
+	pendingID := uuid.New().String()
+	source := "hook"
+	if nonInteractive {
+		source = "non-interactive"
+	}
+	_ = m.db.InsertPendingRequest(db.PendingRequest{
+		ID:          pendingID,
+		DecisionKey: decisionKey,
+		Command:     command,
+		Reason:      reason,
+		Source:      source,
+		SessionID:   sessionID,
+	})
+	defer func() { _ = m.db.DeletePendingRequest(pendingID) }()
+
+	// Step 3: Run TTY prompt and DB poll in parallel.
+	subCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		decision core.Decision
+		scope    string
+		fromPoll bool
+		err      error
+	}
+	ch := make(chan result, 2)
+
+	// Goroutine A: TTY prompt (skipped if non-interactive).
+	go func() {
+		approved, scope, promptErr := PromptUser(subCtx, command, reason, hookMode, nonInteractive)
+		if promptErr != nil {
+			ch <- result{err: promptErr}
+			return
+		}
+		if !approved {
+			ch <- result{decision: core.DecisionBlocked}
+			return
+		}
+		ch <- result{decision: core.DecisionApproval, scope: scope}
+	}()
+
+	// Goroutine B: Poll database for externally-created approval (from TUI).
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-subCtx.Done():
+				return
+			case <-ticker.C:
+				decision, pollErr := m.ConsumeApproval(decisionKey, sessionID)
+				if pollErr != nil {
+					continue // transient DB error, retry
+				}
+				if decision != "" {
+					ch <- result{decision: decision, fromPoll: true}
+					return
+				}
+			}
+		}
+	}()
+
+	// Step 4: Wait for first result.
+	r := <-ch
+	cancel() // stop the other goroutine
+
+	if r.err != nil {
+		// If prompt failed (e.g., errNonInteractive) but poll might still resolve,
+		// wait briefly for the poll goroutine.
+		select {
+		case r2 := <-ch:
+			if r2.err == nil && r2.decision != "" {
+				return r2.decision, nil
+			}
+		case <-time.After(500 * time.Millisecond):
+		}
+		return core.DecisionBlocked, fmt.Errorf("prompt user: %w", r.err)
 	}
 
-	if !approved {
-		return core.DecisionBlocked, nil
+	// If approved via TTY prompt, store the approval.
+	if !r.fromPoll && r.decision == core.DecisionApproval {
+		if storeErr := m.CreateApproval(decisionKey, string(core.DecisionApproval), r.scope, sessionID); storeErr != nil {
+			return core.DecisionBlocked, fmt.Errorf("store approval: %w", storeErr)
+		}
 	}
 
-	// Store the approval using the canonical Decision constant.
-	if err := m.CreateApproval(decisionKey, string(core.DecisionApproval), scope, sessionID); err != nil {
-		return core.DecisionBlocked, fmt.Errorf("store approval: %w", err)
-	}
-
-	return core.DecisionApproval, nil
+	return r.decision, nil
 }
 
 // CreateApproval stores a new signed approval record.

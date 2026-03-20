@@ -103,6 +103,19 @@ func (d *DB) ConsumeApproval(decisionKey, sessionID string) (*Approval, error) {
 	return &a, nil
 }
 
+// DeleteApproval removes a single approval by ID.
+func (d *DB) DeleteApproval(id string) error {
+	result, err := d.db.Exec("DELETE FROM approvals WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("delete approval: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("approval %s not found", id)
+	}
+	return nil
+}
+
 // CleanupExpired deletes old consumed approvals and expired approvals.
 // Consumed approvals are retained for 1 hour after consumption to allow
 // auditing of recent decisions. Returns the number of rows deleted.
