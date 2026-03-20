@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -172,7 +173,9 @@ func sortedCounts(m map[string]int) []countPair {
 	return pairs
 }
 
-// visibleLen estimates the visible length of a string (strips ANSI codes).
+// visibleLen returns the display column width of a string, stripping ANSI
+// codes and counting runes (not bytes) so multi-byte chars like █ are 1 column.
 func visibleLen(s string) int {
-	return len(reControlChars.ReplaceAllString(s, ""))
+	stripped := reControlChars.ReplaceAllString(s, "")
+	return utf8.RuneCountInString(stripped)
 }
