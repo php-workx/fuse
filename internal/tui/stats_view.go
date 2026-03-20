@@ -63,28 +63,30 @@ func (m StatsModel) View() string {
 	}
 
 	// By Decision + By Agent side by side.
-	left := renderSection("By Decision", m.summary.ByDecision, colWidth, maxRows, true)
-	right := renderSection("By Agent", m.summary.ByAgent, colWidth, maxRows, false)
+	left := renderSection("By Decision", m.summary.ByDecision, colWidth, maxRows, labelWidthShort, true)
+	right := renderSection("By Agent", m.summary.ByAgent, colWidth, maxRows, labelWidthShort, false)
 	b.WriteString(sideBySide(left, right, colWidth))
 	b.WriteString("\n")
 
 	// By Source + By Workspace side by side.
-	left = renderSection("By Source", m.summary.BySource, colWidth, maxRows, false)
-	right = renderSection("By Workspace", m.summary.ByWorkspace, colWidth, maxRows, false)
+	// Shorten workspace paths to last 2 components for readability.
+	shortWorkspaces := shortenWorkspacePaths(m.summary.ByWorkspace)
+	left = renderSection("By Source", m.summary.BySource, colWidth, maxRows, labelWidthShort, false)
+	right = renderSection("By Workspace", shortWorkspaces, colWidth, maxRows, labelWidthWide, false)
 	b.WriteString(sideBySide(left, right, colWidth))
 
 	return b.String()
 }
 
 // Layout: "  LABEL         COUNT  ████████"
-// Fixed columns: 2 indent + 14 label + 2 gap + 6 count (right-aligned) + 2 gap + bar
+// Fixed columns: 2 indent + label + 2 gap + 6 count (right-aligned) + 2 gap + bar
 const (
-	labelWidth = 14
-	countWidth = 6
-	rowPrefix  = 2 + labelWidth + 2 + countWidth + 2 // = 26
+	labelWidthShort = 14 // for decision, agent, source
+	labelWidthWide  = 24 // for workspace paths
+	countWidth      = 6
 )
 
-func renderSection(title string, counts map[string]int, width, maxRows int, colorDecisions bool) []string {
+func renderSection(title string, counts map[string]int, width, maxRows, lblWidth int, colorDecisions bool) []string {
 	lines := []string{
 		"  " + styleColHeader.Render(title),
 	}
@@ -101,7 +103,8 @@ func renderSection(title string, counts map[string]int, width, maxRows int, colo
 	}
 
 	maxVal := sorted[0].count
-	maxBarWidth := width - rowPrefix
+	prefix := 2 + lblWidth + 2 + countWidth + 2
+	maxBarWidth := width - prefix
 	if maxBarWidth < 3 {
 		maxBarWidth = 3
 	}
@@ -116,8 +119,8 @@ func renderSection(title string, counts map[string]int, width, maxRows int, colo
 		}
 		bar := strings.Repeat("█", barLen)
 
-		label := sanitize(shorten(kv.key, labelWidth))
-		paddedLabel := fmt.Sprintf("%-*s", labelWidth, label)
+		label := sanitize(shorten(kv.key, lblWidth))
+		paddedLabel := fmt.Sprintf("%-*s", lblWidth, label)
 		if colorDecisions {
 			paddedLabel = decisionStyle(kv.key).Render(paddedLabel)
 		}
@@ -171,6 +174,34 @@ func sortedCounts(m map[string]int) []countPair {
 		return pairs[i].key < pairs[j].key
 	})
 	return pairs
+}
+
+// shortenWorkspacePaths replaces full paths with their last 2 components
+// (e.g., "/Users/runger/workspaces/fuse" → "workspaces/fuse").
+// Merges counts for paths that collide after shortening.
+func shortenWorkspacePaths(counts map[string]int) map[string]int {
+	short := make(map[string]int, len(counts))
+	for path, count := range counts {
+		label := shortenToLastN(path, 2)
+		short[label] += count
+	}
+	return short
+}
+
+// shortenToLastN returns the last n path components, prefixed with ".../" if truncated.
+func shortenToLastN(path string, n int) string {
+	if path == "" {
+		return "(unknown)"
+	}
+	parts := strings.Split(path, "/")
+	// Remove trailing empty string from paths ending in /
+	for len(parts) > 0 && parts[len(parts)-1] == "" {
+		parts = parts[:len(parts)-1]
+	}
+	if len(parts) <= n {
+		return path
+	}
+	return ".../" + strings.Join(parts[len(parts)-n:], "/")
 }
 
 // visibleLen returns the display column width of a string, stripping ANSI
