@@ -406,27 +406,33 @@ func detectInlineScript(cmd string) (Decision, string) {
 	bestReason := ""
 
 	for _, p := range inlineScriptPatterns {
-		if p.re.MatchString(cmd) {
-			// Check if this is a safe python -c pattern.
-			if p.re == reInlinePythonC && isSafePythonInline(cmd) {
-				continue
-			}
+		if !p.re.MatchString(cmd) {
+			continue
+		}
+		// Check if this is a safe python -c pattern.
+		if p.re == reInlinePythonC && isSafePythonInline(cmd) {
+			continue
+		}
+		// Skip heredoc and command substitution detection for git commit /
+		// gh pr create — the heredoc/$() is just a message body, not code execution.
+		if (p.re == reInlineHeredoc || p.re == reInlineCmdSubst) && isSafeHeredocUsage(cmd) {
+			continue
+		}
 
-			var d Decision
-			if p.approval {
-				d = DecisionApproval
-			} else {
-				d = DecisionCaution
-			}
-			if bestDecision == "" {
-				bestDecision = d
+		var d Decision
+		if p.approval {
+			d = DecisionApproval
+		} else {
+			d = DecisionCaution
+		}
+		if bestDecision == "" {
+			bestDecision = d
+			bestReason = "inline script detected: " + p.re.String()
+		} else {
+			combined := MaxDecision(bestDecision, d)
+			if combined != bestDecision {
+				bestDecision = combined
 				bestReason = "inline script detected: " + p.re.String()
-			} else {
-				combined := MaxDecision(bestDecision, d)
-				if combined != bestDecision {
-					bestDecision = combined
-					bestReason = "inline script detected: " + p.re.String()
-				}
 			}
 		}
 	}
@@ -436,6 +442,14 @@ func detectInlineScript(cmd string) (Decision, string) {
 
 // isSafePythonInline returns true if a python -c command uses only safe,
 // read-only modules and contains no dangerous patterns.
+// reSafeHeredocCmd matches commands that safely use heredocs for message bodies,
+// not for code execution. Covers git commit, gh pr create, and similar.
+var reSafeHeredocCmd = regexp.MustCompile(`^\s*(git\s+commit|git\s+tag|gh\s+pr\s+create|gh\s+issue\s+create)\b`)
+
+func isSafeHeredocUsage(cmd string) bool {
+	return reSafeHeredocCmd.MatchString(cmd)
+}
+
 func isSafePythonInline(cmd string) bool {
 	if !safePythonInline.MatchString(cmd) {
 		return false
