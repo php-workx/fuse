@@ -130,20 +130,35 @@ func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, rea
 
 	// Step 4: Wait for first result.
 	r := <-ch
-	cancel() // stop the other goroutine
 
 	if r.err != nil {
-		// If prompt failed (e.g., errNonInteractive) but poll might still resolve,
-		// wait briefly for the poll goroutine.
+		// Prompt failed (e.g., errNonInteractive). Keep polling briefly in case
+		// the TUI resolves the approval. Use the parent context's deadline if
+		// available, otherwise a short fallback to avoid hanging.
+		fallback := 2 * time.Second
+		if deadline, ok := ctx.Deadline(); ok {
+			remaining := time.Until(deadline)
+			if remaining > 0 && remaining < fallback {
+				fallback = remaining
+			}
+		}
+		timer := time.NewTimer(fallback)
+		defer timer.Stop()
 		select {
 		case r2 := <-ch:
+			cancel()
 			if r2.err == nil && r2.decision != "" {
 				return r2.decision, nil
 			}
-		case <-time.After(500 * time.Millisecond):
+		case <-timer.C:
+			cancel()
+		case <-ctx.Done():
+			cancel()
 		}
 		return core.DecisionBlocked, fmt.Errorf("prompt user: %w", r.err)
 	}
+
+	cancel() // stop the poll goroutine
 
 	// If approved via TTY prompt, store the approval.
 	if !r.fromPoll && r.decision == core.DecisionApproval {
