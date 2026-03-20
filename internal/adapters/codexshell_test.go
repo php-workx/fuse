@@ -3,12 +3,15 @@ package adapters
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -157,7 +160,7 @@ func TestExecuteCapturedShellCommand_DoesNotInheritProcessStdin(t *testing.T) {
 		_ = r.Close()
 	}()
 
-	result, err := executeCapturedShellCommand("cat", "", time.Second)
+	result, err := executeCapturedShellCommand(context.Background(), "cat", "", time.Second)
 	if err != nil {
 		t.Fatalf("executeCapturedShellCommand: %v", err)
 	}
@@ -186,7 +189,7 @@ func TestExecuteCodexShellCommand_AllowsBlockedCommandWhenDisabled(t *testing.T)
 		t.Fatalf("mkdir target: %v", err)
 	}
 
-	_, _, exitCode, err := executeCodexShellCommand("rm -rf "+targetDir, "", "test-session", time.Minute)
+	_, _, exitCode, err := executeCodexShellCommand(context.Background(), "rm -rf "+targetDir, "", "test-session", time.Minute)
 	if err != nil {
 		t.Fatalf("expected disabled mode to bypass classification, got error: %v", err)
 	}
@@ -207,10 +210,10 @@ func TestExecuteCodexShellCommand_LogsAndPrunesEvents(t *testing.T) {
 	}
 
 	for _, command := range []string{"printf one", "printf two"} {
-		if _, _, exitCode, err := executeCodexShellCommand(command, "", "test-session", time.Minute); err != nil {
-			t.Fatalf("executeCodexShellCommand(%q): %v", command, err)
+		if _, _, exitCode, err := executeCodexShellCommand(context.Background(), command, "", "test-session", time.Minute); err != nil {
+			t.Fatalf("executeCodexShellCommand(context.Background(),%q): %v", command, err)
 		} else if exitCode != 0 {
-			t.Fatalf("executeCodexShellCommand(%q) exit code = %d", command, exitCode)
+			t.Fatalf("executeCodexShellCommand(context.Background(),%q) exit code = %d", command, exitCode)
 		}
 	}
 
@@ -233,7 +236,7 @@ func TestExecuteCodexShellCommand_EnabledSafeCommand(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 
-	stdout, stderr, exitCode, err := executeCodexShellCommand("printf safe", "", "test-session", time.Minute)
+	stdout, stderr, exitCode, err := executeCodexShellCommand(context.Background(), "printf safe", "", "test-session", time.Minute)
 	if err != nil {
 		t.Fatalf("executeCodexShellCommand: %v", err)
 	}
@@ -253,7 +256,7 @@ func TestExecuteCodexShellCommand_EnabledBlockedCommand(t *testing.T) {
 	enableFuseForTest(t)
 
 	command := "printf blocked > " + filepath.Join(fuseHome, "config", "policy.yaml")
-	stdout, stderr, exitCode, err := executeCodexShellCommand(command, "", "test-session", time.Minute)
+	stdout, stderr, exitCode, err := executeCodexShellCommand(context.Background(), command, "", "test-session", time.Minute)
 	if err == nil {
 		t.Fatal("expected blocked command to return an error")
 	}
@@ -270,7 +273,7 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
-	_, _, exitCode, err := executeCodexShellCommand("python nonexistent_script.py", "", "test-session", time.Minute)
+	_, _, exitCode, err := executeCodexShellCommand(context.Background(), "python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
 		t.Fatal("expected approval-required command without TTY to return an error")
 	}
@@ -513,7 +516,7 @@ func TestExecuteCodexShellCommand_SessionIDAttribution(t *testing.T) {
 	enableFuseForTest(t)
 
 	sessionID := "codex-test-attribution"
-	_, _, exitCode, err := executeCodexShellCommand("printf hello", "", sessionID, time.Minute)
+	_, _, exitCode, err := executeCodexShellCommand(context.Background(), "printf hello", "", sessionID, time.Minute)
 	if err != nil {
 		t.Fatalf("executeCodexShellCommand: %v", err)
 	}
@@ -553,7 +556,7 @@ func TestExecuteCodexShellCommand_DistinctSessionIDs(t *testing.T) {
 
 	// Run commands from two different sessions.
 	for _, sess := range []string{"codex-sess-1", "codex-sess-2"} {
-		_, _, _, err := executeCodexShellCommand("printf "+sess, "", sess, time.Minute)
+		_, _, _, err := executeCodexShellCommand(context.Background(), "printf "+sess, "", sess, time.Minute)
 		if err != nil {
 			t.Fatalf("session %s: %v", sess, err)
 		}
@@ -613,5 +616,249 @@ func TestGenerateSessionID_Unique(t *testing.T) {
 			t.Fatalf("duplicate session ID %q after %d iterations", id, i)
 		}
 		seen[id] = true
+	}
+}
+
+func TestRunCodexShellServer_ConcurrentToolCalls(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	responses := runCodexShellServerRequests(t,
+		jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "tools/call", "params": map[string]interface{}{
+			"name": "run_command", "arguments": map[string]interface{}{"command": "printf one"},
+		}},
+		jsonRPCMessage{"jsonrpc": "2.0", "id": float64(2), "method": "tools/call", "params": map[string]interface{}{
+			"name": "run_command", "arguments": map[string]interface{}{"command": "printf two"},
+		}},
+		jsonRPCMessage{"jsonrpc": "2.0", "id": float64(3), "method": "tools/call", "params": map[string]interface{}{
+			"name": "run_command", "arguments": map[string]interface{}{"command": "printf three"},
+		}},
+	)
+
+	if len(responses) != 3 {
+		t.Fatalf("expected 3 responses, got %d", len(responses))
+	}
+
+	// All IDs must be present (order may vary).
+	seen := map[float64]bool{}
+	for _, r := range responses {
+		id, _ := r["id"].(float64)
+		seen[id] = true
+	}
+	for _, want := range []float64{1, 2, 3} {
+		if !seen[want] {
+			t.Errorf("missing response for id %v", want)
+		}
+	}
+}
+
+func TestRunCodexShellServer_SlowRequestDoesNotBlockFast(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	// Use io.Pipe so we can control timing: send slow request, then fast request.
+	pr, pw := io.Pipe()
+	var output bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- RunCodexShellServer(pr, &output)
+	}()
+
+	// Send slow command (sleep 2).
+	slow := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "tools/call", "params": map[string]interface{}{
+		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 2 && printf slow"},
+	}}
+	writeFramedRequest(t, pw, slow)
+
+	// Small delay to ensure slow request is being processed.
+	time.Sleep(200 * time.Millisecond)
+
+	// Send fast command.
+	fast := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(2), "method": "tools/call", "params": map[string]interface{}{
+		"name": "run_command", "arguments": map[string]interface{}{"command": "printf fast"},
+	}}
+	writeFramedRequest(t, pw, fast)
+
+	// Close stdin after a brief delay to let both process.
+	time.Sleep(3 * time.Second)
+	_ = pw.Close()
+	<-done
+
+	reader := bufio.NewReader(&output)
+	var responses []jsonRPCMessage
+	for {
+		payload, err := readMCPFrame(reader)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("readMCPFrame: %v", err)
+		}
+		msg, _ := decodeJSONRPC(payload)
+		responses = append(responses, msg)
+	}
+
+	if len(responses) != 2 {
+		t.Fatalf("expected 2 responses, got %d", len(responses))
+	}
+
+	// The fast response (id=2) should arrive before the slow response (id=1).
+	firstID, _ := responses[0]["id"].(float64)
+	if firstID != 2 {
+		t.Errorf("expected fast response (id=2) first, got id=%v", firstID)
+	}
+}
+
+func TestRunCodexShellServer_ParseErrorContinuesProcessing(t *testing.T) {
+	// Send malformed JSON followed by a valid initialize request.
+	var input bytes.Buffer
+	// Malformed frame: valid MCP framing but invalid JSON body.
+	input.WriteString("Content-Length: 3\r\n\r\n{x}")
+	// Valid initialize request.
+	initReq, _ := encodeJSONRPC(jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "initialize"})
+	input.WriteString(rawMCPFrame(initReq))
+
+	var output bytes.Buffer
+	if err := RunCodexShellServer(&input, &output); err != nil {
+		t.Fatalf("RunCodexShellServer: %v", err)
+	}
+
+	reader := bufio.NewReader(&output)
+	var responses []jsonRPCMessage
+	for {
+		payload, err := readMCPFrame(reader)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("readMCPFrame: %v", err)
+		}
+		msg, _ := decodeJSONRPC(payload)
+		responses = append(responses, msg)
+	}
+
+	if len(responses) < 2 {
+		t.Fatalf("expected at least 2 responses (parse error + init), got %d", len(responses))
+	}
+
+	// One should be an error response, one should be the init result.
+	var hasError, hasInit bool
+	for _, r := range responses {
+		if _, ok := r["error"]; ok {
+			hasError = true
+		}
+		if result, ok := r["result"]; ok && result != nil {
+			hasInit = true
+		}
+	}
+	if !hasError {
+		t.Error("expected a parse error response for malformed JSON")
+	}
+	if !hasInit {
+		t.Error("expected an initialize response after the parse error")
+	}
+}
+
+func TestRunCodexShellServer_GracefulShutdownOnEOF(t *testing.T) {
+	responses := runCodexShellServerRequests(t, jsonRPCMessage{
+		"jsonrpc": "2.0",
+		"id":      float64(1),
+		"method":  "initialize",
+	})
+
+	if len(responses) != 1 {
+		t.Fatalf("expected 1 response, got %d", len(responses))
+	}
+	if _, ok := responses[0]["result"]; !ok {
+		t.Fatal("expected initialize result")
+	}
+}
+
+func TestRunCodexShellServer_ShutdownKillsInFlight(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+
+	pr, pw := io.Pipe()
+	var output bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- RunCodexShellServer(pr, &output)
+	}()
+
+	// Send a long-running command.
+	req := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "tools/call", "params": map[string]interface{}{
+		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 30"},
+	}}
+	writeFramedRequest(t, pw, req)
+
+	// Give it a moment to start, then close stdin.
+	time.Sleep(500 * time.Millisecond)
+	_ = pw.Close()
+
+	// Server should return within drain timeout (~5s) + margin, not 30s.
+	select {
+	case <-done:
+		// Good — server shut down promptly.
+	case <-time.After(10 * time.Second):
+		t.Fatal("RunCodexShellServer did not shut down within 10s after stdin close (expected ~5s drain)")
+	}
+}
+
+func TestCodexShellWriter_ConcurrentWrites(t *testing.T) {
+	var output bytes.Buffer
+	w := &codexShellWriter{
+		writer:    bufio.NewWriter(&output),
+		transport: codexShellTransportFramed,
+	}
+
+	const n = 20
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(id int) {
+			defer wg.Done()
+			_ = w.writeResponse(jsonRPCMessage{
+				"jsonrpc": "2.0",
+				"id":      float64(id),
+				"result":  "ok",
+			})
+		}(i)
+	}
+	wg.Wait()
+
+	// Read all frames and verify none are corrupted.
+	reader := bufio.NewReader(&output)
+	count := 0
+	for {
+		payload, err := readMCPFrame(reader)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("readMCPFrame after %d frames: %v", count, err)
+		}
+		msg, err := decodeJSONRPC(payload)
+		if err != nil {
+			t.Fatalf("decodeJSONRPC frame %d: %v", count, err)
+		}
+		if _, ok := msg["jsonrpc"]; !ok {
+			t.Fatalf("frame %d missing jsonrpc field", count)
+		}
+		count++
+	}
+	if count != n {
+		t.Fatalf("expected %d frames, got %d", n, count)
+	}
+}
+
+// writeFramedRequest encodes and writes a single MCP-framed request to a writer.
+func writeFramedRequest(t *testing.T, w io.Writer, msg jsonRPCMessage) {
+	t.Helper()
+	payload, err := encodeJSONRPC(msg)
+	if err != nil {
+		t.Fatalf("encode request: %v", err)
+	}
+	if _, err := fmt.Fprintf(w, "Content-Length: %d\r\n\r\n%s", len(payload), payload); err != nil {
+		t.Fatalf("write request: %v", err)
 	}
 }
