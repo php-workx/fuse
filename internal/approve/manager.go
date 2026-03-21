@@ -78,7 +78,7 @@ func (m *Manager) RequestApproval(
 	if insertErr := m.db.InsertPendingRequest(db.PendingRequest{
 		ID:          pendingID,
 		DecisionKey: decisionKey,
-		Command:     command,
+		Command:     db.ScrubCredentials(command),
 		Reason:      reason,
 		Source:      source,
 		SessionID:   sessionID,
@@ -168,6 +168,21 @@ func (m *Manager) RequestApproval(
 
 	cancel()        // stop the poll goroutine
 	deletePending() // resolved via TTY prompt
+
+	// If TTY denied but the TUI approved concurrently, prefer the approval.
+	// The channel is buffered (size 2), so if goroutine B already sent an
+	// APPROVAL result (after consuming the approval from DB), it's sitting
+	// in the buffer. Draining it prevents losing consumed approvals.
+	if r.decision == core.DecisionBlocked && !r.fromPoll {
+		select {
+		case r2 := <-ch:
+			if r2.decision == core.DecisionApproval {
+				return r2.decision, nil
+			}
+		default:
+			// no second result — TTY denial stands
+		}
+	}
 
 	// If approved via TTY prompt, store the approval.
 	if !r.fromPoll && r.decision == core.DecisionApproval {

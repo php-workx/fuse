@@ -48,11 +48,18 @@ func NewModel(database *db.DB, mode string, secret []byte) Model {
 	}
 }
 
-// Init returns the initial command (first tick).
+// cleanupMsg is sent after the startup cleanup completes (fire-and-forget).
+type cleanupMsg struct{}
+
+// Init returns the initial commands (first tick + async cleanup).
 func (m Model) Init() tea.Cmd {
-	// Clean up stale pending requests (>30 min) from crashed hooks.
-	_, _ = m.db.CleanupStalePendingRequests(30 * time.Minute)
-	return tickCmd(m.activeView)
+	database := m.db
+	cleanupCmd := func() tea.Msg {
+		// Clean up stale pending requests (>30 min) from crashed hooks.
+		_, _ = database.CleanupStalePendingRequests(30 * time.Minute)
+		return cleanupMsg{}
+	}
+	return tea.Batch(tickCmd(m.activeView), cleanupCmd)
 }
 
 // Update processes messages.
