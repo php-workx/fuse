@@ -22,6 +22,11 @@ import (
 // Overridable via FUSE_HOOK_TIMEOUT for testing.
 var hookTimeout = 25 * time.Second
 
+// pendingApprovalMsg tells the agent to retry — the user may approve via TUI.
+const pendingApprovalMsg = "fuse:PENDING_APPROVAL WAIT. This command requires user approval " +
+	"via fuse monitor. The approval request has been queued. " +
+	"Wait 30-60 seconds, then retry the same command."
+
 func init() {
 	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -60,7 +65,7 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 	case code := <-resultCh:
 		return code
 	case <-ctx.Done():
-		fmt.Fprintln(stderr, "fuse:TIMEOUT_WAITING_FOR_USER STOP. The user did not approve this action in time. Do not retry this exact command.")
+		fmt.Fprintln(stderr, pendingApprovalMsg)
 		return 2
 	}
 }
@@ -297,6 +302,12 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 	decision, err := mgr.RequestApproval(approvalCtx, result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
 	if err != nil {
 		slog.Error("approval error", "error", err)
+		// If the error is from a non-interactive prompt timeout, tell the agent
+		// to retry — the user may approve via fuse monitor.
+		if strings.Contains(err.Error(), "NON_INTERACTIVE_MODE") || strings.Contains(err.Error(), "TIMEOUT_WAITING") {
+			fmt.Fprintln(stderr, pendingApprovalMsg)
+			return 2
+		}
 		if msg := extractFuseDirective(err); msg != "" {
 			fmt.Fprintln(stderr, msg)
 			return 2
