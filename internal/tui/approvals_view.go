@@ -154,6 +154,7 @@ func (m ApprovalsModel) Update(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
 		case key.Matches(k, keys.BulkPurge):
 			m.confirming = "purge"
 			return m, nil
+		default:
 		}
 	}
 
@@ -188,6 +189,7 @@ func (m *ApprovalsModel) handleActionResult(msg tea.Msg) {
 		} else {
 			m.statusMsg = fmt.Sprintf("Purged %d", msg.deleted)
 		}
+	default:
 	}
 }
 
@@ -201,9 +203,11 @@ func (m ApprovalsModel) handleConfirm(k tea.Key) (ApprovalsModel, tea.Cmd) {
 			return m, m.deleteCmd(m.confirmID)
 		case "purge":
 			return m, m.purgeCmd()
+		default:
 		}
 	case 'n', 'N', tea.KeyEscape:
 		m.confirming = ""
+	default:
 	}
 	return m, nil
 }
@@ -238,6 +242,7 @@ func (m ApprovalsModel) updateDetail(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
 		case key.Matches(k, keys.Enter), key.Matches(k, keys.Escape):
 			m.showDetail = false
 			return m, nil
+		default:
 		}
 	}
 	// Delegate scroll keys (j/k/PgUp/PgDn) to the viewport.
@@ -382,6 +387,7 @@ func (m ApprovalsModel) View() string {
 			b.WriteString(styleError.Render(fmt.Sprintf("  Revoke approval %s? [y/n]", shorten(m.confirmID, 8))))
 		case "purge":
 			b.WriteString(styleError.Render("  Purge all expired/consumed? [y/n]"))
+		default:
 		}
 		b.WriteByte('\n')
 	}

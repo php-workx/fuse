@@ -104,12 +104,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case viewApprovals:
 				m.approvals.SetData(msg.approvals)
 				m.approvals.SetPending(msg.pending)
+			default:
 			}
 		}
 		return m, tickCmd(m.activeView)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+	default:
 	}
 
 	// Delegate non-key messages to active view.
@@ -121,6 +123,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.stats, cmd = m.stats.Update(msg)
 	case viewApprovals:
 		m.approvals, cmd = m.approvals.Update(msg)
+	default:
 	}
 	return m, cmd
 }
@@ -163,6 +166,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.fetchGen++
 				return m, m.fetchData()
 			}
+		default:
 		}
 	}
 
@@ -175,6 +179,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.stats, cmd = m.stats.Update(msg)
 	case viewApprovals:
 		m.approvals, cmd = m.approvals.Update(msg)
+	default:
 	}
 	return m, cmd
 }
@@ -209,6 +214,7 @@ func (m Model) View() tea.View {
 		b.WriteString(m.stats.View())
 	case viewApprovals:
 		b.WriteString(m.approvals.View())
+	default:
 	}
 
 	// Footer.
@@ -218,6 +224,7 @@ func (m Model) View() tea.View {
 		footer += m.events.FilterInfo()
 	case viewApprovals:
 		footer += m.approvals.FilterInfo()
+	default:
 	}
 	if m.lastErr != nil {
 		footer += "  " + styleError.Render("DB: "+m.lastErr.Error())
@@ -243,6 +250,7 @@ func tickCmd(view viewMode) tea.Cmd {
 		interval = 500 * time.Millisecond // faster polling for pending requests
 	case viewStats:
 		interval = 5 * time.Second
+	default:
 	}
 	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return tickMsg{view: view}
@@ -275,6 +283,7 @@ func (m Model) fetchData() tea.Cmd {
 			// Fetch pending requests independently — a transient pending error
 			// should not block the approval history update.
 			msg.pending, _ = database.ListPendingRequests()
+		default:
 		}
 		return msg
 	}

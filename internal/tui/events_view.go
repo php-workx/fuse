@@ -101,6 +101,7 @@ func (m EventsModel) Update(msg tea.Msg) (EventsModel, tea.Cmd) {
 				m.searchInput.SetValue("")
 				m.applyFilters()
 			}
+		default:
 		}
 	}
 	return m, nil
@@ -115,6 +116,7 @@ func (m EventsModel) updateDetail(msg tea.Msg) (EventsModel, tea.Cmd) {
 		case key.Matches(k, keys.Enter), key.Matches(k, keys.Escape):
 			m.showDetail = false
 			return m, nil
+		default:
 		}
 	}
 	// Delegate all other messages (including scroll keys) to the viewport.
@@ -138,6 +140,7 @@ func (m EventsModel) updateSearch(msg tea.Msg) (EventsModel, tea.Cmd) {
 			m.searchInput.SetValue("")
 			m.applyFilters()
 			return m, nil
+		default:
 		}
 	}
 	var cmd tea.Cmd
