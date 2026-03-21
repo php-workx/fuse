@@ -138,12 +138,11 @@ func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, rea
 	if r.err != nil {
 		// Prompt failed (e.g., non-interactive terminal). The TUI (fuse monitor)
 		// can still resolve this — keep polling until the context expires.
-		// Use the context deadline if available (hook's 25s timeout propagates
-		// via the outer RunHook select). If no deadline, use 25s as safety net
-		// for the hook timeout budget.
+		// The hook caller provides a deadline (hookTimeout - 2s). If no
+		// deadline (e.g., run mode), fall back to 2 minutes.
 		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
 			var deadlineCancel context.CancelFunc
-			ctx, deadlineCancel = context.WithTimeout(ctx, 25*time.Second)
+			ctx, deadlineCancel = context.WithTimeout(ctx, 2*time.Minute)
 			defer deadlineCancel()
 		}
 		select {

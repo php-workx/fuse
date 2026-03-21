@@ -18,11 +18,15 @@ import (
 	"github.com/runger/fuse/internal/policy"
 )
 
-// hookTimeout is the internal timeout before Claude's 30s kill.
-// Overridable via FUSE_HOOK_TIMEOUT for testing.
-var hookTimeout = 25 * time.Second
+// hookTimeout is fuse's internal safety timeout.
+// Claude Code's default hook timeout is 600s; users can configure per-hook
+// via the "timeout" field in settings. We default to 300s — long enough for a
+// human to notice and approve via fuse monitor, but well under Claude Code's
+// limit. Override with FUSE_HOOK_TIMEOUT env var or test helpers.
+var hookTimeout = 300 * time.Second
 
-// pendingApprovalMsg tells the agent to retry — the user may approve via TUI.
+// pendingApprovalMsg tells the agent the approval is still pending.
+// Used when the hook times out before the user approves via the TUI.
 const pendingApprovalMsg = "fuse:PENDING_APPROVAL WAIT. This command requires user approval " +
 	"via fuse monitor. The approval request has been queued. " +
 	"Wait 30-60 seconds, then retry the same command."
