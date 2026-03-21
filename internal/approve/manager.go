@@ -3,6 +3,7 @@ package approve
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,7 +56,11 @@ func scopeExpiry(scope string) *time.Time {
 //  2. Write a pending request so the TUI can see it
 //  3. Run TTY prompt and DB poll in parallel — first to resolve wins
 //  4. Clean up pending request on exit
-func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, reason, sessionID string, hookMode, nonInteractive bool) (core.Decision, error) {
+func (m *Manager) RequestApproval(
+	ctx context.Context,
+	decisionKey, command, reason, sessionID, source string,
+	hookMode, nonInteractive bool,
+) (core.Decision, error) {
 	// Step 1: Check for an existing valid approval.
 	existing, err := m.ConsumeApproval(decisionKey, sessionID)
 	if err != nil {
@@ -67,18 +72,19 @@ func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, rea
 
 	// Step 2: Write pending request for TUI visibility.
 	pendingID := uuid.New().String()
-	source := "hook"
-	if nonInteractive {
-		source = "non-interactive"
+	if source == "" {
+		source = "hook"
 	}
-	_ = m.db.InsertPendingRequest(db.PendingRequest{
+	if insertErr := m.db.InsertPendingRequest(db.PendingRequest{
 		ID:          pendingID,
 		DecisionKey: decisionKey,
 		Command:     command,
 		Reason:      reason,
 		Source:      source,
 		SessionID:   sessionID,
-	})
+	}); insertErr != nil {
+		slog.Warn("failed to insert pending request for TUI visibility", "error", insertErr)
+	}
 	// Don't delete the pending request on timeout — let it persist so the TUI
 	// can show it even after the hook exits. The user may approve minutes later;
 	// the agent's retry will find the cached approval via ConsumeApproval.

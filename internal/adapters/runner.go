@@ -190,6 +190,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 				command,
 				result.Reason,
 				"",    // no session ID in run mode
+				"run", // source adapter
 				false, // not hook mode — 5min timeout
 				false, // not dry-run (already checked above)
 			)

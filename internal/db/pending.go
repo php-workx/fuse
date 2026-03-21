@@ -57,9 +57,13 @@ func (d *DB) ListPendingRequests() ([]PendingRequest, error) {
 
 // DeletePendingRequest removes a pending request by ID.
 func (d *DB) DeletePendingRequest(id string) error {
-	_, err := d.db.Exec("DELETE FROM pending_requests WHERE id = ?", id)
+	result, err := d.db.Exec("DELETE FROM pending_requests WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("delete pending request: %w", err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("pending request %s not found", id)
 	}
 	return nil
 }

@@ -228,7 +228,10 @@ type tickMsg struct {
 
 func tickCmd(view viewMode) tea.Cmd {
 	interval := 1500 * time.Millisecond
-	if view == viewStats {
+	switch view {
+	case viewApprovals:
+		interval = 500 * time.Millisecond // faster polling for pending requests
+	case viewStats:
 		interval = 5 * time.Second
 	}
 	return tea.Tick(interval, func(t time.Time) tea.Msg {
@@ -259,8 +262,14 @@ func (m Model) fetchData() tea.Cmd {
 			msg.summary, msg.err = database.SummarizeEvents()
 		case viewApprovals:
 			msg.approvals, msg.err = database.ListApprovals(50)
-			// Also fetch pending requests (fast, small table).
-			msg.pending, _ = database.ListPendingRequests()
+			if msg.err == nil {
+				// Also fetch pending requests (fast, small table).
+				var pendingErr error
+				msg.pending, pendingErr = database.ListPendingRequests()
+				if pendingErr != nil {
+					msg.err = pendingErr
+				}
+			}
 		}
 		return msg
 	}

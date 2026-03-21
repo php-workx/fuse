@@ -5,12 +5,21 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"regexp"
 	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+// reControlChars matches ANSI escape sequences and non-printable control characters.
+// Used to prevent terminal injection via crafted command strings in approval prompts.
+var reControlChars = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`)
+
+func sanitizePrompt(s string) string {
+	return reControlChars.ReplaceAllString(s, "")
+}
 
 var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
 
@@ -20,7 +29,9 @@ var ttyMu sync.Mutex
 
 // PromptUser shows a TUI approval prompt on /dev/tty.
 // Returns the user's decision (approved bool), chosen scope, and any error.
-// hookMode: true = 25s timeout, false = 5min timeout.
+// hookMode: true = short TTY prompt timeout (25s), false = 5min timeout.
+// Note: the TTY prompt timeout is intentionally shorter than the hook timeout
+// (300s) because the DB poll continues after the prompt times out.
 // The ctx is checked in the polling loop; cancellation denies immediately.
 func PromptUser(ctx context.Context, command, reason string, hookMode, nonInteractive bool) (approved bool, scope string, err error) {
 	// Fast path: non-interactive mode returns immediately without locking.
@@ -214,11 +225,11 @@ func renderPrompt(tty *os.File, command, reason string) {
 	fmt.Fprintf(tty, "\n")
 	fmt.Fprintf(tty, "  \033[1;33m--- fuse: approval required ---\033[0m\n")
 	fmt.Fprintf(tty, "\n")
-	fmt.Fprintf(tty, "  \033[1mAgent requested:\033[0m %s\n", command)
-	fmt.Fprintf(tty, "  \033[1mCwd:\033[0m            %s\n", cwd)
+	fmt.Fprintf(tty, "  \033[1mAgent requested:\033[0m %s\n", sanitizePrompt(command))
+	fmt.Fprintf(tty, "  \033[1mCwd:\033[0m            %s\n", sanitizePrompt(cwd))
 	fmt.Fprintf(tty, "  \033[1mRisk:\033[0m           APPROVAL\n")
 	if reason != "" {
-		fmt.Fprintf(tty, "  \033[1mReason:\033[0m         %s\n", reason)
+		fmt.Fprintf(tty, "  \033[1mReason:\033[0m         %s\n", sanitizePrompt(reason))
 	}
 	if contextVars != "" {
 		fmt.Fprintf(tty, "  \033[1mContext:\033[0m        %s\n", contextVars)

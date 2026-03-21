@@ -309,7 +309,7 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 			if mgrErr != nil {
 				return "", "", 0, mgrErr
 			}
-			decision, promptErr := mgr.RequestApproval(ctx, result.DecisionKey, command, result.Reason, sessionID, false, dryRun)
+			decision, promptErr := mgr.RequestApproval(ctx, result.DecisionKey, command, result.Reason, sessionID, "codex-shell", false, dryRun)
 			if promptErr != nil {
 				return "", "", 0, promptErr
 			}

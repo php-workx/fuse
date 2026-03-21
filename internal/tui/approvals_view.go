@@ -383,7 +383,15 @@ func (m ApprovalsModel) approveCmd(scope string) tea.Cmd {
 		}
 		err = mgr.CreateApproval(req.DecisionKey, "APPROVAL", scope, req.SessionID)
 		if err == nil {
-			_ = database.DeletePendingRequest(req.ID) // clean up after resolution
+			_ = database.DeletePendingRequest(req.ID)
+			_ = database.LogEvent(&db.EventRecord{
+				Command:      req.Command,
+				Decision:     "APPROVAL",
+				Reason:       req.Reason,
+				Source:       "tui",
+				SessionID:    req.SessionID,
+				UserResponse: "approved_via_tui (scope: " + scope + ")",
+			})
 		}
 		return approveResultMsg{scope: scope, err: err}
 	}
@@ -404,7 +412,15 @@ func (m ApprovalsModel) denyCmd() tea.Cmd {
 		// Deny with "once" scope — blocks THIS request, not future ones.
 		err = mgr.CreateApproval(req.DecisionKey, "BLOCKED", "once", req.SessionID)
 		if err == nil {
-			_ = database.DeletePendingRequest(req.ID) // clean up after resolution
+			_ = database.DeletePendingRequest(req.ID)
+			_ = database.LogEvent(&db.EventRecord{
+				Command:      req.Command,
+				Decision:     "BLOCKED",
+				Reason:       req.Reason,
+				Source:       "tui",
+				SessionID:    req.SessionID,
+				UserResponse: "denied_via_tui",
+			})
 		}
 		return denyResultMsg{err: err}
 	}

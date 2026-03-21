@@ -303,7 +303,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 	// wait indefinitely with context.Background().
 	approvalCtx, approvalCancel := context.WithTimeout(context.Background(), hookTimeout-2*time.Second)
 	defer approvalCancel()
-	decision, err := mgr.RequestApproval(approvalCtx, result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
+	decision, err := mgr.RequestApproval(approvalCtx, result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, "hook", true, dryRun)
 	if err != nil {
 		slog.Error("approval error", "error", err)
 		// If the error is from a non-interactive prompt timeout, tell the agent
