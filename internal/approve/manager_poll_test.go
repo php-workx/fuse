@@ -24,6 +24,17 @@ func testSecret() []byte {
 	return []byte("01234567890123456789012345678901") // 32 bytes
 }
 
+func testReq(decisionKey, command, reason, sessionID string) ApprovalRequest {
+	return ApprovalRequest{
+		DecisionKey:    decisionKey,
+		Command:        command,
+		Reason:         reason,
+		SessionID:      sessionID,
+		Source:         "hook",
+		NonInteractive: true,
+	}
+}
+
 func TestRequestApproval_PollResolvesFromDB(t *testing.T) {
 	database := openTestDB(t)
 	secret := testSecret()
@@ -35,8 +46,6 @@ func TestRequestApproval_PollResolvesFromDB(t *testing.T) {
 	decisionKey := "test-key-poll"
 	sessionID := "test-session"
 
-	// Pre-create an approval in the DB (simulating TUI action).
-	// Use a goroutine with a small delay to simulate async TUI approval.
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		_ = mgr.CreateApproval(decisionKey, "APPROVAL", "once", sessionID)
@@ -45,9 +54,7 @@ func TestRequestApproval_PollResolvesFromDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// RequestApproval should find the externally-created approval via DB poll
-	// without needing TTY input (nonInteractive=true skips TTY prompt).
-	decision, err := mgr.RequestApproval(ctx, decisionKey, "echo test", "test reason", sessionID, "hook", false, true)
+	decision, err := mgr.RequestApproval(ctx, testReq(decisionKey, "echo test", "test reason", sessionID))
 	if err != nil {
 		t.Fatalf("RequestApproval: %v", err)
 	}
@@ -64,18 +71,14 @@ func TestRequestApproval_TimeoutReturnsBlocked(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 
-	// No approval created — should timeout and return BLOCKED.
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
-	decision, err := mgr.RequestApproval(ctx, "no-approval-key", "echo test", "reason", "sess", "hook", false, true)
-	// In non-interactive mode, the prompt fails immediately with errNonInteractive.
-	// The poll runs but finds nothing within the context timeout.
-	// Expected: BLOCKED (either from prompt failure or context timeout).
+	decision, err := mgr.RequestApproval(ctx, testReq("no-approval-key", "echo test", "reason", "sess"))
 	if decision != "BLOCKED" {
 		t.Errorf("decision = %q, want BLOCKED (no approval, timed out)", decision)
 	}
-	_ = err // error is expected (prompt user: non-interactive)
+	_ = err
 }
 
 func TestRequestApproval_PendingRequestCleanedUp(t *testing.T) {
@@ -86,13 +89,11 @@ func TestRequestApproval_PendingRequestCleanedUp(t *testing.T) {
 		t.Fatalf("NewManager: %v", err)
 	}
 
-	// Pre-create approval so it resolves quickly.
 	_ = mgr.CreateApproval("cleanup-key", "APPROVAL", "once", "sess")
 
 	ctx := context.Background()
-	_, _ = mgr.RequestApproval(ctx, "cleanup-key", "echo test", "reason", "sess", "hook", false, true)
+	_, _ = mgr.RequestApproval(ctx, testReq("cleanup-key", "echo test", "reason", "sess"))
 
-	// After RequestApproval returns, the pending request should be cleaned up.
 	pending, err := database.ListPendingRequests()
 	if err != nil {
 		t.Fatalf("ListPendingRequests: %v", err)
@@ -102,20 +103,15 @@ func TestRequestApproval_PendingRequestCleanedUp(t *testing.T) {
 	}
 }
 
-// TestRequestApproval_TUIApproveResolvesHook simulates the full TUI→hook flow:
-// a separate Manager (simulating the TUI process) creates an approval that
-// the hook's DB poll picks up.
 func TestRequestApproval_TUIApproveResolvesHook(t *testing.T) {
 	database := openTestDB(t)
 	secret := testSecret()
 
-	// Hook-side manager.
 	hookMgr, err := NewManager(database, secret)
 	if err != nil {
 		t.Fatalf("NewManager (hook): %v", err)
 	}
 
-	// TUI-side manager (same DB and secret, different Manager instance).
 	tuiMgr, err := NewManager(database, secret)
 	if err != nil {
 		t.Fatalf("NewManager (tui): %v", err)
@@ -124,7 +120,6 @@ func TestRequestApproval_TUIApproveResolvesHook(t *testing.T) {
 	decisionKey := "tui-e2e-approve"
 	sessionID := "tui-sess"
 
-	// Simulate TUI approving after 300ms.
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		_ = tuiMgr.CreateApproval(decisionKey, "APPROVAL", "session", sessionID)
@@ -133,7 +128,7 @@ func TestRequestApproval_TUIApproveResolvesHook(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	decision, err := hookMgr.RequestApproval(ctx, decisionKey, "kubectl delete pod", "k8s rule", sessionID, "hook", false, true)
+	decision, err := hookMgr.RequestApproval(ctx, testReq(decisionKey, "kubectl delete pod", "k8s rule", sessionID))
 	if err != nil {
 		t.Fatalf("RequestApproval: %v", err)
 	}
@@ -142,8 +137,6 @@ func TestRequestApproval_TUIApproveResolvesHook(t *testing.T) {
 	}
 }
 
-// TestRequestApproval_TUIApproveSessionScopeReusable verifies that a session-scoped
-// approval from the TUI is reusable for subsequent commands with the same key.
 func TestRequestApproval_TUIApproveSessionScopeReusable(t *testing.T) {
 	database := openTestDB(t)
 	secret := testSecret()
@@ -156,14 +149,12 @@ func TestRequestApproval_TUIApproveSessionScopeReusable(t *testing.T) {
 	decisionKey := "session-reuse-key"
 	sessionID := "reuse-sess"
 
-	// Create session-scoped approval (simulating TUI).
 	if err := mgr.CreateApproval(decisionKey, "APPROVAL", "session", sessionID); err != nil {
 		t.Fatalf("CreateApproval: %v", err)
 	}
 
-	// First consumption — should succeed.
 	ctx := context.Background()
-	d1, err := mgr.RequestApproval(ctx, decisionKey, "echo 1", "test", sessionID, "hook", false, true)
+	d1, err := mgr.RequestApproval(ctx, testReq(decisionKey, "echo 1", "test", sessionID))
 	if err != nil {
 		t.Fatalf("first RequestApproval: %v", err)
 	}
@@ -171,8 +162,7 @@ func TestRequestApproval_TUIApproveSessionScopeReusable(t *testing.T) {
 		t.Errorf("first decision = %q, want APPROVAL", d1)
 	}
 
-	// Second consumption — session scope is reusable, should also succeed.
-	d2, err := mgr.RequestApproval(ctx, decisionKey, "echo 2", "test", sessionID, "hook", false, true)
+	d2, err := mgr.RequestApproval(ctx, testReq(decisionKey, "echo 2", "test", sessionID))
 	if err != nil {
 		t.Fatalf("second RequestApproval: %v", err)
 	}
@@ -192,7 +182,6 @@ func TestRequestApproval_DenyViaDB(t *testing.T) {
 	decisionKey := "deny-key"
 	sessionID := "sess"
 
-	// Pre-create a BLOCKED approval (simulating TUI deny).
 	go func() {
 		time.Sleep(300 * time.Millisecond)
 		_ = mgr.CreateApproval(decisionKey, "BLOCKED", "once", sessionID)
@@ -201,7 +190,7 @@ func TestRequestApproval_DenyViaDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	decision, err := mgr.RequestApproval(ctx, decisionKey, "terraform destroy", "IaC rule", sessionID, "hook", false, true)
+	decision, err := mgr.RequestApproval(ctx, testReq(decisionKey, "terraform destroy", "IaC rule", sessionID))
 	if err != nil {
 		t.Fatalf("RequestApproval: %v", err)
 	}

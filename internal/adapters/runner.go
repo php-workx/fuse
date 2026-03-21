@@ -184,16 +184,12 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 			if mgrErr != nil {
 				return 1, fmt.Errorf("create approval manager: %w", mgrErr)
 			}
-			decision, promptErr := mgr.RequestApproval(
-				context.Background(),
-				result.DecisionKey,
-				command,
-				result.Reason,
-				"",    // no session ID in run mode
-				"run", // source adapter
-				false, // not hook mode — 5min timeout
-				false, // not dry-run (already checked above)
-			)
+			decision, promptErr := mgr.RequestApproval(context.Background(), approve.ApprovalRequest{
+				DecisionKey: result.DecisionKey,
+				Command:     command,
+				Reason:      result.Reason,
+				Source:      "run",
+			})
 			if promptErr != nil {
 				return 1, fmt.Errorf("approval: %w", promptErr)
 			}
