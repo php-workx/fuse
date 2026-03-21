@@ -206,8 +206,11 @@ func (m Model) View() tea.View {
 
 	// Footer.
 	footer := "  " + footerHelp()
-	if m.activeView == viewEvents {
+	switch m.activeView {
+	case viewEvents:
 		footer += m.events.FilterInfo()
+	case viewApprovals:
+		footer += m.approvals.FilterInfo()
 	}
 	if m.lastErr != nil {
 		footer += "  " + styleError.Render("DB: "+m.lastErr.Error())
@@ -262,14 +265,9 @@ func (m Model) fetchData() tea.Cmd {
 			msg.summary, msg.err = database.SummarizeEvents()
 		case viewApprovals:
 			msg.approvals, msg.err = database.ListApprovals(50)
-			if msg.err == nil {
-				// Also fetch pending requests (fast, small table).
-				var pendingErr error
-				msg.pending, pendingErr = database.ListPendingRequests()
-				if pendingErr != nil {
-					msg.err = pendingErr
-				}
-			}
+			// Fetch pending requests independently — a transient pending error
+			// should not block the approval history update.
+			msg.pending, _ = database.ListPendingRequests()
 		}
 		return msg
 	}

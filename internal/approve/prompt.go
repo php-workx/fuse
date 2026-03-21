@@ -232,7 +232,7 @@ func renderPrompt(tty *os.File, command, reason string) {
 		fmt.Fprintf(tty, "  \033[1mReason:\033[0m         %s\n", sanitizePrompt(reason))
 	}
 	if contextVars != "" {
-		fmt.Fprintf(tty, "  \033[1mContext:\033[0m        %s\n", contextVars)
+		fmt.Fprintf(tty, "  \033[1mContext:\033[0m        %s\n", sanitizePrompt(contextVars))
 	}
 	fmt.Fprintf(tty, "\n")
 	fmt.Fprintf(tty, "  \033[1;32m[A]pprove\033[0m  |  \033[1;31m[D]eny\033[0m\n")
