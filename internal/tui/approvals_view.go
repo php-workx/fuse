@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -36,7 +37,9 @@ type ApprovalsModel struct {
 	scopeSelect bool   // waiting for scope keypress after 'a'
 	confirming  string // "delete", "purge", or ""
 	confirmID   string
-	statusMsg   string // transient footer message
+	statusMsg   string         // transient footer message
+	showDetail  bool           // detail panel open for history item
+	detailView  viewport.Model // scrollable detail panel
 
 	// Dependencies.
 	database *db.DB
@@ -49,9 +52,10 @@ type ApprovalsModel struct {
 // NewApprovalsModel creates an initialized ApprovalsModel.
 func NewApprovalsModel(database *db.DB, secret []byte) ApprovalsModel {
 	return ApprovalsModel{
-		database: database,
-		secret:   secret,
-		clock:    func() time.Time { return time.Now().UTC() },
+		database:   database,
+		secret:     secret,
+		clock:      func() time.Time { return time.Now().UTC() },
+		detailView: viewport.New(),
 	}
 }
 
@@ -72,6 +76,7 @@ func (m *ApprovalsModel) SetPending(pending []db.PendingRequest) {
 func (m *ApprovalsModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+	m.detailView.SetWidth(w - 4)
 }
 
 // StatusMsg returns and clears the transient status message.
@@ -83,6 +88,11 @@ func (m *ApprovalsModel) StatusMsg() string {
 
 // Update handles key messages.
 func (m ApprovalsModel) Update(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
+	// When the detail panel is open, delegate to the detail handler.
+	if m.showDetail {
+		return m.updateDetail(msg)
+	}
+
 	if msg, ok := msg.(tea.KeyMsg); ok {
 		k := msg.Key()
 
@@ -125,6 +135,13 @@ func (m ApprovalsModel) Update(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
 				return m, m.denyCmd()
 			}
 
+		// Toggle detail panel for history item.
+		case key.Matches(k, keys.Enter):
+			if m.focus == focusHistory && len(m.approvals) > 0 {
+				m.toggleDetail()
+				return m, nil
+			}
+
 		// Revoke approval from history.
 		case key.Matches(k, keys.Delete):
 			if m.focus == focusHistory && len(m.approvals) > 0 {
@@ -141,6 +158,11 @@ func (m ApprovalsModel) Update(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
 	}
 
 	// Handle action results.
+	m.handleActionResult(msg)
+	return m, nil
+}
+
+func (m *ApprovalsModel) handleActionResult(msg tea.Msg) {
 	switch msg := msg.(type) {
 	case approveResultMsg:
 		if msg.err != nil {
@@ -167,8 +189,6 @@ func (m ApprovalsModel) Update(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
 			m.statusMsg = fmt.Sprintf("Purged %d", msg.deleted)
 		}
 	}
-
-	return m, nil
 }
 
 func (m ApprovalsModel) handleConfirm(k tea.Key) (ApprovalsModel, tea.Cmd) {
@@ -208,6 +228,66 @@ func (m ApprovalsModel) handleScopeSelect(k tea.Key) (ApprovalsModel, tea.Cmd) {
 
 	m.scopeSelect = false
 	return m, m.approveCmd(scope)
+}
+
+// updateDetail handles messages when the detail panel is focused.
+func (m ApprovalsModel) updateDetail(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
+	if msg, ok := msg.(tea.KeyMsg); ok {
+		k := msg.Key()
+		switch {
+		case key.Matches(k, keys.Enter), key.Matches(k, keys.Escape):
+			m.showDetail = false
+			return m, nil
+		}
+	}
+	// Delegate scroll keys (j/k/PgUp/PgDn) to the viewport.
+	var cmd tea.Cmd
+	m.detailView, cmd = m.detailView.Update(msg)
+	return m, cmd
+}
+
+func (m *ApprovalsModel) toggleDetail() {
+	m.showDetail = !m.showDetail
+	if m.showDetail && m.historyIdx >= 0 && m.historyIdx < len(m.approvals) {
+		a := &m.approvals[m.historyIdx]
+		content := m.renderDetail(a)
+		m.detailView.SetContent(content)
+		detailH := m.height * 40 / 100
+		if detailH < 5 {
+			detailH = 5
+		}
+		m.detailView.SetHeight(detailH)
+		m.detailView.SetWidth(m.width - 4)
+		m.detailView.GotoTop()
+	}
+}
+
+func (m ApprovalsModel) renderDetail(a *db.Approval) string {
+	var b strings.Builder
+	now := m.clock()
+
+	b.WriteString("  Approval Detail\n")
+	b.WriteString("  " + strings.Repeat("─", m.width-6) + "\n")
+	fmt.Fprintf(&b, "  ID:           %s\n", sanitize(a.ID))
+	fmt.Fprintf(&b, "  Decision Key: %s\n", sanitize(a.DecisionKey))
+	fmt.Fprintf(&b, "  Decision:     %s\n", sanitize(a.Decision))
+	fmt.Fprintf(&b, "  Scope:        %s\n", sanitize(a.Scope))
+	fmt.Fprintf(&b, "  Session ID:   %s\n", sanitize(fallbackValue(a.SessionID)))
+	fmt.Fprintf(&b, "  Created At:   %s\n", formatApprovalTime(a.CreatedAt))
+
+	status, _ := approvalStatus(a, now)
+	fmt.Fprintf(&b, "  Status:       %s\n", status)
+
+	if a.ConsumedAt != nil {
+		fmt.Fprintf(&b, "  Consumed At:  %s\n", formatApprovalTime(*a.ConsumedAt))
+	}
+	if a.ExpiresAt != nil {
+		fmt.Fprintf(&b, "  Expires At:   %s\n", formatApprovalTime(*a.ExpiresAt))
+	}
+	fmt.Fprintf(&b, "  HMAC:         %s\n", sanitize(shorten(a.HMAC, 20)))
+
+	b.WriteString("\n  Press Enter or Esc to close\n")
+	return b.String()
 }
 
 // View renders the approvals view.
@@ -289,6 +369,11 @@ func (m ApprovalsModel) View() string {
 		}
 	}
 
+	// Detail panel (rendered via viewport for scrolling).
+	if m.showDetail {
+		b.WriteString(m.detailView.View())
+	}
+
 	// Confirmation dialog.
 	if m.confirming != "" {
 		b.WriteByte('\n')
@@ -343,6 +428,9 @@ func (m *ApprovalsModel) moveCursor(delta int) {
 
 func (m ApprovalsModel) historyHeight() int {
 	h := m.height - len(m.pending)*4 - 8 // pending section + headers + separator
+	if m.showDetail {
+		h = h * 60 / 100 // table gets 60%, detail gets 40%
+	}
 	if h < 3 {
 		h = 3
 	}

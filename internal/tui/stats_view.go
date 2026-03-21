@@ -211,6 +211,5 @@ func shortenToLastN(path string, n int) string {
 // visibleLen returns the display column width of a string, stripping ANSI
 // codes and counting runes (not bytes) so multi-byte chars like █ are 1 column.
 func visibleLen(s string) int {
-	stripped := reControlChars.ReplaceAllString(s, "")
-	return utf8.RuneCountInString(stripped)
+	return utf8.RuneCountInString(sanitize(s))
 }

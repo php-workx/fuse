@@ -112,6 +112,59 @@ func TestApprovalsView_MoveCursor(t *testing.T) {
 	}
 }
 
+func TestApprovalsView_DetailPanelToggle(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 40
+	m.focus = focusHistory
+	m.SetData([]db.Approval{
+		{
+			ID: "a1", DecisionKey: "key-1", Decision: "APPROVAL",
+			Scope: "session", SessionID: "sess-1",
+			CreatedAt: "2026-03-20T12:00:00Z",
+			HMAC:      "hmac-test-value",
+		},
+	})
+
+	// Press Enter — should open detail panel.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if !m.showDetail {
+		t.Fatal("expected showDetail=true after Enter")
+	}
+
+	// Detail panel should contain approval fields.
+	view := m.View()
+	if !containsStr(view, "Approval Detail") {
+		t.Error("detail panel should show 'Approval Detail' header")
+	}
+	if !containsStr(view, "key-1") {
+		t.Error("detail panel should show decision key")
+	}
+	if !containsStr(view, "session") {
+		t.Error("detail panel should show scope")
+	}
+
+	// Press Escape — should close detail panel.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.showDetail {
+		t.Fatal("expected showDetail=false after Escape")
+	}
+}
+
+func TestApprovalsView_DetailPanelEmptyHistory(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 40
+	m.focus = focusHistory
+	// Empty history.
+
+	// Press Enter with no history items — should not open detail.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.showDetail {
+		t.Error("should not open detail panel with empty history")
+	}
+}
+
 func makeKeyMsg(code rune) tea.KeyMsg {
 	return tea.KeyPressMsg{Code: code}
 }

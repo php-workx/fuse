@@ -1,10 +1,11 @@
 package tui
 
 import (
-	"regexp"
 	"strings"
 
 	"charm.land/lipgloss/v2"
+
+	sanitize_pkg "github.com/runger/fuse/internal/sanitize"
 )
 
 var (
@@ -42,27 +43,10 @@ func decisionStyle(decision string) lipgloss.Style {
 	}
 }
 
-// reControlChars matches ANSI/terminal escape sequences and non-printable control characters.
-// Covers: 7-bit CSI, BEL/ST-terminated OSC, other ESC sequences, and C0 controls.
-var reControlChars = regexp.MustCompile(
-	`\x1b\[[0-9;]*[a-zA-Z]` + // 7-bit CSI sequences
-		`|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)` + // OSC sequences (BEL or ST terminated)
-		`|\x1b[^[\]]` + // other ESC sequences
-		`|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]`, // C0 control chars
-)
-
-// sanitize strips ANSI/OSC escape sequences, C0 controls, and Unicode C1
-// control characters (U+0080-U+009F) from a string before display.
+// sanitize strips ANSI/OSC escape sequences, control characters, and Unicode
+// C1 codes from a string before display. Delegates to the shared sanitize package.
 func sanitize(s string) string {
-	s = reControlChars.ReplaceAllString(s, "")
-	clean := make([]rune, 0, len(s))
-	for _, r := range s {
-		if r >= 0x80 && r <= 0x9F {
-			continue
-		}
-		clean = append(clean, r)
-	}
-	return string(clean)
+	return sanitize_pkg.String(s)
 }
 
 // shorten truncates s to maxLen characters, adding "..." if truncated.
