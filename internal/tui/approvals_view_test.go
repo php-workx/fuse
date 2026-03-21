@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/runger/fuse/internal/db"
 )
 
@@ -107,6 +109,127 @@ func TestApprovalsView_MoveCursor(t *testing.T) {
 	m.moveCursor(-5) // clamp to 0
 	if m.pendingIdx != 0 {
 		t.Errorf("pendingIdx = %d, want 0", m.pendingIdx)
+	}
+}
+
+func makeKeyMsg(code rune) tea.KeyMsg {
+	return tea.KeyPressMsg{Code: code}
+}
+
+func TestApprovalsView_ApproveScopeSelection(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 40
+	m.focus = focusPending
+	m.SetPending([]db.PendingRequest{
+		{ID: "r1", DecisionKey: "k1", Command: "cmd1", Source: "hook", CreatedAt: "2026-03-20T12:00:00Z"},
+	})
+
+	// Press 'a' — should enter scope selection mode.
+	m, _ = m.Update(makeKeyMsg('a'))
+	if !m.scopeSelect {
+		t.Fatal("expected scopeSelect=true after pressing 'a'")
+	}
+
+	// Press Escape — should cancel scope selection.
+	m, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.scopeSelect {
+		t.Fatal("expected scopeSelect=false after Escape")
+	}
+
+	// Press 'a' again, then 'o' for once scope.
+	m, _ = m.Update(makeKeyMsg('a'))
+	if !m.scopeSelect {
+		t.Fatal("expected scopeSelect=true after second 'a'")
+	}
+	m, _ = m.Update(makeKeyMsg('o'))
+	if m.scopeSelect {
+		t.Fatal("expected scopeSelect=false after scope key")
+	}
+}
+
+func TestApprovalsView_DenyPendingRequest(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 40
+	m.focus = focusPending
+	m.SetPending([]db.PendingRequest{
+		{ID: "r1", DecisionKey: "k1", Command: "cmd1", Source: "hook", CreatedAt: "2026-03-20T12:00:00Z"},
+	})
+
+	// Press 'd' — should produce a command (denyCmd).
+	_, cmd := m.Update(makeKeyMsg('d'))
+	if cmd == nil {
+		t.Error("expected non-nil cmd after pressing 'd' on pending request")
+	}
+}
+
+func TestApprovalsView_RevokeConfirmation(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 40
+	m.focus = focusHistory
+	m.SetData([]db.Approval{
+		{ID: "a1", DecisionKey: "k1", Decision: "APPROVAL", Scope: "once", CreatedAt: "2026-03-20T12:00:00Z"},
+	})
+
+	// Press 'x' (revoke key) — should enter confirmation mode.
+	m, _ = m.Update(makeKeyMsg('x'))
+	if m.confirming != "delete" {
+		t.Errorf("expected confirming='delete', got %q", m.confirming)
+	}
+
+	// Press 'n' — should cancel.
+	m, _ = m.Update(makeKeyMsg('n'))
+	if m.confirming != "" {
+		t.Errorf("expected confirming='', got %q", m.confirming)
+	}
+}
+
+func TestApprovalsView_PurgeConfirmation(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 40
+
+	// Press 'X' — should enter purge confirmation.
+	m, _ = m.Update(makeKeyMsg('X'))
+	if m.confirming != "purge" {
+		t.Errorf("expected confirming='purge', got %q", m.confirming)
+	}
+
+	// Press 'y' — should clear confirming and execute purge.
+	m, cmd := m.Update(makeKeyMsg('y'))
+	if m.confirming != "" {
+		t.Errorf("expected confirming cleared after 'y', got %q", m.confirming)
+	}
+	// cmd may be nil since database is nil, but confirming should be cleared.
+	_ = cmd
+}
+
+func TestApprovalsView_ApproveEmptyListNoOp(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 40
+	m.focus = focusPending
+	// Empty pending list.
+
+	// Press 'a' — should NOT enter scope selection (no pending items).
+	m, _ = m.Update(makeKeyMsg('a'))
+	if m.scopeSelect {
+		t.Error("expected scopeSelect=false with empty pending list")
+	}
+}
+
+func TestApprovalsView_DenyEmptyListNoOp(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 40
+	m.focus = focusPending
+
+	// Press 'd' with empty list — should return nil cmd.
+	_, cmd := m.Update(makeKeyMsg('d'))
+	if cmd != nil {
+		t.Error("expected nil cmd when denying with empty pending list")
 	}
 }
 
