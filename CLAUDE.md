@@ -6,7 +6,7 @@ Fuse is a local safety runtime for AI coding agents (Claude Code, Codex CLI). It
 
 ## Tech Stack
 
-- **Language:** Go 1.24.12
+- **Language:** Go 1.25
 - **Build:** `just` (not Make) — see `justfile` for all targets
 - **Platforms:** macOS (darwin/arm64, amd64), Linux (linux/amd64, arm64). No Windows — uses Unix TTY.
 - **Dependencies:** Minimal. Pure-Go SQLite (`modernc.org/sqlite`), shell parser (`mvdan.cc/sh`), Cobra CLI, YAML. No RPC/cloud SDKs.

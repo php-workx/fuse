@@ -291,7 +291,12 @@ func requestMCPApproval(name string, arguments map[string]interface{}) (bool, er
 		},
 	}
 
-	decision, err := mgr.RequestApproval(context.Background(), result.DecisionKey, extractCommandFromResult(result), result.Reason, "", false, false)
+	decision, err := mgr.RequestApproval(context.Background(), approve.ApprovalRequest{
+		DecisionKey: result.DecisionKey,
+		Command:     extractCommandFromResult(result),
+		Reason:      result.Reason,
+		Source:      "mcp-proxy",
+	})
 	if err != nil {
 		return false, err
 	}

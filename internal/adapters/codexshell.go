@@ -70,6 +70,8 @@ func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 	// any stragglers (kills child processes via exec.CommandContext).
 	waitGroupWithTimeout(&wg, 5*time.Second)
 	cancel()
+	// Brief extra drain after cancel to let goroutines finish writing responses.
+	waitGroupWithTimeout(&wg, 1*time.Second)
 	return nil
 }
 
@@ -307,7 +309,14 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 			if mgrErr != nil {
 				return "", "", 0, mgrErr
 			}
-			decision, promptErr := mgr.RequestApproval(ctx, result.DecisionKey, command, result.Reason, sessionID, false, dryRun)
+			decision, promptErr := mgr.RequestApproval(ctx, approve.ApprovalRequest{
+				DecisionKey:    result.DecisionKey,
+				Command:        command,
+				Reason:         result.Reason,
+				SessionID:      sessionID,
+				Source:         "codex-shell",
+				NonInteractive: dryRun,
+			})
 			if promptErr != nil {
 				return "", "", 0, promptErr
 			}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -17,8 +18,26 @@ import (
 	"github.com/runger/fuse/internal/policy"
 )
 
-// hookTimeout is the internal timeout before Claude's 30s kill.
-const hookTimeout = 25 * time.Second
+// hookTimeout is fuse's internal safety timeout.
+// Claude Code's default hook timeout is 600s; users can configure per-hook
+// via the "timeout" field in settings. We default to 300s — long enough for a
+// human to notice and approve via fuse monitor, but well under Claude Code's
+// limit. Override with FUSE_HOOK_TIMEOUT env var or test helpers.
+var hookTimeout = 300 * time.Second
+
+// pendingApprovalMsg tells the agent the approval is still pending.
+// Used when the hook times out before the user approves via the TUI.
+const pendingApprovalMsg = "fuse:PENDING_APPROVAL WAIT. This command requires user approval " +
+	"via fuse monitor. The approval request has been queued. " +
+	"Wait 30-60 seconds, then retry the same command."
+
+func init() {
+	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			hookTimeout = d
+		}
+	}
+}
 
 // HookRequest is the JSON input from Claude Code's PreToolUse hook.
 type HookRequest struct {
@@ -38,7 +57,14 @@ type BashToolInput struct {
 // Writes directive messages to stderr.
 // NEVER writes to stdout (stdout is for tool output in hook mode).
 func RunHook(stdin io.Reader, stderr io.Writer) int {
-	ctx, cancel := context.WithTimeout(context.Background(), hookTimeout)
+	// Re-check env var at call time so t.Setenv works in integration tests.
+	timeout := hookTimeout
+	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			timeout = d
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	resultCh := make(chan int, 1)
@@ -50,7 +76,7 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 	case code := <-resultCh:
 		return code
 	case <-ctx.Done():
-		fmt.Fprintln(stderr, "fuse:TIMEOUT_WAITING_FOR_USER STOP. The user did not approve this action in time. Do not retry this exact command.")
+		fmt.Fprintln(stderr, pendingApprovalMsg)
 		return 2
 	}
 }
@@ -279,9 +305,36 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		return 2
 	}
 
-	decision, err := mgr.RequestApproval(context.Background(), result.DecisionKey, extractCommandFromResult(result), result.Reason, req.SessionID, true, dryRun)
+	// Re-read the env var so that t.Setenv works in integration tests
+	// and so we use the same dynamically-resolved timeout as RunHook.
+	timeout := hookTimeout
+	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
+		if d, parseErr := time.ParseDuration(v); parseErr == nil {
+			timeout = d
+		}
+	}
+	// Use the hook timeout (minus 2s margin) as the approval context.
+	// This ensures the DB poll respects the hook's timeout budget and doesn't
+	// wait indefinitely with context.Background().
+	approvalCtx, approvalCancel := context.WithTimeout(context.Background(), timeout-2*time.Second)
+	defer approvalCancel()
+	decision, err := mgr.RequestApproval(approvalCtx, approve.ApprovalRequest{
+		DecisionKey:    result.DecisionKey,
+		Command:        extractCommandFromResult(result),
+		Reason:         result.Reason,
+		SessionID:      req.SessionID,
+		Source:         "hook",
+		HookMode:       true,
+		NonInteractive: dryRun,
+	})
 	if err != nil {
 		slog.Error("approval error", "error", err)
+		// If the error is from a non-interactive prompt timeout, tell the agent
+		// to retry — the user may approve via fuse monitor.
+		if strings.Contains(err.Error(), "NON_INTERACTIVE_MODE") || strings.Contains(err.Error(), "TIMEOUT_WAITING") {
+			fmt.Fprintln(stderr, pendingApprovalMsg)
+			return 2
+		}
 		if msg := extractFuseDirective(err); msg != "" {
 			fmt.Fprintln(stderr, msg)
 			return 2
