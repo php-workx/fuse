@@ -50,6 +50,8 @@ func NewModel(database *db.DB, mode string, secret []byte) Model {
 
 // Init returns the initial command (first tick).
 func (m Model) Init() tea.Cmd {
+	// Clean up stale pending requests (>30 min) from crashed hooks.
+	_, _ = m.db.CleanupStalePendingRequests(30 * time.Minute)
 	return tickCmd(m.activeView)
 }
 

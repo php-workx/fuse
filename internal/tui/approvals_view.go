@@ -382,6 +382,9 @@ func (m ApprovalsModel) approveCmd(scope string) tea.Cmd {
 			return approveResultMsg{err: err}
 		}
 		err = mgr.CreateApproval(req.DecisionKey, "APPROVAL", scope, req.SessionID)
+		if err == nil {
+			_ = database.DeletePendingRequest(req.ID) // clean up after resolution
+		}
 		return approveResultMsg{scope: scope, err: err}
 	}
 }
@@ -400,6 +403,9 @@ func (m ApprovalsModel) denyCmd() tea.Cmd {
 		}
 		// Deny with "once" scope — blocks THIS request, not future ones.
 		err = mgr.CreateApproval(req.DecisionKey, "BLOCKED", "once", req.SessionID)
+		if err == nil {
+			_ = database.DeletePendingRequest(req.ID) // clean up after resolution
+		}
 		return denyResultMsg{err: err}
 	}
 }

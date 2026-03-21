@@ -79,7 +79,11 @@ func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, rea
 		Source:      source,
 		SessionID:   sessionID,
 	})
-	defer func() { _ = m.db.DeletePendingRequest(pendingID) }()
+	// Don't delete the pending request on timeout — let it persist so the TUI
+	// can show it even after the hook exits. The user may approve minutes later;
+	// the agent's retry will find the cached approval via ConsumeApproval.
+	// Only delete on successful resolution (approved or denied).
+	deletePending := func() { _ = m.db.DeletePendingRequest(pendingID) }
 
 	// Step 3: Run TTY prompt and DB poll in parallel.
 	subCtx, cancel := context.WithCancel(ctx)
@@ -146,15 +150,19 @@ func (m *Manager) RequestApproval(ctx context.Context, decisionKey, command, rea
 		case r2 := <-ch:
 			cancel()
 			if r2.err == nil && r2.decision != "" {
+				deletePending() // resolved via TUI poll
 				return r2.decision, nil
 			}
 		case <-ctx.Done():
 			cancel()
 		}
+		// Timeout — DON'T delete pending request. It persists so the TUI
+		// can still show it and the user can pre-approve for the next retry.
 		return core.DecisionBlocked, fmt.Errorf("prompt user: %w", r.err)
 	}
 
-	cancel() // stop the poll goroutine
+	cancel()        // stop the poll goroutine
+	deletePending() // resolved via TTY prompt
 
 	// If approved via TTY prompt, store the approval.
 	if !r.fromPoll && r.decision == core.DecisionApproval {
