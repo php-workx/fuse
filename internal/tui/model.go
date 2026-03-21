@@ -75,6 +75,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		// Discard stale ticks from a previous view and reschedule.
+		if msg.view != m.activeView {
+			return m, tickCmd(m.activeView)
+		}
 		if m.fetching {
 			return m, nil // skip — previous fetch still in-flight
 		}
@@ -147,23 +151,27 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case key.Matches(k, keys.Tab):
 			m.activeView = (m.activeView + 1) % 3
 			m.fetchGen++
+			m.fetching = true
 			return m, m.fetchData()
 		case key.Matches(k, keys.ViewEvents):
 			if m.activeView != viewEvents {
 				m.activeView = viewEvents
 				m.fetchGen++
+				m.fetching = true
 				return m, m.fetchData()
 			}
 		case key.Matches(k, keys.ViewStats):
 			if m.activeView != viewStats {
 				m.activeView = viewStats
 				m.fetchGen++
+				m.fetching = true
 				return m, m.fetchData()
 			}
 		case key.Matches(k, keys.ViewAppr):
 			if m.activeView != viewApprovals {
 				m.activeView = viewApprovals
 				m.fetchGen++
+				m.fetching = true
 				return m, m.fetchData()
 			}
 		default:

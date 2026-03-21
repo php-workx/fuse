@@ -49,15 +49,17 @@ func sanitize(s string) string {
 	return sanitize_pkg.String(s)
 }
 
-// shorten truncates s to maxLen characters, adding "..." if truncated.
+// shorten truncates s to maxLen runes, adding "..." if truncated.
+// Uses rune-aware length and slicing so multi-byte characters are never split.
 func shorten(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		return string(runes[:maxLen])
 	}
-	return s[:maxLen-3] + "..."
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // fallbackValue returns "-" for empty strings, otherwise the string itself.

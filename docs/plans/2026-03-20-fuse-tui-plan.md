@@ -6,7 +6,7 @@ The fuse CLI currently shows events as static tabwriter output (`fuse events`). 
 
 ## Dependencies
 
-```
+```text
 github.com/charmbracelet/bubbletea/v2  v2.0.2
 github.com/charmbracelet/lipgloss/v2   v2.0.2
 github.com/charmbracelet/bubbles/v2    v2.0.0
@@ -31,7 +31,7 @@ All stable releases. No existing TUI libraries in go.mod.
 
 ## Architecture
 
-```
+```text
 ┌─ fuse monitor ──────────────────────────────────────────────────┐
 │  [fuse monitor]  Mode: DRYRUN  │ ❶Events  ❷Stats  ❸Approvals  │
 ├─────────────────────────────────────────────────────────────────┤
@@ -105,10 +105,10 @@ Plus: header bar (bold, dark bg), footer (faint), active tab (bold underline), c
 | `Esc` | Close detail / clear filter |
 | `/` | Enter search mode (free-text filter on command field) |
 | `d` | Cycle decision filter: ALL → SAFE → CAUTION → APPROVAL → BLOCKED |
-
-**Search mode:** When `searching` is true (after pressing `/`), all key messages route exclusively to the text input model. Global single-key bindings (`q`, `d`, `j`, `k`, `g`, `G`, `1`/`2`/`3`) are suppressed. Only `Enter` (apply filter and exit search) and `Esc` (clear and exit search) are handled outside the text input. `Ctrl+C` remains active for quit.
 | `PgUp`/`PgDn` | Page scroll |
 | `g`/`G` | Jump to top/bottom |
+
+**Search mode:** When `searching` is true (after pressing `/`), all key messages route exclusively to the text input model. Global single-key bindings (`q`, `d`, `j`, `k`, `g`, `G`, `1`/`2`/`3`) are suppressed. Only `Enter` (apply filter and exit search) and `Esc` (clear and exit search) are handled outside the text input. `Ctrl+C` remains active for quit.
 
 **Interactive behavior acceptance criteria:**
 
@@ -236,7 +236,7 @@ type EventsModel struct {
 
 **Detail panel** (shown when Enter pressed on a row):
 
-```
+```text
 ╭─ Event Detail ──────────────────────────────────────────╮
 │  ID:          1234                                       │
 │  Time:        2026-03-20T14:32:05.123Z                   │
@@ -261,7 +261,7 @@ Reuses `db.SummarizeEvents()` directly (`events.go:118`). **Known gap:** `Summar
 - Horizontal bars using `█` characters, proportional to count
 - Decision labels color-coded
 
-```
+```text
   Total Events: 1,234
 
   By Decision                    By Agent

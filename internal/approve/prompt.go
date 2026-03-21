@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -14,9 +15,13 @@ import (
 	"github.com/runger/fuse/internal/sanitize"
 )
 
-// sanitizePrompt delegates to the shared sanitize package.
+// sanitizePrompt delegates to the shared sanitize package and additionally
+// replaces \n and \r with spaces to prevent prompt layout injection.
 func sanitizePrompt(s string) string {
-	return sanitize.String(s)
+	s = sanitize.String(s)
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return s
 }
 
 var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")

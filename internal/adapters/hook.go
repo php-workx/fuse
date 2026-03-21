@@ -305,10 +305,18 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 		return 2
 	}
 
-	// Use the hook timeout (hookTimeout - 2s margin) as the approval context.
+	// Re-read the env var so that t.Setenv works in integration tests
+	// and so we use the same dynamically-resolved timeout as RunHook.
+	timeout := hookTimeout
+	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
+		if d, parseErr := time.ParseDuration(v); parseErr == nil {
+			timeout = d
+		}
+	}
+	// Use the hook timeout (minus 2s margin) as the approval context.
 	// This ensures the DB poll respects the hook's timeout budget and doesn't
 	// wait indefinitely with context.Background().
-	approvalCtx, approvalCancel := context.WithTimeout(context.Background(), hookTimeout-2*time.Second)
+	approvalCtx, approvalCancel := context.WithTimeout(context.Background(), timeout-2*time.Second)
 	defer approvalCancel()
 	decision, err := mgr.RequestApproval(approvalCtx, approve.ApprovalRequest{
 		DecisionKey:    result.DecisionKey,

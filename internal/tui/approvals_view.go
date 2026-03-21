@@ -76,7 +76,7 @@ func (m *ApprovalsModel) SetPending(pending []db.PendingRequest) {
 func (m *ApprovalsModel) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-	m.detailView.SetWidth(w - 4)
+	m.detailView.SetWidth(max(w-4, 0))
 }
 
 // StatusMsg returns and clears the transient status message.
@@ -262,7 +262,7 @@ func (m *ApprovalsModel) toggleDetail() {
 			detailH = 5
 		}
 		m.detailView.SetHeight(detailH)
-		m.detailView.SetWidth(m.width - 4)
+		m.detailView.SetWidth(max(m.width-4, 0))
 		m.detailView.GotoTop()
 	}
 }
@@ -272,7 +272,7 @@ func (m ApprovalsModel) renderDetail(a *db.Approval) string {
 	now := m.clock()
 
 	b.WriteString("  Approval Detail\n")
-	b.WriteString("  " + strings.Repeat("─", m.width-6) + "\n")
+	b.WriteString("  " + strings.Repeat("─", max(m.width-6, 0)) + "\n")
 	fmt.Fprintf(&b, "  ID:           %s\n", sanitize(a.ID))
 	fmt.Fprintf(&b, "  Decision Key: %s\n", sanitize(a.DecisionKey))
 	fmt.Fprintf(&b, "  Decision:     %s\n", sanitize(a.Decision))
@@ -311,7 +311,7 @@ func (m ApprovalsModel) View() string {
 			if m.focus == focusPending && i == m.pendingIdx {
 				prefix = styleCursor.Render("▶ ")
 			}
-			b.WriteString(prefix + sanitize(shorten(req.Command, m.width-4)) + "\n")
+			b.WriteString(prefix + sanitize(shorten(req.Command, max(m.width-4, 0))) + "\n")
 			fmt.Fprintf(&b, "    Source: %s  Session: %s\n", sanitize(req.Source), sanitize(shorten(req.SessionID, 12)))
 			if req.Reason != "" {
 				b.WriteString("    Reason: " + sanitize(req.Reason) + "\n")
@@ -331,7 +331,7 @@ func (m ApprovalsModel) View() string {
 	}
 
 	// Separator.
-	b.WriteString("  " + strings.Repeat("─", m.width-4) + "\n")
+	b.WriteString("  " + strings.Repeat("─", max(m.width-4, 0)) + "\n")
 
 	// History section.
 	fmt.Fprintf(&b, "  Approval History (%d)\n\n", len(m.approvals))

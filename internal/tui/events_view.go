@@ -90,9 +90,13 @@ func (m EventsModel) Update(msg tea.Msg) (EventsModel, tea.Cmd) {
 		case key.Matches(k, keys.Home):
 			m.cursor = 0
 			m.offset = 0
+			if len(m.filtered) > 0 {
+				m.selectedID = m.filtered[0].ID
+			}
 		case key.Matches(k, keys.End):
 			if len(m.filtered) > 0 {
 				m.cursor = len(m.filtered) - 1
+				m.selectedID = m.filtered[m.cursor].ID
 			}
 		case key.Matches(k, keys.Enter):
 			m.toggleDetail()
@@ -185,7 +189,7 @@ func (m EventsModel) View() string {
 	for i := m.offset; i < end; i++ {
 		e := &m.filtered[i]
 		ts := formatTime(e.Timestamp)
-		ws := shortenPath(e.WorkspaceRoot)
+		ws := sanitize(shortenPath(e.WorkspaceRoot))
 		decision := sanitize(fallbackValue(e.Decision))
 		agent := sanitize(fallbackValue(e.Agent))
 		source := sanitize(fallbackValue(e.Source))
@@ -241,14 +245,14 @@ func (m EventsModel) renderDetail(e *db.EventRecord) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "  ID:          %d\n", e.ID)
 	fmt.Fprintf(&b, "  Time:        %s\n", e.Timestamp)
-	fmt.Fprintf(&b, "  Decision:    %s\n", decisionStyle(e.Decision).Render(e.Decision))
+	fmt.Fprintf(&b, "  Decision:    %s\n", decisionStyle(e.Decision).Render(sanitize(fallbackValue(e.Decision))))
 	writeWrapped(&b, "  Command:     ", sanitize(e.Command), valueWidth)
-	fmt.Fprintf(&b, "  Rule ID:     %s\n", fallbackValue(e.RuleID))
+	fmt.Fprintf(&b, "  Rule ID:     %s\n", sanitize(fallbackValue(e.RuleID)))
 	writeWrapped(&b, "  Reason:      ", sanitize(fallbackValue(e.Reason)), valueWidth)
-	fmt.Fprintf(&b, "  Agent:       %s\n", fallbackValue(e.Agent))
-	fmt.Fprintf(&b, "  Source:      %s\n", fallbackValue(e.Source))
-	fmt.Fprintf(&b, "  Session:     %s\n", fallbackValue(e.SessionID))
-	fmt.Fprintf(&b, "  Workspace:   %s\n", fallbackValue(e.WorkspaceRoot))
+	fmt.Fprintf(&b, "  Agent:       %s\n", sanitize(fallbackValue(e.Agent)))
+	fmt.Fprintf(&b, "  Source:      %s\n", sanitize(fallbackValue(e.Source)))
+	fmt.Fprintf(&b, "  Session:     %s\n", sanitize(fallbackValue(e.SessionID)))
+	fmt.Fprintf(&b, "  Workspace:   %s\n", sanitize(fallbackValue(e.WorkspaceRoot)))
 	if e.DurationMs > 0 {
 		fmt.Fprintf(&b, "  Duration:    %dms\n", e.DurationMs)
 	} else {
@@ -264,16 +268,18 @@ func (m EventsModel) renderDetail(e *db.EventRecord) string {
 
 // writeWrapped writes a labeled value, wrapping long values to fit within maxWidth.
 // Continuation lines are indented to align with the value start.
+// Uses rune-aware slicing so multi-byte characters are never split mid-rune.
 func writeWrapped(b *strings.Builder, label, value string, maxWidth int) {
-	if len(value) <= maxWidth {
+	runes := []rune(value)
+	if len(runes) <= maxWidth {
 		b.WriteString(label + value + "\n")
 		return
 	}
 
 	indent := strings.Repeat(" ", len(label))
 	first := true
-	for value != "" {
-		chunk := value
+	for len(runes) > 0 {
+		chunk := runes
 		if len(chunk) > maxWidth {
 			// Try to break at a space.
 			cut := maxWidth
@@ -286,21 +292,21 @@ func writeWrapped(b *strings.Builder, label, value string, maxWidth int) {
 			if cut <= maxWidth/2 {
 				cut = maxWidth // no good break point — hard wrap
 			}
-			chunk = value[:cut]
-			value = value[cut:]
+			chunk = runes[:cut]
+			runes = runes[cut:]
 			// Skip leading space on next line.
-			if value != "" && value[0] == ' ' {
-				value = value[1:]
+			if len(runes) > 0 && runes[0] == ' ' {
+				runes = runes[1:]
 			}
 		} else {
-			value = ""
+			runes = nil
 		}
 
 		if first {
-			b.WriteString(label + chunk + "\n")
+			b.WriteString(label + string(chunk) + "\n")
 			first = false
 		} else {
-			b.WriteString(indent + chunk + "\n")
+			b.WriteString(indent + string(chunk) + "\n")
 		}
 	}
 }
@@ -347,6 +353,7 @@ func (m *EventsModel) cycleDecisionFilter() {
 	m.filterDecision = decisionCycle[(current+1)%len(decisionCycle)]
 	m.cursor = 0
 	m.offset = 0
+	m.selectedID = 0 // let anchorCursor pick a new anchor after filter change
 	m.applyFilters()
 }
 
