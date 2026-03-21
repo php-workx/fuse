@@ -57,7 +57,14 @@ type BashToolInput struct {
 // Writes directive messages to stderr.
 // NEVER writes to stdout (stdout is for tool output in hook mode).
 func RunHook(stdin io.Reader, stderr io.Writer) int {
-	ctx, cancel := context.WithTimeout(context.Background(), hookTimeout)
+	// Re-check env var at call time so t.Setenv works in integration tests.
+	timeout := hookTimeout
+	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			timeout = d
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	resultCh := make(chan int, 1)
