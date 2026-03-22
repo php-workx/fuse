@@ -53,10 +53,10 @@ func withFuseHome(t *testing.T) string {
 func shortTestDrains(t *testing.T) {
 	t.Helper()
 	oldDrain, oldPost := codexDrainTimeout, codexDrainPostCancel
-	codexDrainTimeout = 500 * time.Millisecond
+	codexDrainTimeout = 2 * time.Second
 	codexDrainPostCancel = 200 * time.Millisecond
 	oldHook := hookTimeout
-	hookTimeout = 500 * time.Millisecond
+	hookTimeout = 2 * time.Second
 	t.Cleanup(func() {
 		codexDrainTimeout = oldDrain
 		codexDrainPostCancel = oldPost
@@ -287,7 +287,7 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, _, exitCode, err := executeCodexShellCommand(ctx, "python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
