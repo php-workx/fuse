@@ -13,10 +13,11 @@ import (
 
 // StatsModel renders an aggregate summary dashboard.
 type StatsModel struct {
-	summary db.EventSummary
-	hasData bool
-	width   int
-	height  int
+	summary      db.EventSummary
+	judgeSummary db.JudgeSummary
+	hasData      bool
+	width        int
+	height       int
 }
 
 // NewStatsModel creates an initialized StatsModel.
@@ -28,6 +29,11 @@ func NewStatsModel() StatsModel {
 func (m *StatsModel) SetData(summary db.EventSummary) {
 	m.summary = summary
 	m.hasData = summary.Total > 0
+}
+
+// SetJudgeSummary updates the judge accuracy data.
+func (m *StatsModel) SetJudgeSummary(js db.JudgeSummary) {
+	m.judgeSummary = js
 }
 
 // SetSize updates dimensions.
@@ -78,6 +84,24 @@ func (m StatsModel) View() string {
 	left = renderSection("By Source", m.summary.BySource, colWidth, maxRows, labelWidthShort, false)
 	right = renderSection("By Workspace", shortWorkspaces, colWidth, wsMaxRows, labelWidthWide, false)
 	b.WriteString(sideBySide(left, right, colWidth))
+
+	// Judge Accuracy section (only shown when there are evaluated events).
+	if m.judgeSummary.Evaluated > 0 {
+		js := m.judgeSummary
+		b.WriteString("\n")
+		b.WriteString("  " + styleColHeader.Render("Judge Accuracy (last 7 days)") + "\n")
+
+		pct := 0
+		if js.Evaluated > 0 {
+			pct = js.Agreed * 100 / js.Evaluated
+		}
+		fmt.Fprintf(&b, "    Evaluated:       %d\n", js.Evaluated)
+		fmt.Fprintf(&b, "    Agreed:          %d (%d%%)\n", js.Agreed, pct)
+		fmt.Fprintf(&b, "    Would upgrade:   %d\n", js.WouldUpgrade)
+		fmt.Fprintf(&b, "    Would downgrade: %d\n", js.WouldDowngrade)
+		fmt.Fprintf(&b, "    Errors:          %d\n", js.Errors)
+		fmt.Fprintf(&b, "    Avg latency:     %dms\n", int(js.AvgLatencyMs))
+	}
 
 	return b.String()
 }

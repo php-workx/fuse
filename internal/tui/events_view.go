@@ -173,8 +173,8 @@ func (m EventsModel) View() string {
 	}
 
 	// Column headers.
-	header := fmt.Sprintf("  %-8s  %-8s  %-6s  %-12s  %-20s  %s",
-		"TIME", "DECISION", "AGENT", "SOURCE", "WORKSPACE", "COMMAND")
+	header := fmt.Sprintf("  %-8s  %-8s  %-11s  %-6s  %-12s  %-20s  %s",
+		"TIME", "DECISION", "JUDGE", "AGENT", "SOURCE", "WORKSPACE", "COMMAND")
 	b.WriteString(styleColHeader.Render(shorten(header, m.width)) + "\n")
 
 	// Compute visible rows.
@@ -193,11 +193,12 @@ func (m EventsModel) View() string {
 		decision := sanitize(fallbackValue(e.Decision))
 		agent := sanitize(fallbackValue(e.Agent))
 		source := sanitize(fallbackValue(e.Source))
-		command := sanitize(shorten(e.Command, m.width-62))
+		command := sanitize(shorten(e.Command, m.width-75))
 
 		decCol := decisionStyle(e.Decision).Render(fmt.Sprintf("%-8s", decision))
-		row := fmt.Sprintf("  %-8s  %s  %-6s  %-12s  %-20s  %s",
-			ts, decCol, agent, source, shorten(ws, 20), command)
+		judgeCol := formatJudgeColumn(e)
+		row := fmt.Sprintf("  %-8s  %s  %s  %-6s  %-12s  %-20s  %s",
+			ts, decCol, judgeCol, agent, source, shorten(ws, 20), command)
 
 		if i == m.cursor {
 			b.WriteString(styleCursor.Render(shorten(row, m.width)) + "\n")
@@ -263,6 +264,30 @@ func (m EventsModel) renderDetail(e *db.EventRecord) string {
 	} else {
 		b.WriteString("  Exit Code:   -\n")
 	}
+
+	// Judge information.
+	if e.JudgeError != "" {
+		fmt.Fprintf(&b, "  Judge:       ERROR -- %s\n", sanitize(e.JudgeError))
+	} else if e.JudgeDecision != "" {
+		judgeLine := fmt.Sprintf("%s (%d%%) via %s",
+			e.JudgeDecision,
+			int(e.JudgeConfidence*100),
+			sanitize(fallbackValue(e.JudgeProvider)))
+		if e.JudgeReasoning != "" {
+			judgeLine += fmt.Sprintf(" -- %q", sanitize(shorten(e.JudgeReasoning, valueWidth-40)))
+		}
+		if e.JudgeApplied {
+			judgeLine += " [APPLIED]"
+		}
+		writeWrapped(&b, "  Judge:       ", judgeLine, valueWidth)
+
+		mode := "shadow (not applied)"
+		if e.JudgeApplied {
+			mode = "applied"
+		}
+		fmt.Fprintf(&b, "  Judge Mode:  %s\n", mode)
+	}
+
 	return styleDetail.Render(b.String())
 }
 
@@ -308,6 +333,43 @@ func writeWrapped(b *strings.Builder, label, value string, maxWidth int) {
 		} else {
 			b.WriteString(indent + string(chunk) + "\n")
 		}
+	}
+}
+
+// formatJudgeColumn returns an 11-char wide judge indicator for the table row.
+// Format: "=SAFE  94%" (agree) or "→APPR  88%" (disagree). Empty if no judge.
+func formatJudgeColumn(e *db.EventRecord) string {
+	if e.JudgeDecision == "" {
+		return fmt.Sprintf("%-11s", "")
+	}
+
+	prefix := "="
+	if !strings.EqualFold(e.JudgeDecision, e.Decision) {
+		prefix = "\xe2\x86\x92" // → (UTF-8 encoded)
+	}
+
+	abbrev := abbreviateDecision(e.JudgeDecision)
+	conf := int(e.JudgeConfidence * 100)
+	text := fmt.Sprintf("%s%-4s %3d%%", prefix, abbrev, conf)
+
+	if e.JudgeApplied {
+		return decisionStyle(e.JudgeDecision).Render(fmt.Sprintf("%-11s", text))
+	}
+	return styleDim.Render(fmt.Sprintf("%-11s", text))
+}
+
+// abbreviateDecision shortens "APPROVAL" to "APPR" and leaves others as-is (max 4 chars).
+func abbreviateDecision(d string) string {
+	upper := strings.ToUpper(d)
+	switch upper {
+	case "APPROVAL":
+		return "APPR"
+	case "CAUTION":
+		return "CAUT"
+	case "BLOCKED":
+		return "BLKD"
+	default:
+		return upper
 	}
 }
 
