@@ -211,7 +211,7 @@ func applyV6(db *sql.DB) error {
 	}
 
 	for _, stmt := range stmts {
-		if _, err := db.Exec(stmt); err != nil {
+		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumnError(err) {
 			return err
 		}
 	}

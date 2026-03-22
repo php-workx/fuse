@@ -196,72 +196,81 @@ func (d *DB) ListEvents(filter *EventFilter) ([]EventRecord, error) {
 
 	var events []EventRecord
 	for rows.Next() {
-		var event EventRecord
-		var sessionID, command, decision, ruleID, reason, metadata sql.NullString
-		var source, agent, cwd, workspaceRoot, approvalID, userResponse sql.NullString
-		var fileInspected sql.NullInt64
-		var executionExitCode sql.NullInt64
-		var judgeDecision, judgeReasoning, judgeProvider, judgeError sql.NullString
-		var judgeConfidence sql.NullFloat64
-		var judgeApplied, judgeLatencyMs sql.NullInt64
-		if err := rows.Scan(
-			&event.ID,
-			&event.Timestamp,
-			&sessionID,
-			&command,
-			&decision,
-			&ruleID,
-			&reason,
-			&event.DurationMs,
-			&metadata,
-			&source,
-			&agent,
-			&cwd,
-			&workspaceRoot,
-			&fileInspected,
-			&approvalID,
-			&userResponse,
-			&executionExitCode,
-			&judgeDecision,
-			&judgeConfidence,
-			&judgeReasoning,
-			&judgeApplied,
-			&judgeProvider,
-			&judgeLatencyMs,
-			&judgeError,
-		); err != nil {
-			return nil, fmt.Errorf("scan event: %w", err)
+		event, err := scanEventRow(rows)
+		if err != nil {
+			return nil, err
 		}
-		event.SessionID = sessionID.String
-		event.Command = command.String
-		event.Decision = decision.String
-		event.RuleID = ruleID.String
-		event.Reason = reason.String
-		event.Metadata = metadata.String
-		event.Source = source.String
-		event.Agent = agent.String
-		event.Cwd = cwd.String
-		event.WorkspaceRoot = workspaceRoot.String
-		event.ApprovalID = approvalID.String
-		event.UserResponse = userResponse.String
-		event.FileInspected = fileInspected.Valid && fileInspected.Int64 != 0
-		if executionExitCode.Valid {
-			code := executionExitCode.Int64
-			event.ExecutionExitCode = &code
-		}
-		event.JudgeDecision = judgeDecision.String
-		event.JudgeConfidence = judgeConfidence.Float64
-		event.JudgeReasoning = judgeReasoning.String
-		event.JudgeApplied = judgeApplied.Valid && judgeApplied.Int64 != 0
-		event.JudgeProvider = judgeProvider.String
-		event.JudgeLatencyMs = judgeLatencyMs.Int64
-		event.JudgeError = judgeError.String
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate events: %w", err)
 	}
 	return events, nil
+}
+
+// scanEventRow scans a single row from an events query into an EventRecord.
+func scanEventRow(rows *sql.Rows) (EventRecord, error) {
+	var event EventRecord
+	var sessionID, command, decision, ruleID, reason, metadata sql.NullString
+	var source, agent, cwd, workspaceRoot, approvalID, userResponse sql.NullString
+	var fileInspected sql.NullInt64
+	var executionExitCode sql.NullInt64
+	var judgeDecision, judgeReasoning, judgeProvider, judgeError sql.NullString
+	var judgeConfidence sql.NullFloat64
+	var judgeApplied, judgeLatencyMs sql.NullInt64
+	if err := rows.Scan(
+		&event.ID,
+		&event.Timestamp,
+		&sessionID,
+		&command,
+		&decision,
+		&ruleID,
+		&reason,
+		&event.DurationMs,
+		&metadata,
+		&source,
+		&agent,
+		&cwd,
+		&workspaceRoot,
+		&fileInspected,
+		&approvalID,
+		&userResponse,
+		&executionExitCode,
+		&judgeDecision,
+		&judgeConfidence,
+		&judgeReasoning,
+		&judgeApplied,
+		&judgeProvider,
+		&judgeLatencyMs,
+		&judgeError,
+	); err != nil {
+		return EventRecord{}, fmt.Errorf("scan event: %w", err)
+	}
+	event.SessionID = sessionID.String
+	event.Command = command.String
+	event.Decision = decision.String
+	event.RuleID = ruleID.String
+	event.Reason = reason.String
+	event.Metadata = metadata.String
+	event.Source = source.String
+	event.Agent = agent.String
+	event.Cwd = cwd.String
+	event.WorkspaceRoot = workspaceRoot.String
+	event.ApprovalID = approvalID.String
+	event.UserResponse = userResponse.String
+	event.FileInspected = fileInspected.Valid && fileInspected.Int64 != 0
+	if executionExitCode.Valid {
+		code := executionExitCode.Int64
+		event.ExecutionExitCode = &code
+	}
+	event.JudgeDecision = judgeDecision.String
+	event.JudgeConfidence = judgeConfidence.Float64
+	event.JudgeReasoning = judgeReasoning.String
+	event.JudgeApplied = judgeApplied.Valid && judgeApplied.Int64 != 0
+	event.JudgeProvider = judgeProvider.String
+	event.JudgeLatencyMs = judgeLatencyMs.Int64
+	event.JudgeError = judgeError.String
+	return event, nil
 }
 
 // SummarizeEvents aggregates counts across the full local event table

@@ -5,10 +5,10 @@ import "fmt"
 // JudgeSummary holds aggregated judge accuracy statistics.
 type JudgeSummary struct {
 	Evaluated      int
-	Agreed         int     // judge decision == original decision
-	WouldUpgrade   int     // judge severity > original severity
-	WouldDowngrade int     // judge severity < original severity
-	Errors         int     // judge_error != ''
+	Agreed         int // judge decision == original decision
+	WouldUpgrade   int // judge severity > original severity
+	WouldDowngrade int // judge severity < original severity
+	Errors         int // judge_error != ''
 	AvgLatencyMs   float64
 }
 
@@ -19,21 +19,21 @@ func (d *DB) SummarizeJudgeAccuracy() (JudgeSummary, error) {
 	row := d.db.QueryRow(`
 		SELECT
 			COUNT(*) AS evaluated,
-			SUM(CASE WHEN judge_decision = decision THEN 1 ELSE 0 END) AS agreed,
-			SUM(CASE
+			COALESCE(SUM(CASE WHEN judge_decision = decision THEN 1 ELSE 0 END), 0) AS agreed,
+			COALESCE(SUM(CASE
 				WHEN judge_error != '' THEN 0
 				WHEN (judge_decision = 'APPROVAL' AND decision IN ('SAFE','CAUTION'))
 				  OR (judge_decision = 'CAUTION' AND decision = 'SAFE')
-				THEN 1 ELSE 0 END) AS would_upgrade,
-			SUM(CASE
+				THEN 1 ELSE 0 END), 0) AS would_upgrade,
+			COALESCE(SUM(CASE
 				WHEN judge_error != '' THEN 0
 				WHEN (judge_decision = 'SAFE' AND decision IN ('CAUTION','APPROVAL'))
 				  OR (judge_decision = 'CAUTION' AND decision = 'APPROVAL')
-				THEN 1 ELSE 0 END) AS would_downgrade,
-			SUM(CASE WHEN judge_error != '' THEN 1 ELSE 0 END) AS errors,
+				THEN 1 ELSE 0 END), 0) AS would_downgrade,
+			COALESCE(SUM(CASE WHEN judge_error != '' THEN 1 ELSE 0 END), 0) AS errors,
 			COALESCE(AVG(CASE WHEN judge_latency_ms > 0 THEN judge_latency_ms END), 0) AS avg_latency
 		FROM events
-		WHERE judge_decision != ''
+		WHERE (judge_decision != '' OR judge_error != '')
 		  AND timestamp > datetime('now', '-7 days')
 	`)
 
