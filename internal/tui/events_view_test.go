@@ -379,9 +379,9 @@ func TestPageSize_Zero(t *testing.T) {
 func TestFormatJudgeColumn_Empty(t *testing.T) {
 	e := &db.EventRecord{}
 	got := formatJudgeColumn(e)
-	// Should be 11 spaces (empty, no judge data).
-	if len(strings.TrimRight(got, " ")) != 0 {
-		t.Errorf("empty judge: got %q, want blank", got)
+	want := strings.Repeat(" ", 11)
+	if got != want {
+		t.Errorf("empty judge: got %q, want %q", got, want)
 	}
 }
 
@@ -480,6 +480,9 @@ func TestRenderDetail_WithJudgeVerdict(t *testing.T) {
 	}
 	if !strings.Contains(got, "claude") {
 		t.Error("detail should show provider")
+	}
+	if !strings.Contains(got, "risky force push") {
+		t.Error("detail should show judge reasoning")
 	}
 	if !strings.Contains(got, "APPLIED") {
 		t.Error("detail should show APPLIED tag")

@@ -193,7 +193,11 @@ func (m EventsModel) View() string {
 		decision := sanitize(fallbackValue(e.Decision))
 		agent := sanitize(fallbackValue(e.Agent))
 		source := sanitize(fallbackValue(e.Source))
-		command := sanitize(shorten(e.Command, m.width-75))
+		cmdWidth := m.width - 75
+		if cmdWidth < 0 {
+			cmdWidth = 0
+		}
+		command := sanitize(shorten(e.Command, cmdWidth))
 
 		decCol := decisionStyle(e.Decision).Render(fmt.Sprintf("%-8s", decision))
 		judgeCol := formatJudgeColumn(e)
@@ -274,7 +278,11 @@ func (m EventsModel) renderDetail(e *db.EventRecord) string {
 			int(e.JudgeConfidence*100),
 			sanitize(fallbackValue(e.JudgeProvider)))
 		if e.JudgeReasoning != "" {
-			judgeLine += fmt.Sprintf(" -- %q", sanitize(shorten(e.JudgeReasoning, valueWidth-40)))
+			reasonWidth := valueWidth - 40
+			if reasonWidth < 0 {
+				reasonWidth = 0
+			}
+			judgeLine += fmt.Sprintf(" -- %q", sanitize(shorten(e.JudgeReasoning, reasonWidth)))
 		}
 		if e.JudgeApplied {
 			judgeLine += " [APPLIED]"
