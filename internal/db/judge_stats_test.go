@@ -33,8 +33,15 @@ func TestSummarizeJudgeAccuracy_Mixed(t *testing.T) {
 	}
 	defer d.Close()
 
+	mustLog := func(name string, e *EventRecord) {
+		t.Helper()
+		if err := d.LogEvent(e); err != nil {
+			t.Fatalf("%s: LogEvent: %v", name, err)
+		}
+	}
+
 	// Agreed: judge says CAUTION, original is CAUTION.
-	_ = d.LogEvent(&EventRecord{
+	mustLog("agreed", &EventRecord{
 		Command:         "git push origin feat/x",
 		Decision:        "CAUTION",
 		JudgeDecision:   "CAUTION",
@@ -44,7 +51,7 @@ func TestSummarizeJudgeAccuracy_Mixed(t *testing.T) {
 	})
 
 	// Would upgrade: judge says APPROVAL, original is CAUTION.
-	_ = d.LogEvent(&EventRecord{
+	mustLog("upgrade", &EventRecord{
 		Command:         "rm -rf /important",
 		Decision:        "CAUTION",
 		JudgeDecision:   "APPROVAL",
@@ -54,7 +61,7 @@ func TestSummarizeJudgeAccuracy_Mixed(t *testing.T) {
 	})
 
 	// Would downgrade: judge says SAFE, original is APPROVAL.
-	_ = d.LogEvent(&EventRecord{
+	mustLog("downgrade", &EventRecord{
 		Command:         "ls -la",
 		Decision:        "APPROVAL",
 		JudgeDecision:   "SAFE",
@@ -64,7 +71,7 @@ func TestSummarizeJudgeAccuracy_Mixed(t *testing.T) {
 	})
 
 	// Error: judge failed (no judge_decision, just error).
-	_ = d.LogEvent(&EventRecord{
+	mustLog("error", &EventRecord{
 		Command:    "echo test",
 		Decision:   "CAUTION",
 		JudgeError: "connection timeout",

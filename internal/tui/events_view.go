@@ -345,7 +345,7 @@ func formatJudgeColumn(e *db.EventRecord) string {
 
 	prefix := "="
 	if !strings.EqualFold(e.JudgeDecision, e.Decision) {
-		prefix = "\xe2\x86\x92" // → (UTF-8 encoded)
+		prefix = ">"
 	}
 
 	abbrev := abbreviateDecision(e.JudgeDecision)

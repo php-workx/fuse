@@ -40,6 +40,15 @@ func DefaultConfig() *Config {
 	return &Config{
 		LogLevel:        "warn",
 		MaxEventLogRows: 10000,
+		LLMJudge: LLMJudgeConfig{
+			Mode:               "off",
+			Provider:           "auto",
+			Timeout:            "10s",
+			UpgradeThreshold:   0.7,
+			DowngradeThreshold: 0.95,
+			TriggerDecisions:   []string{"approval", "caution"},
+			MaxCallsPerMinute:  30,
+		},
 	}
 }
 

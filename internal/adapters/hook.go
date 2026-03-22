@@ -424,17 +424,26 @@ func buildJudgeContext(command, cwd, toolName string, result *core.ClassifyResul
 		RuleID:          result.RuleID,
 		ToolName:        toolName,
 	}
-	if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
-		absPath := filepath.Join(cwd, scriptPath)
-		if content, readErr := os.ReadFile(absPath); readErr == nil {
-			ctx.ScriptContents = string(content)
-			ctx.ScriptPath = scriptPath
+	if cwd != "" {
+		if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
+			absPath := filepath.Clean(filepath.Join(cwd, scriptPath))
+			cleanCwd := filepath.Clean(cwd)
+			// Only read scripts that resolve within cwd to prevent path traversal.
+			if strings.HasPrefix(absPath, cleanCwd+string(filepath.Separator)) || absPath == cleanCwd {
+				if content, readErr := os.ReadFile(absPath); readErr == nil {
+					ctx.ScriptContents = string(content)
+					ctx.ScriptPath = scriptPath
+				}
+			}
 		}
 	}
 	return ctx
 }
 
 // applyVerdict populates the LLM judge fields on an EventRecord from a Verdict.
+// When the verdict was applied, restores the original classifier decision in the
+// event record so that judge accuracy queries can compare judge_decision against
+// the pre-judge classification.
 func applyVerdict(event *db.EventRecord, verdict *judge.Verdict) {
 	if verdict != nil {
 		event.JudgeDecision = string(verdict.JudgeDecision)
@@ -444,6 +453,9 @@ func applyVerdict(event *db.EventRecord, verdict *judge.Verdict) {
 		event.JudgeProvider = verdict.ProviderName
 		event.JudgeLatencyMs = verdict.LatencyMs
 		event.JudgeError = verdict.Error
+		if verdict.Applied {
+			event.Decision = string(verdict.OriginalDecision)
+		}
 	}
 }
 
