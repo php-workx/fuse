@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -293,4 +294,179 @@ func containsStr(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+// --- FilterInfo tests ---
+
+func TestApprovalsFilterInfo_WithStatusMsg(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.statusMsg = "Approved (once)"
+	got := m.FilterInfo()
+	if got != " Approved (once)" {
+		t.Errorf("FilterInfo with status: got %q, want %q", got, " Approved (once)")
+	}
+}
+
+func TestApprovalsFilterInfo_FocusPending(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.focus = focusPending
+	got := m.FilterInfo()
+	if got != " [pending]" {
+		t.Errorf("FilterInfo pending: got %q, want %q", got, " [pending]")
+	}
+}
+
+func TestApprovalsFilterInfo_FocusHistory(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.focus = focusHistory
+	got := m.FilterInfo()
+	if got != " [history]" {
+		t.Errorf("FilterInfo history: got %q, want %q", got, " [history]")
+	}
+}
+
+// --- StatusMsg tests ---
+
+func TestStatusMsg_GetAndClear(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.statusMsg = "Denied"
+	got := m.StatusMsg()
+	if got != "Denied" {
+		t.Errorf("StatusMsg first call: got %q, want %q", got, "Denied")
+	}
+	got = m.StatusMsg()
+	if got != "" {
+		t.Errorf("StatusMsg second call: got %q, want empty", got)
+	}
+}
+
+func TestStatusMsg_EmptyInitially(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	got := m.StatusMsg()
+	if got != "" {
+		t.Errorf("StatusMsg initial: got %q, want empty", got)
+	}
+}
+
+// --- handleActionResult tests ---
+
+func TestHandleActionResult_ApproveSuccess(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.handleActionResult(approveResultMsg{scope: "session", err: nil})
+	if m.statusMsg != "Approved (session)" {
+		t.Errorf("approve success: got %q, want %q", m.statusMsg, "Approved (session)")
+	}
+}
+
+func TestHandleActionResult_ApproveError(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.handleActionResult(approveResultMsg{err: errTest})
+	if !containsStr(m.statusMsg, "Error:") {
+		t.Errorf("approve error: got %q, want Error prefix", m.statusMsg)
+	}
+}
+
+func TestHandleActionResult_DenySuccess(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.handleActionResult(denyResultMsg{err: nil})
+	if m.statusMsg != "Denied" {
+		t.Errorf("deny success: got %q, want %q", m.statusMsg, "Denied")
+	}
+}
+
+func TestHandleActionResult_DeleteSuccess(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.handleActionResult(deleteResultMsg{err: nil})
+	if m.statusMsg != "Revoked" {
+		t.Errorf("delete success: got %q, want %q", m.statusMsg, "Revoked")
+	}
+}
+
+func TestHandleActionResult_PurgeSuccess(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.handleActionResult(purgeResultMsg{deleted: 5, err: nil})
+	if m.statusMsg != "Purged 5" {
+		t.Errorf("purge success: got %q, want %q", m.statusMsg, "Purged 5")
+	}
+}
+
+func TestHandleActionResult_PurgeError(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.handleActionResult(purgeResultMsg{err: errTest})
+	if !containsStr(m.statusMsg, "Error:") {
+		t.Errorf("purge error: got %q, want Error prefix", m.statusMsg)
+	}
+}
+
+var errTest = fmt.Errorf("test error")
+
+// --- moveCursor history tests ---
+
+func TestApprovalsMoveCursor_History(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.focus = focusHistory
+	m.SetData([]db.Approval{
+		{ID: "a1", DecisionKey: "k1", CreatedAt: "2026-03-20T12:00:00Z"},
+		{ID: "a2", DecisionKey: "k2", CreatedAt: "2026-03-20T12:01:00Z"},
+		{ID: "a3", DecisionKey: "k3", CreatedAt: "2026-03-20T12:02:00Z"},
+	})
+
+	m.moveCursor(1)
+	if m.historyIdx != 1 {
+		t.Errorf("historyIdx = %d, want 1", m.historyIdx)
+	}
+	m.moveCursor(1)
+	if m.historyIdx != 2 {
+		t.Errorf("historyIdx = %d, want 2", m.historyIdx)
+	}
+	m.moveCursor(1) // clamp at end
+	if m.historyIdx != 2 {
+		t.Errorf("historyIdx = %d, want 2 (clamped)", m.historyIdx)
+	}
+	m.moveCursor(-10) // clamp at start
+	if m.historyIdx != 0 {
+		t.Errorf("historyIdx = %d, want 0", m.historyIdx)
+	}
+}
+
+func TestApprovalsMoveCursor_HistoryEmpty(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.focus = focusHistory
+	// No approvals set.
+	m.moveCursor(1) // should not panic
+	if m.historyIdx != 0 {
+		t.Errorf("historyIdx on empty: got %d, want 0", m.historyIdx)
+	}
+}
+
+// --- parseTime tests ---
+
+func TestParseTime_ValidWithMillis(t *testing.T) {
+	got := parseTime("2026-03-20T14:30:00.123Z")
+	if got.Year() != 2026 || got.Month() != 3 || got.Day() != 20 {
+		t.Errorf("valid with millis: got %v", got)
+	}
+}
+
+func TestParseTime_ValidWithoutMillis(t *testing.T) {
+	got := parseTime("2026-03-20T14:30:00Z")
+	if got.Year() != 2026 || got.Month() != 3 || got.Day() != 20 {
+		t.Errorf("valid without millis: got %v", got)
+	}
+}
+
+func TestParseTime_InvalidFormat(t *testing.T) {
+	got := parseTime("not-a-date")
+	// Should fall back to time.Now() — just verify it's recent.
+	if time.Since(got) > time.Minute {
+		t.Errorf("invalid format should return ~now, got %v", got)
+	}
+}
+
+func TestParseTime_Empty(t *testing.T) {
+	got := parseTime("")
+	// Should fall back to time.Now().
+	if time.Since(got) > time.Minute {
+		t.Errorf("empty should return ~now, got %v", got)
+	}
 }

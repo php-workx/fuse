@@ -211,3 +211,74 @@ func TestModel_ResizePropagates(t *testing.T) {
 		t.Errorf("events width: got %d, want 100", m.events.width)
 	}
 }
+
+// --- tickCmd tests ---
+
+func TestTickCmd_EventsInterval(t *testing.T) {
+	cmd := tickCmd(viewEvents)
+	if cmd == nil {
+		t.Fatal("tickCmd(viewEvents) should return a non-nil Cmd")
+	}
+}
+
+func TestTickCmd_ApprovalsInterval(t *testing.T) {
+	cmd := tickCmd(viewApprovals)
+	if cmd == nil {
+		t.Fatal("tickCmd(viewApprovals) should return a non-nil Cmd")
+	}
+}
+
+func TestTickCmd_StatsInterval(t *testing.T) {
+	cmd := tickCmd(viewStats)
+	if cmd == nil {
+		t.Fatal("tickCmd(viewStats) should return a non-nil Cmd")
+	}
+}
+
+// --- Stale tick discard tests ---
+
+func TestModel_StaleTickReschedules(t *testing.T) {
+	d := openTestDB(t)
+	m := NewModel(d, "dryrun", nil)
+	m.width = 80
+	m.height = 24
+	m.events.SetSize(80, 21)
+
+	// Switch to stats view.
+	m.activeView = viewStats
+
+	// Send a tick for events (stale since we're on stats).
+	updated, cmd := m.Update(tickMsg{view: viewEvents})
+	m = updated.(Model)
+
+	// Should NOT have started a fetch (stale tick).
+	if m.fetching {
+		t.Error("stale tick should not trigger a fetch")
+	}
+
+	// Should reschedule a tick (non-nil cmd).
+	if cmd == nil {
+		t.Fatal("stale tick should reschedule, got nil cmd")
+	}
+}
+
+func TestModel_StaleTickDoesNotFetch(t *testing.T) {
+	d := openTestDB(t)
+	seedEvents(t, d, 2)
+
+	m := NewModel(d, "dryrun", nil)
+	m.width = 80
+	m.height = 24
+
+	// Switch to approvals view.
+	m.activeView = viewApprovals
+
+	// Send tick for events view (wrong view).
+	updated, _ := m.Update(tickMsg{view: viewEvents})
+	m = updated.(Model)
+
+	// Events should remain empty since we never fetched for events.
+	if len(m.events.events) != 0 {
+		t.Errorf("stale tick should not fetch events data, got %d events", len(m.events.events))
+	}
+}
