@@ -374,6 +374,140 @@ func TestPageSize_Zero(t *testing.T) {
 	}
 }
 
+// --- formatJudgeColumn tests ---
+
+func TestFormatJudgeColumn_Empty(t *testing.T) {
+	e := &db.EventRecord{}
+	got := formatJudgeColumn(e)
+	// Should be 11 spaces (empty, no judge data).
+	if len(strings.TrimRight(got, " ")) != 0 {
+		t.Errorf("empty judge: got %q, want blank", got)
+	}
+}
+
+func TestFormatJudgeColumn_Agreed(t *testing.T) {
+	e := &db.EventRecord{
+		Decision:        "CAUTION",
+		JudgeDecision:   "CAUTION",
+		JudgeConfidence: 0.94,
+	}
+	got := formatJudgeColumn(e)
+	if !strings.Contains(got, "=") {
+		t.Errorf("agreed: expected '=' prefix, got %q", got)
+	}
+	if !strings.Contains(got, "94%") {
+		t.Errorf("agreed: expected '94%%', got %q", got)
+	}
+}
+
+func TestFormatJudgeColumn_Disagreed(t *testing.T) {
+	e := &db.EventRecord{
+		Decision:        "CAUTION",
+		JudgeDecision:   "SAFE",
+		JudgeConfidence: 0.88,
+	}
+	got := formatJudgeColumn(e)
+	if !strings.Contains(got, ">") {
+		t.Errorf("disagreed: expected '>' prefix, got %q", got)
+	}
+	if !strings.Contains(got, "88%") {
+		t.Errorf("disagreed: expected '88%%', got %q", got)
+	}
+}
+
+func TestFormatJudgeColumn_Applied(t *testing.T) {
+	e := &db.EventRecord{
+		Decision:        "CAUTION",
+		JudgeDecision:   "APPROVAL",
+		JudgeConfidence: 0.75,
+		JudgeApplied:    true,
+	}
+	got := formatJudgeColumn(e)
+	// Applied uses decisionStyle (colored), not styleDim.
+	if !strings.Contains(got, "APPR") {
+		t.Errorf("applied: expected 'APPR' abbreviation, got %q", got)
+	}
+}
+
+// --- abbreviateDecision tests ---
+
+func TestAbbreviateDecision(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"APPROVAL", "APPR"},
+		{"CAUTION", "CAUT"},
+		{"BLOCKED", "BLKD"},
+		{"SAFE", "SAFE"},
+		{"safe", "SAFE"},
+		{"approval", "APPR"},
+		{"UNKNOWN", "UNKNOWN"},
+	}
+	for _, tt := range tests {
+		got := abbreviateDecision(tt.input)
+		if got != tt.want {
+			t.Errorf("abbreviateDecision(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+// --- renderDetail judge coverage ---
+
+func TestRenderDetail_WithJudgeVerdict(t *testing.T) {
+	m := NewEventsModel()
+	m.width = 100
+	m.height = 40
+	m.filtered = []db.EventRecord{
+		{
+			ID:              1,
+			Decision:        "CAUTION",
+			Command:         "git push --force",
+			JudgeDecision:   "APPROVAL",
+			JudgeConfidence: 0.76,
+			JudgeProvider:   "claude",
+			JudgeReasoning:  "risky force push",
+			JudgeApplied:    true,
+		},
+	}
+	m.cursor = 0
+	got := m.renderDetail(&m.filtered[0])
+	if !strings.Contains(got, "APPROVAL") {
+		t.Error("detail should show judge decision")
+	}
+	if !strings.Contains(got, "76%") {
+		t.Error("detail should show confidence percentage")
+	}
+	if !strings.Contains(got, "claude") {
+		t.Error("detail should show provider")
+	}
+	if !strings.Contains(got, "APPLIED") {
+		t.Error("detail should show APPLIED tag")
+	}
+}
+
+func TestRenderDetail_WithJudgeError(t *testing.T) {
+	m := NewEventsModel()
+	m.width = 100
+	m.height = 40
+	m.filtered = []db.EventRecord{
+		{
+			ID:         1,
+			Decision:   "CAUTION",
+			Command:    "echo test",
+			JudgeError: "connection timeout",
+		},
+	}
+	m.cursor = 0
+	got := m.renderDetail(&m.filtered[0])
+	if !strings.Contains(got, "ERROR") {
+		t.Error("detail should show ERROR for judge error")
+	}
+	if !strings.Contains(got, "connection timeout") {
+		t.Error("detail should show error message")
+	}
+}
+
 // --- updateSearch tests ---
 
 func TestUpdateSearch_EnterCommits(t *testing.T) {

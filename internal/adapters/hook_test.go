@@ -7,6 +7,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/runger/fuse/internal/core"
+	"github.com/runger/fuse/internal/db"
+	"github.com/runger/fuse/internal/judge"
 )
 
 func TestRunHook_SafeCommand(t *testing.T) {
@@ -412,6 +416,154 @@ func TestRunHook_NativeFileParentTraversalSecretsRequiresApproval(t *testing.T) 
 
 	if exitCode != 2 {
 		t.Fatalf("expected exit code 2 for ../secrets/prod.json traversal, got %d; stderr: %s", exitCode, stderr.String())
+	}
+}
+
+// --- applyVerdict tests ---
+
+func TestApplyVerdict_Nil(t *testing.T) {
+	event := &db.EventRecord{Decision: "CAUTION"}
+	applyVerdict(event, nil)
+	// Should be a no-op.
+	if event.JudgeDecision != "" {
+		t.Errorf("nil verdict should not set judge fields, got %q", event.JudgeDecision)
+	}
+}
+
+func TestApplyVerdict_NotApplied(t *testing.T) {
+	event := &db.EventRecord{Decision: "CAUTION"}
+	v := &judge.Verdict{
+		OriginalDecision: core.DecisionCaution,
+		JudgeDecision:    core.DecisionSafe,
+		Confidence:       0.8,
+		Reasoning:        "safe command",
+		Applied:          false,
+		ProviderName:     "claude",
+		LatencyMs:        200,
+	}
+	applyVerdict(event, v)
+	if event.JudgeDecision != "SAFE" {
+		t.Errorf("JudgeDecision = %q, want SAFE", event.JudgeDecision)
+	}
+	// Decision should remain CAUTION (not applied).
+	if event.Decision != "CAUTION" {
+		t.Errorf("Decision = %q, want CAUTION (unchanged)", event.Decision)
+	}
+}
+
+func TestApplyVerdict_Applied(t *testing.T) {
+	event := &db.EventRecord{Decision: "APPROVAL"}
+	v := &judge.Verdict{
+		OriginalDecision: core.DecisionApproval,
+		JudgeDecision:    core.DecisionSafe,
+		Confidence:       0.97,
+		Reasoning:        "actually safe",
+		Applied:          true,
+		ProviderName:     "codex",
+		LatencyMs:        350,
+	}
+	applyVerdict(event, v)
+	// When applied, Decision should be restored to OriginalDecision.
+	if event.Decision != "APPROVAL" {
+		t.Errorf("Decision = %q, want APPROVAL (original restored)", event.Decision)
+	}
+	if event.JudgeDecision != "SAFE" {
+		t.Errorf("JudgeDecision = %q, want SAFE", event.JudgeDecision)
+	}
+	if !event.JudgeApplied {
+		t.Error("JudgeApplied should be true")
+	}
+	if event.JudgeProvider != "codex" {
+		t.Errorf("JudgeProvider = %q, want codex", event.JudgeProvider)
+	}
+}
+
+func TestApplyVerdict_Error(t *testing.T) {
+	event := &db.EventRecord{Decision: "CAUTION"}
+	v := &judge.Verdict{
+		OriginalDecision: core.DecisionCaution,
+		Error:            "timeout",
+		ProviderName:     "claude",
+		LatencyMs:        10000,
+	}
+	applyVerdict(event, v)
+	if event.JudgeError != "timeout" {
+		t.Errorf("JudgeError = %q, want timeout", event.JudgeError)
+	}
+	if event.Decision != "CAUTION" {
+		t.Errorf("Decision should remain CAUTION on error, got %q", event.Decision)
+	}
+}
+
+// --- buildJudgeContext tests ---
+
+func TestBuildJudgeContext_Basic(t *testing.T) {
+	result := &core.ClassifyResult{
+		Decision: core.DecisionCaution,
+		Reason:   "test reason",
+		RuleID:   "test-rule",
+	}
+	ctx := buildJudgeContext("echo hello", "/Users/dev/project", "Bash", result)
+	if ctx.Command != "echo hello" {
+		t.Errorf("Command = %q", ctx.Command)
+	}
+	if ctx.Cwd != "/Users/dev/project" {
+		t.Errorf("Cwd = %q", ctx.Cwd)
+	}
+	if ctx.WorkspaceRoot != "dev/project" {
+		t.Errorf("WorkspaceRoot = %q, want dev/project", ctx.WorkspaceRoot)
+	}
+	if ctx.CurrentDecision != "CAUTION" {
+		t.Errorf("CurrentDecision = %q", ctx.CurrentDecision)
+	}
+	if ctx.ToolName != "Bash" {
+		t.Errorf("ToolName = %q", ctx.ToolName)
+	}
+}
+
+func TestBuildJudgeContext_EmptyCwd(t *testing.T) {
+	result := &core.ClassifyResult{Decision: core.DecisionCaution}
+	ctx := buildJudgeContext("python script.py", "", "Bash", result)
+	// Empty cwd should skip script detection entirely.
+	if ctx.ScriptContents != "" {
+		t.Error("expected empty ScriptContents with empty cwd")
+	}
+}
+
+func TestBuildJudgeContext_PathTraversalBlocked(t *testing.T) {
+	dir := t.TempDir()
+	// Create a file outside cwd that a traversal path would reach.
+	outsideFile := filepath.Join(dir, "secret.sh")
+	if err := os.WriteFile(outsideFile, []byte("#!/bin/bash\nrm -rf /"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cwd := filepath.Join(dir, "project")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result := &core.ClassifyResult{Decision: core.DecisionApproval}
+	ctx := buildJudgeContext("bash ../secret.sh", cwd, "Bash", result)
+	// ../secret.sh resolves outside cwd — should NOT be read.
+	if ctx.ScriptContents != "" {
+		t.Error("path traversal should be blocked — ScriptContents should be empty")
+	}
+}
+
+func TestBuildJudgeContext_ScriptWithinCwd(t *testing.T) {
+	dir := t.TempDir()
+	scriptContent := "#!/bin/bash\necho safe\n"
+	if err := os.WriteFile(filepath.Join(dir, "deploy.sh"), []byte(scriptContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result := &core.ClassifyResult{Decision: core.DecisionApproval}
+	ctx := buildJudgeContext("bash deploy.sh", dir, "Bash", result)
+	if ctx.ScriptContents != scriptContent {
+		t.Errorf("ScriptContents = %q, want %q", ctx.ScriptContents, scriptContent)
+	}
+	if ctx.ScriptPath != "deploy.sh" {
+		t.Errorf("ScriptPath = %q, want deploy.sh", ctx.ScriptPath)
 	}
 }
 
