@@ -29,7 +29,7 @@ type Verdict struct {
 	JudgeDecision    core.Decision
 	Confidence       float64
 	Reasoning        string
-	Applied          bool   // true if the judge's decision was used
+	Applied          bool // true if the judge's decision was used
 	ProviderName     string
 	LatencyMs        int64
 	Error            string // non-empty if judge failed
@@ -212,14 +212,20 @@ func configHash(cfg config.LLMJudgeConfig) string {
 // The Judge instance is cached and re-initialized when the config changes,
 // supporting hot-reload for long-running adapters (codex-shell).
 func MaybeJudge(ctx context.Context, cfg *config.Config, result *core.ClassifyResult, promptCtx PromptContext) (*core.ClassifyResult, *Verdict) {
-	if cfg == nil || cfg.LLMJudge.Mode == "" || cfg.LLMJudge.Mode == "off" {
+	if cfg == nil || cfg.LLMJudge.Mode == "off" {
 		return result, nil
 	}
 
+	// Default mode to "shadow" when llm_judge section is present but mode is empty.
+	judgeCfg := cfg.LLMJudge
+	if judgeCfg.Mode == "" {
+		judgeCfg.Mode = "shadow"
+	}
+
 	cachedJudgeMu.Lock()
-	hash := configHash(cfg.LLMJudge)
+	hash := configHash(judgeCfg)
 	if cachedJudge == nil || hash != cachedCfgHash {
-		j, err := NewJudge(cfg.LLMJudge)
+		j, err := NewJudge(judgeCfg)
 		if err != nil {
 			cachedJudgeMu.Unlock()
 			slog.Warn("llm judge init failed", "error", err)
