@@ -404,9 +404,9 @@ groupObserve: {"events", "stats", "monitor", "doctor", "test"},
 4. Press `d` to cycle decision filter, `/` to search, `Enter` for detail
 5. **Deterministic refresh test:** The model must accept injected tick/data messages in tests. A deterministic integration test shall seed a temp SQLite DB, deliver a synthetic `tickMsg`, and assert that the active view refreshes from the updated DB contents without waiting on wall-clock time.
 6. **Manual smoke test:** Run `fuse test classify "echo hello"` in another terminal — event appears in TUI within 2s (smoke test only, not primary acceptance test)
-6. Press `q` — clean exit, terminal restored
-7. `go test -race ./...` — full suite green
-8. `just check-local` — full quality gate
+7. Press `q` — clean exit, terminal restored
+8. `go test -race ./...` — full suite green
+9. `just check-local` — full quality gate
 
 **Required test boundaries:**
 

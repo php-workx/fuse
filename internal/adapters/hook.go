@@ -33,7 +33,7 @@ const pendingApprovalMsg = "fuse:PENDING_APPROVAL WAIT. This command requires us
 
 func init() {
 	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err == nil && d > 3*time.Second {
 			hookTimeout = d
 		}
 	}
@@ -60,7 +60,7 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 	// Re-check env var at call time so t.Setenv works in integration tests.
 	timeout := hookTimeout
 	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		if d, err := time.ParseDuration(v); err == nil && d > 3*time.Second {
 			timeout = d
 		}
 	}
@@ -309,7 +309,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 	// and so we use the same dynamically-resolved timeout as RunHook.
 	timeout := hookTimeout
 	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
-		if d, parseErr := time.ParseDuration(v); parseErr == nil {
+		if d, parseErr := time.ParseDuration(v); parseErr == nil && d > 3*time.Second {
 			timeout = d
 		}
 	}
