@@ -50,6 +50,20 @@ func withFuseHome(t *testing.T) string {
 	return fuseHome
 }
 
+func shortTestDrains(t *testing.T) {
+	t.Helper()
+	oldDrain, oldPost := codexDrainTimeout, codexDrainPostCancel
+	codexDrainTimeout = 500 * time.Millisecond
+	codexDrainPostCancel = 200 * time.Millisecond
+	oldHook := hookTimeout
+	hookTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		codexDrainTimeout = oldDrain
+		codexDrainPostCancel = oldPost
+		hookTimeout = oldHook
+	})
+}
+
 func enableFuseForTest(t *testing.T) {
 	t.Helper()
 	if err := os.WriteFile(config.EnabledMarkerPath(), []byte("1"), 0o600); err != nil {
@@ -482,9 +496,7 @@ func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
-	old := hookTimeout
-	hookTimeout = 500 * time.Millisecond
-	t.Cleanup(func() { hookTimeout = old })
+	shortTestDrains(t)
 
 	responses := runCodexShellServerRequests(t, jsonRPCMessage{
 		"jsonrpc": "2.0",
@@ -782,6 +794,7 @@ func TestRunCodexShellServer_GracefulShutdownOnEOF(t *testing.T) {
 func TestRunCodexShellServer_ShutdownKillsInFlight(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
+	shortTestDrains(t)
 
 	pr, pw := io.Pipe()
 	var output bytes.Buffer
@@ -800,12 +813,12 @@ func TestRunCodexShellServer_ShutdownKillsInFlight(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	_ = pw.Close()
 
-	// Server should return within drain timeout (~5s) + margin, not 10s.
+	// Server should return within drain timeout + margin, not 10s.
 	select {
 	case <-done:
 		// Good — server shut down promptly.
-	case <-time.After(8 * time.Second):
-		t.Fatal("RunCodexShellServer did not shut down within 8s after stdin close (expected ~5s drain)")
+	case <-time.After(3 * time.Second):
+		t.Fatal("RunCodexShellServer did not shut down within 3s after stdin close")
 	}
 }
 
