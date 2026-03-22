@@ -146,9 +146,15 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// View switching (suppressed during search mode).
+	// When on the approvals view, Tab toggles focus (pending/history)
+	// instead of switching views. Use number keys (1/2/3) to switch.
 	if m.activeView != viewEvents || !m.events.searching {
 		switch {
 		case key.Matches(k, keys.Tab):
+			if m.activeView == viewApprovals {
+				// Delegate to approvals view for focus toggle.
+				break
+			}
 			m.activeView = (m.activeView + 1) % 3
 			m.fetchGen++
 			m.fetching = true

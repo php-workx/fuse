@@ -291,7 +291,10 @@ func requestMCPApproval(name string, arguments map[string]interface{}) (bool, er
 		},
 	}
 
-	decision, err := mgr.RequestApproval(context.Background(), approve.ApprovalRequest{
+	// Use a bounded context so headless sessions don't hang indefinitely.
+	proxyCtx, proxyCancel := context.WithTimeout(context.Background(), hookTimeout)
+	defer proxyCancel()
+	decision, err := mgr.RequestApproval(proxyCtx, approve.ApprovalRequest{
 		DecisionKey: result.DecisionKey,
 		Command:     extractCommandFromResult(result),
 		Reason:      result.Reason,
