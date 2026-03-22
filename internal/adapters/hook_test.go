@@ -418,9 +418,9 @@ func TestRunHook_NativeFileParentTraversalSecretsRequiresApproval(t *testing.T) 
 func enableHookForTest(t *testing.T) {
 	t.Helper()
 
-	// Use a short hook timeout for tests so approval-waiting tests complete quickly.
+	// Use a very short hook timeout for tests so approval-waiting tests complete quickly.
 	old := hookTimeout
-	hookTimeout = 3 * time.Second
+	hookTimeout = 500 * time.Millisecond
 	t.Cleanup(func() { hookTimeout = old })
 
 	fuseHome := t.TempDir()

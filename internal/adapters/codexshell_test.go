@@ -273,7 +273,7 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	_, _, exitCode, err := executeCodexShellCommand(ctx, "python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
@@ -482,6 +482,9 @@ func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
+	old := hookTimeout
+	hookTimeout = 500 * time.Millisecond
+	t.Cleanup(func() { hookTimeout = old })
 
 	responses := runCodexShellServerRequests(t, jsonRPCMessage{
 		"jsonrpc": "2.0",
@@ -666,14 +669,14 @@ func TestRunCodexShellServer_SlowRequestDoesNotBlockFast(t *testing.T) {
 		done <- RunCodexShellServer(pr, &output)
 	}()
 
-	// Send slow command (sleep 2).
+	// Send slow command (sleep 0.5).
 	slow := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "tools/call", "params": map[string]interface{}{
-		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 2 && printf slow"},
+		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 0.5 && printf slow"},
 	}}
 	writeFramedRequest(t, pw, slow)
 
 	// Small delay to ensure slow request is being processed.
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	// Send fast command.
 	fast := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(2), "method": "tools/call", "params": map[string]interface{}{
@@ -682,7 +685,7 @@ func TestRunCodexShellServer_SlowRequestDoesNotBlockFast(t *testing.T) {
 	writeFramedRequest(t, pw, fast)
 
 	// Close stdin after a brief delay to let both process.
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
 	_ = pw.Close()
 	<-done
 
@@ -789,20 +792,20 @@ func TestRunCodexShellServer_ShutdownKillsInFlight(t *testing.T) {
 
 	// Send a long-running command.
 	req := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "tools/call", "params": map[string]interface{}{
-		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 30"},
+		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 10"},
 	}}
 	writeFramedRequest(t, pw, req)
 
 	// Give it a moment to start, then close stdin.
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	_ = pw.Close()
 
-	// Server should return within drain timeout (~5s) + margin, not 30s.
+	// Server should return within drain timeout (~5s) + margin, not 10s.
 	select {
 	case <-done:
 		// Good — server shut down promptly.
-	case <-time.After(10 * time.Second):
-		t.Fatal("RunCodexShellServer did not shut down within 10s after stdin close (expected ~5s drain)")
+	case <-time.After(8 * time.Second):
+		t.Fatal("RunCodexShellServer did not shut down within 8s after stdin close (expected ~5s drain)")
 	}
 }
 
