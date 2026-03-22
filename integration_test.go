@@ -113,7 +113,7 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 
 	t.Run("destructive MCP delete tool returns caution/approval", func(t *testing.T) {
 		t.Setenv("FUSE_NON_INTERACTIVE", "1")
-		t.Setenv("FUSE_HOOK_TIMEOUT", "3s") // short timeout for tests
+		t.Setenv("FUSE_HOOK_TIMEOUT", "5s") // short timeout for tests (must be > 3s)
 		input := `{"tool_name":"mcp__server__delete_database","tool_input":{"name":"prod"},"session_id":"integ-test","cwd":"/tmp"}`
 		stdin := strings.NewReader(input)
 		stderr := &bytes.Buffer{}
