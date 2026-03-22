@@ -305,7 +305,7 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 	responses := runCodexShellServerRequests(t,
 		jsonRPCMessage{
 			"jsonrpc": "2.0",
-			"id":      1,
+			"id":      float64(1),
 			"method":  "initialize",
 		},
 		jsonRPCMessage{
@@ -314,7 +314,7 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 		},
 		jsonRPCMessage{
 			"jsonrpc": "2.0",
-			"id":      2,
+			"id":      float64(2),
 			"method":  "tools/list",
 		},
 	)
@@ -323,9 +323,20 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 		t.Fatalf("expected 2 responses, got %d", len(responses))
 	}
 
-	initResult, _ := responses[0]["result"].(map[string]interface{})
+	// Match responses by ID since concurrent processing may reorder them.
+	var initResp, listResp jsonRPCMessage
+	for _, r := range responses {
+		switch id, _ := r["id"].(float64); id {
+		case 1:
+			initResp = r
+		case 2:
+			listResp = r
+		}
+	}
+
+	initResult, _ := initResp["result"].(map[string]interface{})
 	if initResult == nil {
-		t.Fatalf("expected initialize result, got %#v", responses[0])
+		t.Fatalf("expected initialize result, got %#v", initResp)
 	}
 	if protocolVersion, _ := initResult["protocolVersion"].(string); protocolVersion != "2024-11-05" {
 		t.Fatalf("protocolVersion = %q, want %q", protocolVersion, "2024-11-05")
@@ -335,7 +346,7 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 		t.Fatalf("serverInfo.name = %q, want %q", name, "fuse-shell")
 	}
 
-	listResult, _ := responses[1]["result"].(map[string]interface{})
+	listResult, _ := listResp["result"].(map[string]interface{})
 	tools, _ := listResult["tools"].([]interface{})
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
@@ -350,7 +361,7 @@ func TestRunCodexShellServer_InitializeAndToolsList_LineDelimited(t *testing.T) 
 	responses := runCodexShellServerLineRequests(t,
 		jsonRPCMessage{
 			"jsonrpc": "2.0",
-			"id":      0,
+			"id":      float64(0),
 			"method":  "initialize",
 			"params": map[string]interface{}{
 				"protocolVersion": "2025-06-18",
@@ -368,7 +379,7 @@ func TestRunCodexShellServer_InitializeAndToolsList_LineDelimited(t *testing.T) 
 		},
 		jsonRPCMessage{
 			"jsonrpc": "2.0",
-			"id":      1,
+			"id":      float64(1),
 			"method":  "tools/list",
 		},
 	)
@@ -377,15 +388,26 @@ func TestRunCodexShellServer_InitializeAndToolsList_LineDelimited(t *testing.T) 
 		t.Fatalf("expected 2 responses, got %d", len(responses))
 	}
 
-	initResult, _ := responses[0]["result"].(map[string]interface{})
+	// Match responses by ID since concurrent processing may reorder them.
+	var initResp, listResp jsonRPCMessage
+	for _, r := range responses {
+		switch id, _ := r["id"].(float64); id {
+		case 0:
+			initResp = r
+		case 1:
+			listResp = r
+		}
+	}
+
+	initResult, _ := initResp["result"].(map[string]interface{})
 	if initResult == nil {
-		t.Fatalf("expected initialize result, got %#v", responses[0])
+		t.Fatalf("expected initialize result, got %#v", initResp)
 	}
 	if protocolVersion, _ := initResult["protocolVersion"].(string); protocolVersion == "" {
 		t.Fatalf("expected protocolVersion in initialize result, got %#v", initResult)
 	}
 
-	listResult, _ := responses[1]["result"].(map[string]interface{})
+	listResult, _ := listResp["result"].(map[string]interface{})
 	tools, _ := listResult["tools"].([]interface{})
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
