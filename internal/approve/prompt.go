@@ -5,12 +5,24 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/runger/fuse/internal/sanitize"
 )
+
+// sanitizePrompt delegates to the shared sanitize package and additionally
+// replaces \n and \r with spaces to prevent prompt layout injection.
+func sanitizePrompt(s string) string {
+	s = sanitize.String(s)
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, "\r", " ")
+	return s
+}
 
 var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
 
@@ -20,7 +32,9 @@ var ttyMu sync.Mutex
 
 // PromptUser shows a TUI approval prompt on /dev/tty.
 // Returns the user's decision (approved bool), chosen scope, and any error.
-// hookMode: true = 25s timeout, false = 5min timeout.
+// hookMode: true = short TTY prompt timeout (25s), false = 5min timeout.
+// Note: the TTY prompt timeout is intentionally shorter than the hook timeout
+// (300s) because the DB poll continues after the prompt times out.
 // The ctx is checked in the polling loop; cancellation denies immediately.
 func PromptUser(ctx context.Context, command, reason string, hookMode, nonInteractive bool) (approved bool, scope string, err error) {
 	// Fast path: non-interactive mode returns immediately without locking.
@@ -28,7 +42,12 @@ func PromptUser(ctx context.Context, command, reason string, hookMode, nonIntera
 		return false, "", errNonInteractive
 	}
 
-	ttyMu.Lock()
+	// Use TryLock to avoid blocking on the mutex for minutes when another
+	// approval prompt holds the lock. If the lock is unavailable, the DB poll
+	// goroutine can still resolve the request via the TUI.
+	if !ttyMu.TryLock() {
+		return false, "", errNonInteractive
+	}
 	defer ttyMu.Unlock()
 
 	tty, err := openTTY(false) // already checked non-interactive above
@@ -214,14 +233,14 @@ func renderPrompt(tty *os.File, command, reason string) {
 	fmt.Fprintf(tty, "\n")
 	fmt.Fprintf(tty, "  \033[1;33m--- fuse: approval required ---\033[0m\n")
 	fmt.Fprintf(tty, "\n")
-	fmt.Fprintf(tty, "  \033[1mAgent requested:\033[0m %s\n", command)
-	fmt.Fprintf(tty, "  \033[1mCwd:\033[0m            %s\n", cwd)
+	fmt.Fprintf(tty, "  \033[1mAgent requested:\033[0m %s\n", sanitizePrompt(command))
+	fmt.Fprintf(tty, "  \033[1mCwd:\033[0m            %s\n", sanitizePrompt(cwd))
 	fmt.Fprintf(tty, "  \033[1mRisk:\033[0m           APPROVAL\n")
 	if reason != "" {
-		fmt.Fprintf(tty, "  \033[1mReason:\033[0m         %s\n", reason)
+		fmt.Fprintf(tty, "  \033[1mReason:\033[0m         %s\n", sanitizePrompt(reason))
 	}
 	if contextVars != "" {
-		fmt.Fprintf(tty, "  \033[1mContext:\033[0m        %s\n", contextVars)
+		fmt.Fprintf(tty, "  \033[1mContext:\033[0m        %s\n", sanitizePrompt(contextVars))
 	}
 	fmt.Fprintf(tty, "\n")
 	fmt.Fprintf(tty, "  \033[1;32m[A]pprove\033[0m  |  \033[1;31m[D]eny\033[0m\n")

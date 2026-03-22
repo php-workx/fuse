@@ -170,7 +170,7 @@ func mergeFuseHookMatchers(settings map[string]interface{}, matchers []string) {
 		wantedMatchers = append(wantedMatchers, fuseMatcherEntry{
 			Matcher: matcher,
 			Hooks: []fuseHookEntry{
-				{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
+				{Type: "command", Command: "fuse hook evaluate", Timeout: 300},
 			},
 		})
 	}
@@ -209,7 +209,7 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 	hooksRaw, ok := entry["hooks"]
 	if !ok {
 		entry["hooks"] = fuseHooksToInterface([]fuseHookEntry{
-			{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
+			{Type: "command", Command: "fuse hook evaluate", Timeout: 300},
 		})
 		return entry
 	}
@@ -217,7 +217,7 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 	hooks, ok := hooksRaw.([]interface{})
 	if !ok {
 		entry["hooks"] = fuseHooksToInterface([]fuseHookEntry{
-			{Type: "command", Command: "fuse hook evaluate", Timeout: 30},
+			{Type: "command", Command: "fuse hook evaluate", Timeout: 300},
 		})
 		return entry
 	}
@@ -231,7 +231,7 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 		cmd, _ := hMap["command"].(string)
 		if cmd == "fuse hook evaluate" {
 			// Already present — update timeout.
-			hMap["timeout"] = float64(30)
+			hMap["timeout"] = float64(300)
 			return entry
 		}
 	}
@@ -240,7 +240,7 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 	fuseHook := map[string]interface{}{
 		"type":    "command",
 		"command": "fuse hook evaluate",
-		"timeout": float64(30),
+		"timeout": float64(300),
 	}
 	hooks = append(hooks, fuseHook)
 	entry["hooks"] = hooks

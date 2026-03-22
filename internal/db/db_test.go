@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -503,6 +504,50 @@ func TestCleanupExpired_DeletesOldConsumed(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("remaining = %d, want 0", count)
+	}
+}
+
+func TestListApprovals(t *testing.T) {
+	d := openTestDB(t)
+
+	// Insert test approvals.
+	for i, scope := range []string{"once", "session", "forever"} {
+		_, err := d.db.Exec(`
+			INSERT INTO approvals (id, decision_key, decision, scope, session_id, hmac, created_at)
+			VALUES (?, ?, 'APPROVAL', ?, 'sess-1', 'test-hmac', datetime('now', ?))
+		`, fmt.Sprintf("test-%d", i), fmt.Sprintf("key-%d", i), scope, fmt.Sprintf("-%d seconds", 10-i))
+		if err != nil {
+			t.Fatalf("insert approval %d: %v", i, err)
+		}
+	}
+
+	approvals, err := d.ListApprovals(10)
+	if err != nil {
+		t.Fatalf("ListApprovals: %v", err)
+	}
+	if len(approvals) != 3 {
+		t.Fatalf("expected 3 approvals, got %d", len(approvals))
+	}
+
+	// Verify newest first (ORDER BY created_at DESC).
+	if approvals[0].Scope != "forever" {
+		t.Errorf("first approval scope = %q, want 'forever' (newest)", approvals[0].Scope)
+	}
+
+	// Verify hmac is NOT populated (excluded from query).
+	for _, a := range approvals {
+		if a.HMAC != "" {
+			t.Errorf("approval %s has non-empty HMAC %q — should be excluded from ListApprovals", a.ID, a.HMAC)
+		}
+	}
+
+	// Verify limit works.
+	limited, err := d.ListApprovals(1)
+	if err != nil {
+		t.Fatalf("ListApprovals(1): %v", err)
+	}
+	if len(limited) != 1 {
+		t.Fatalf("expected 1 approval with limit=1, got %d", len(limited))
 	}
 }
 

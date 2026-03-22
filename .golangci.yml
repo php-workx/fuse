@@ -114,6 +114,7 @@ linters:
         - appendCombine     # stylistic — separate appends are often clearer
         - unnamedResult     # stylistic — named results not always warranted
         - regexpSimplify    # cosmetic — both forms are correct
+        - hugeParam         # false positive on bubbletea value-receiver methods (tea.Model interface)
     # Revive settings
     revive:
       rules: []

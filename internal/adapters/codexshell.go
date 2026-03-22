@@ -18,6 +18,14 @@ import (
 	"github.com/runger/fuse/internal/policy"
 )
 
+// codexDrainTimeout is the time to wait for in-flight requests before cancelling.
+// codexDrainPostCancel is the extra drain after cancel for response writes.
+// Overridable in tests to avoid 5s+ waits.
+var (
+	codexDrainTimeout    = 5 * time.Second
+	codexDrainPostCancel = 1 * time.Second
+)
+
 type codexShellTransport int
 
 const (
@@ -68,8 +76,10 @@ func RunCodexShellServer(stdin io.Reader, stdout io.Writer) error {
 
 	// Wait for in-flight requests to complete naturally, then cancel
 	// any stragglers (kills child processes via exec.CommandContext).
-	waitGroupWithTimeout(&wg, 5*time.Second)
+	waitGroupWithTimeout(&wg, codexDrainTimeout)
 	cancel()
+	// Brief extra drain after cancel to let goroutines finish writing responses.
+	waitGroupWithTimeout(&wg, codexDrainPostCancel)
 	return nil
 }
 
@@ -307,7 +317,14 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 			if mgrErr != nil {
 				return "", "", 0, mgrErr
 			}
-			decision, promptErr := mgr.RequestApproval(ctx, result.DecisionKey, command, result.Reason, sessionID, false, dryRun)
+			decision, promptErr := mgr.RequestApproval(ctx, approve.ApprovalRequest{
+				DecisionKey:    result.DecisionKey,
+				Command:        command,
+				Reason:         result.Reason,
+				SessionID:      sessionID,
+				Source:         "codex-shell",
+				NonInteractive: dryRun,
+			})
 			if promptErr != nil {
 				return "", "", 0, promptErr
 			}

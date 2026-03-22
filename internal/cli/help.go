@@ -31,7 +31,7 @@ const (
 var groupCommandOrder = map[string][]string{
 	groupSetup:   {"install", "uninstall", "enable", "disable", "dryrun"},
 	groupRuntime: {"run", "hook", "proxy"},
-	groupObserve: {"events", "stats", "doctor", "test"},
+	groupObserve: {"events", "stats", "monitor", "doctor", "test"},
 }
 
 // termWidthFunc returns the terminal width. Overridable in tests.

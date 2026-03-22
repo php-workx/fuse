@@ -6,7 +6,7 @@ import (
 )
 
 // currentSchemaVersion is the latest schema version applied by migrate.
-const currentSchemaVersion = "4"
+const currentSchemaVersion = "5"
 
 // migrate creates or updates the database schema.
 func migrate(db *sql.DB) error {
@@ -55,6 +55,13 @@ func migrate(db *sql.DB) error {
 
 	if version == "3" {
 		if err := applyV4(db); err != nil {
+			return err
+		}
+		version = "4"
+	}
+
+	if version == "4" {
+		if err := applyV5(db); err != nil {
 			return err
 		}
 	}
@@ -152,6 +159,31 @@ func applyV4(db *sql.DB) error {
 
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyV5(db *sql.DB) error {
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS pending_requests (
+			id             TEXT PRIMARY KEY,
+			decision_key   TEXT NOT NULL,
+			command        TEXT NOT NULL,
+			reason         TEXT,
+			source         TEXT NOT NULL DEFAULT 'hook',
+			session_id     TEXT,
+			cwd            TEXT,
+			workspace_root TEXT,
+			created_at     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_pending_created ON pending_requests(created_at)`,
+		`INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', '5')`,
+	}
+
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
 			return err
 		}
 	}

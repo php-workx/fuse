@@ -113,6 +113,7 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 
 	t.Run("destructive MCP delete tool returns caution/approval", func(t *testing.T) {
 		t.Setenv("FUSE_NON_INTERACTIVE", "1")
+		t.Setenv("FUSE_HOOK_TIMEOUT", "5s") // short timeout for tests (must be > 3s)
 		input := `{"tool_name":"mcp__server__delete_database","tool_input":{"name":"prod"},"session_id":"integ-test","cwd":"/tmp"}`
 		stdin := strings.NewReader(input)
 		stderr := &bytes.Buffer{}
@@ -121,8 +122,12 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 		if exitCode != 2 {
 			t.Errorf("expected exit code 2 for MCP delete without interactive approval, got %d; stderr: %s", exitCode, stderr.String())
 		}
-		if !strings.Contains(stderr.String(), "NON_INTERACTIVE_MODE") && !strings.Contains(stderr.String(), "USER_DENIED") && !strings.Contains(stderr.String(), "TIMEOUT_WAITING_FOR_USER") {
-			t.Errorf("expected stderr to contain approval denial directive, got: %s", stderr.String())
+		stderrStr := stderr.String()
+		if !strings.Contains(stderrStr, "PENDING_APPROVAL") &&
+			!strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") &&
+			!strings.Contains(stderrStr, "USER_DENIED") &&
+			!strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
+			t.Errorf("expected PENDING_APPROVAL or approval denial directive, got: %s", stderrStr)
 		}
 	})
 

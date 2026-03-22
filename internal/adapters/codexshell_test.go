@@ -50,6 +50,20 @@ func withFuseHome(t *testing.T) string {
 	return fuseHome
 }
 
+func shortTestDrains(t *testing.T) {
+	t.Helper()
+	oldDrain, oldPost := codexDrainTimeout, codexDrainPostCancel
+	codexDrainTimeout = 500 * time.Millisecond
+	codexDrainPostCancel = 200 * time.Millisecond
+	oldHook := hookTimeout
+	hookTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		codexDrainTimeout = oldDrain
+		codexDrainPostCancel = oldPost
+		hookTimeout = oldHook
+	})
+}
+
 func enableFuseForTest(t *testing.T) {
 	t.Helper()
 	if err := os.WriteFile(config.EnabledMarkerPath(), []byte("1"), 0o600); err != nil {
@@ -273,7 +287,9 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
-	_, _, exitCode, err := executeCodexShellCommand(context.Background(), "python nonexistent_script.py", "", "test-session", time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, _, exitCode, err := executeCodexShellCommand(ctx, "python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
 		t.Fatal("expected approval-required command without TTY to return an error")
 	}
@@ -289,7 +305,7 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 	responses := runCodexShellServerRequests(t,
 		jsonRPCMessage{
 			"jsonrpc": "2.0",
-			"id":      1,
+			"id":      float64(1),
 			"method":  "initialize",
 		},
 		jsonRPCMessage{
@@ -298,7 +314,7 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 		},
 		jsonRPCMessage{
 			"jsonrpc": "2.0",
-			"id":      2,
+			"id":      float64(2),
 			"method":  "tools/list",
 		},
 	)
@@ -307,9 +323,20 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 		t.Fatalf("expected 2 responses, got %d", len(responses))
 	}
 
-	initResult, _ := responses[0]["result"].(map[string]interface{})
+	// Match responses by ID since concurrent processing may reorder them.
+	var initResp, listResp jsonRPCMessage
+	for _, r := range responses {
+		switch id, _ := r["id"].(float64); id {
+		case 1:
+			initResp = r
+		case 2:
+			listResp = r
+		}
+	}
+
+	initResult, _ := initResp["result"].(map[string]interface{})
 	if initResult == nil {
-		t.Fatalf("expected initialize result, got %#v", responses[0])
+		t.Fatalf("expected initialize result, got %#v", initResp)
 	}
 	if protocolVersion, _ := initResult["protocolVersion"].(string); protocolVersion != "2024-11-05" {
 		t.Fatalf("protocolVersion = %q, want %q", protocolVersion, "2024-11-05")
@@ -319,7 +346,7 @@ func TestRunCodexShellServer_InitializeAndToolsList(t *testing.T) {
 		t.Fatalf("serverInfo.name = %q, want %q", name, "fuse-shell")
 	}
 
-	listResult, _ := responses[1]["result"].(map[string]interface{})
+	listResult, _ := listResp["result"].(map[string]interface{})
 	tools, _ := listResult["tools"].([]interface{})
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
@@ -334,7 +361,7 @@ func TestRunCodexShellServer_InitializeAndToolsList_LineDelimited(t *testing.T) 
 	responses := runCodexShellServerLineRequests(t,
 		jsonRPCMessage{
 			"jsonrpc": "2.0",
-			"id":      0,
+			"id":      float64(0),
 			"method":  "initialize",
 			"params": map[string]interface{}{
 				"protocolVersion": "2025-06-18",
@@ -352,7 +379,7 @@ func TestRunCodexShellServer_InitializeAndToolsList_LineDelimited(t *testing.T) 
 		},
 		jsonRPCMessage{
 			"jsonrpc": "2.0",
-			"id":      1,
+			"id":      float64(1),
 			"method":  "tools/list",
 		},
 	)
@@ -361,15 +388,26 @@ func TestRunCodexShellServer_InitializeAndToolsList_LineDelimited(t *testing.T) 
 		t.Fatalf("expected 2 responses, got %d", len(responses))
 	}
 
-	initResult, _ := responses[0]["result"].(map[string]interface{})
+	// Match responses by ID since concurrent processing may reorder them.
+	var initResp, listResp jsonRPCMessage
+	for _, r := range responses {
+		switch id, _ := r["id"].(float64); id {
+		case 0:
+			initResp = r
+		case 1:
+			listResp = r
+		}
+	}
+
+	initResult, _ := initResp["result"].(map[string]interface{})
 	if initResult == nil {
-		t.Fatalf("expected initialize result, got %#v", responses[0])
+		t.Fatalf("expected initialize result, got %#v", initResp)
 	}
 	if protocolVersion, _ := initResult["protocolVersion"].(string); protocolVersion == "" {
 		t.Fatalf("expected protocolVersion in initialize result, got %#v", initResult)
 	}
 
-	listResult, _ := responses[1]["result"].(map[string]interface{})
+	listResult, _ := listResp["result"].(map[string]interface{})
 	tools, _ := listResult["tools"].([]interface{})
 	if len(tools) != 1 {
 		t.Fatalf("expected 1 tool, got %d", len(tools))
@@ -480,6 +518,7 @@ func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
+	shortTestDrains(t)
 
 	responses := runCodexShellServerRequests(t, jsonRPCMessage{
 		"jsonrpc": "2.0",
@@ -664,14 +703,14 @@ func TestRunCodexShellServer_SlowRequestDoesNotBlockFast(t *testing.T) {
 		done <- RunCodexShellServer(pr, &output)
 	}()
 
-	// Send slow command (sleep 2).
+	// Send slow command (sleep 0.5).
 	slow := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "tools/call", "params": map[string]interface{}{
-		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 2 && printf slow"},
+		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 0.5 && printf slow"},
 	}}
 	writeFramedRequest(t, pw, slow)
 
 	// Small delay to ensure slow request is being processed.
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	// Send fast command.
 	fast := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(2), "method": "tools/call", "params": map[string]interface{}{
@@ -680,7 +719,7 @@ func TestRunCodexShellServer_SlowRequestDoesNotBlockFast(t *testing.T) {
 	writeFramedRequest(t, pw, fast)
 
 	// Close stdin after a brief delay to let both process.
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
 	_ = pw.Close()
 	<-done
 
@@ -777,6 +816,7 @@ func TestRunCodexShellServer_GracefulShutdownOnEOF(t *testing.T) {
 func TestRunCodexShellServer_ShutdownKillsInFlight(t *testing.T) {
 	withFuseHome(t)
 	enableFuseForTest(t)
+	shortTestDrains(t)
 
 	pr, pw := io.Pipe()
 	var output bytes.Buffer
@@ -787,20 +827,20 @@ func TestRunCodexShellServer_ShutdownKillsInFlight(t *testing.T) {
 
 	// Send a long-running command.
 	req := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "tools/call", "params": map[string]interface{}{
-		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 30"},
+		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 10"},
 	}}
 	writeFramedRequest(t, pw, req)
 
 	// Give it a moment to start, then close stdin.
-	time.Sleep(500 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	_ = pw.Close()
 
-	// Server should return within drain timeout (~5s) + margin, not 30s.
+	// Server should return within drain timeout + margin, not 10s.
 	select {
 	case <-done:
 		// Good — server shut down promptly.
-	case <-time.After(10 * time.Second):
-		t.Fatal("RunCodexShellServer did not shut down within 10s after stdin close (expected ~5s drain)")
+	case <-time.After(3 * time.Second):
+		t.Fatal("RunCodexShellServer did not shut down within 3s after stdin close")
 	}
 }
 
