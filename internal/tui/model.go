@@ -277,7 +277,7 @@ type dataMsg struct {
 	view         viewMode
 	events       []db.EventRecord
 	summary      db.EventSummary
-	judgeSummary  db.JudgeSummary
+	judgeSummary db.JudgeSummary
 	approvals    []db.Approval
 	pending      []db.PendingRequest
 	err          error

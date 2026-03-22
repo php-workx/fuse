@@ -27,8 +27,8 @@ func (p *claudeProvider) Name() string { return "claude" }
 
 func (p *claudeProvider) Query(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	args := []string{
-		"-p",                          // print mode: read stdin, print response, exit
-		"--bare",                      // skip hooks, LSP, CLAUDE.md (faster startup)
+		"-p",     // print mode: read stdin, print response, exit
+		"--bare", // skip hooks, LSP, CLAUDE.md (faster startup)
 		"--system-prompt", systemPrompt,
 		"--output-format", "text",
 	}

@@ -174,6 +174,26 @@ func TestParseResponse_ConfidenceClamping(t *testing.T) {
 	}
 }
 
+func TestShortenToLastN(t *testing.T) {
+	tests := []struct {
+		path string
+		n    int
+		want string
+	}{
+		{"/Users/dev/workspaces/fuse", 2, "workspaces/fuse"},
+		{"/Users/dev/workspaces/fuse", 1, "fuse"},
+		{"/short", 5, "/short"},
+		{"relative/path", 2, "relative/path"},
+		{"", 2, "."},
+	}
+	for _, tt := range tests {
+		got := ShortenToLastN(tt.path, tt.n)
+		if got != tt.want {
+			t.Errorf("ShortenToLastN(%q, %d) = %q, want %q", tt.path, tt.n, got, tt.want)
+		}
+	}
+}
+
 func TestParseResponse_LowercaseDecision(t *testing.T) {
 	resp, err := ParseResponse(`{"decision":"safe","confidence":0.9,"reasoning":"ok"}`)
 	if err != nil {

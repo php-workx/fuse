@@ -8,23 +8,23 @@ import (
 
 // Config represents the fuse configuration from config.yaml.
 type Config struct {
-	LogLevel        string          `yaml:"log_level"`
-	MaxEventLogRows int             `yaml:"max_event_log_rows"`
-	MCPProxies      []MCPProxy      `yaml:"mcp_proxies"`
-	LLMJudge        LLMJudgeConfig  `yaml:"llm_judge"`
+	LogLevel        string         `yaml:"log_level"`
+	MaxEventLogRows int            `yaml:"max_event_log_rows"`
+	MCPProxies      []MCPProxy     `yaml:"mcp_proxies"`
+	LLMJudge        LLMJudgeConfig `yaml:"llm_judge"`
 }
 
 // LLMJudgeConfig controls the optional LLM judge that provides a second opinion
 // on CAUTION and APPROVAL classifications.
 type LLMJudgeConfig struct {
-	Mode               string   `yaml:"mode"`                  // "off", "shadow", "active"
-	Provider           string   `yaml:"provider"`              // "claude", "codex", "auto"
-	Model              string   `yaml:"model"`                 // provider-specific model name
-	Timeout            string   `yaml:"timeout"`               // duration string, default "10s"
-	UpgradeThreshold   float64  `yaml:"upgrade_threshold"`     // min confidence for upgrades, default 0.7
-	DowngradeThreshold float64  `yaml:"downgrade_threshold"`   // min confidence for downgrades, default 0.95
-	TriggerDecisions   []string `yaml:"trigger_decisions"`     // default ["approval", "caution"]
-	MaxCallsPerMinute  int      `yaml:"max_calls_per_minute"`  // rate limit, default 30
+	Mode               string   `yaml:"mode"`                 // "off", "shadow", "active"
+	Provider           string   `yaml:"provider"`             // "claude", "codex", "auto"
+	Model              string   `yaml:"model"`                // provider-specific model name
+	Timeout            string   `yaml:"timeout"`              // duration string, default "10s"
+	UpgradeThreshold   float64  `yaml:"upgrade_threshold"`    // min confidence for upgrades, default 0.7
+	DowngradeThreshold float64  `yaml:"downgrade_threshold"`  // min confidence for downgrades, default 0.95
+	TriggerDecisions   []string `yaml:"trigger_decisions"`    // default ["approval", "caution"]
+	MaxCallsPerMinute  int      `yaml:"max_calls_per_minute"` // rate limit, default 30
 }
 
 // MCPProxy defines an MCP proxy configuration.
