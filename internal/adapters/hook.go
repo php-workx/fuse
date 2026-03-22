@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -159,6 +160,7 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 	mcpPromptCtx := judge.PromptContext{
 		Command:         mcpCommand,
 		Cwd:             req.Cwd,
+		WorkspaceRoot:   judge.ShortenToLastN(req.Cwd, 2),
 		CurrentDecision: string(decision),
 		Reason:          mcpResult.Reason,
 		ToolName:        req.ToolName,
@@ -169,20 +171,18 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 
 	// MCP tools don't use tag_overrides — dryrun always allows.
 	if dryRun {
-		logHookEventFields(req.SessionID, mcpCommand, "", string(decision), "", "")
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
 		return 0
 	}
-
-	_ = mcpVerdict // verdict logged via logHookEventFields for MCP tools
 
 	switch decision {
 	case core.DecisionBlocked:
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. MCP tool call blocked by policy. Do not retry this exact command. Ask the user for guidance.")
-		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionBlocked), "", "MCP tool blocked by policy")
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
 		return 2
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s classified as CAUTION\n", req.ToolName)
-		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionCaution), "", fmt.Sprintf("MCP tool %s classified as CAUTION", req.ToolName))
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
 		return 0
 	case core.DecisionApproval:
 		result := &core.ClassifyResult{
@@ -200,7 +200,7 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 		return handleApproval(req, result, stderr, cfg, dryRun)
 	default:
 		// SAFE
-		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionSafe), "", "")
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
 		return 0
 	}
 }
@@ -264,20 +264,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 	}
 
 	// LLM judge: get a second opinion on the classification.
-	promptCtx := judge.PromptContext{
-		Command:         input.Command,
-		Cwd:             req.Cwd,
-		CurrentDecision: string(result.Decision),
-		Reason:          result.Reason,
-		RuleID:          result.RuleID,
-		ToolName:        "Bash",
-	}
-	if scriptPath := core.DetectReferencedFile(input.Command); scriptPath != "" {
-		if content, readErr := os.ReadFile(scriptPath); readErr == nil {
-			promptCtx.ScriptContents = string(content)
-			promptCtx.ScriptPath = scriptPath
-		}
-	}
+	promptCtx := buildJudgeContext(input.Command, req.Cwd, "Bash", result)
 	var verdict *judge.Verdict
 	result, verdict = judge.MaybeJudge(context.Background(), cfg, result, promptCtx)
 
@@ -423,6 +410,28 @@ func logHookEventFields(sessionID, command, cwd, decision, ruleID, reason string
 		Cwd:       cwd,
 	})
 	cleanupExecutionState(database, loadRuntimeConfig())
+}
+
+// buildJudgeContext builds a judge PromptContext for shell commands, including
+// script contents when a referenced file is detected. Used by all shell adapters.
+func buildJudgeContext(command, cwd, toolName string, result *core.ClassifyResult) judge.PromptContext {
+	ctx := judge.PromptContext{
+		Command:         command,
+		Cwd:             cwd,
+		WorkspaceRoot:   judge.ShortenToLastN(cwd, 2),
+		CurrentDecision: string(result.Decision),
+		Reason:          result.Reason,
+		RuleID:          result.RuleID,
+		ToolName:        toolName,
+	}
+	if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
+		absPath := filepath.Join(cwd, scriptPath)
+		if content, readErr := os.ReadFile(absPath); readErr == nil {
+			ctx.ScriptContents = string(content)
+			ctx.ScriptPath = scriptPath
+		}
+	}
+	return ctx
 }
 
 // applyVerdict populates the LLM judge fields on an EventRecord from a Verdict.

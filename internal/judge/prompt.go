@@ -3,11 +3,23 @@ package judge
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 
 	"github.com/runger/fuse/internal/db"
 )
+
+// ShortenToLastN returns the last n path components of p.
+// For example, ShortenToLastN("/Users/dev/workspaces/fuse", 2) returns "workspaces/fuse".
+func ShortenToLastN(p string, n int) string {
+	p = filepath.Clean(p)
+	parts := strings.Split(p, string(filepath.Separator))
+	if len(parts) <= n {
+		return p
+	}
+	return strings.Join(parts[len(parts)-n:], string(filepath.Separator))
+}
 
 // systemPrompt is the narrow, security-focused system prompt for the LLM judge.
 const systemPrompt = `You are a command safety judge for a software development environment.

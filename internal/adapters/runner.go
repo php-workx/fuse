@@ -143,20 +143,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	}
 
 	// LLM judge: get a second opinion on the classification.
-	promptCtx := judge.PromptContext{
-		Command:         command,
-		Cwd:             cwd,
-		CurrentDecision: string(result.Decision),
-		Reason:          result.Reason,
-		RuleID:          result.RuleID,
-		ToolName:        "Bash",
-	}
-	if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
-		if content, readErr := os.ReadFile(scriptPath); readErr == nil {
-			promptCtx.ScriptContents = string(content)
-			promptCtx.ScriptPath = scriptPath
-		}
-	}
+	promptCtx := buildJudgeContext(command, cwd, "Bash", result)
 	var verdict *judge.Verdict
 	result, verdict = judge.MaybeJudge(context.Background(), cfg, result, promptCtx)
 

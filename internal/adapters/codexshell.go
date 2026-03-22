@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
@@ -285,22 +284,8 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 	}
 
 	// LLM judge: get a second opinion on the classification.
-	promptCtx := judge.PromptContext{
-		Command:         command,
-		Cwd:             cwd,
-		CurrentDecision: string(result.Decision),
-		Reason:          result.Reason,
-		RuleID:          result.RuleID,
-		ToolName:        "Bash",
-	}
-	if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
-		if content, readErr := os.ReadFile(scriptPath); readErr == nil {
-			promptCtx.ScriptContents = string(content)
-			promptCtx.ScriptPath = scriptPath
-		}
-	}
 	var verdict *judge.Verdict
-	result, verdict = judge.MaybeJudge(ctx, cfg, result, promptCtx)
+	result, verdict = judge.MaybeJudge(ctx, cfg, result, buildJudgeContext(command, cwd, "Bash", result))
 
 	if ctx.Err() != nil {
 		return "", "", 0, ctx.Err()
