@@ -15,6 +15,7 @@ import (
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/db"
 	"github.com/runger/fuse/internal/events"
+	"github.com/runger/fuse/internal/judge"
 	"github.com/runger/fuse/internal/policy"
 )
 
@@ -150,11 +151,29 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 	decision := core.ClassifyMCPTool(toolAction, args)
 	mcpCommand := formatMCPCommand(req.ToolName, args)
 
+	// LLM judge: get a second opinion on MCP tool classification.
+	mcpResult := &core.ClassifyResult{
+		Decision: decision,
+		Reason:   fmt.Sprintf("MCP tool %s classified as %s", req.ToolName, decision),
+	}
+	mcpPromptCtx := judge.PromptContext{
+		Command:         mcpCommand,
+		Cwd:             req.Cwd,
+		CurrentDecision: string(decision),
+		Reason:          mcpResult.Reason,
+		ToolName:        req.ToolName,
+	}
+	var mcpVerdict *judge.Verdict
+	mcpResult, mcpVerdict = judge.MaybeJudge(context.Background(), cfg, mcpResult, mcpPromptCtx)
+	decision = mcpResult.Decision
+
 	// MCP tools don't use tag_overrides — dryrun always allows.
 	if dryRun {
 		logHookEventFields(req.SessionID, mcpCommand, "", string(decision), "", "")
 		return 0
 	}
+
+	_ = mcpVerdict // verdict logged via logHookEventFields for MCP tools
 
 	switch decision {
 	case core.DecisionBlocked:
@@ -244,6 +263,24 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 		return 2 // fail-closed
 	}
 
+	// LLM judge: get a second opinion on the classification.
+	promptCtx := judge.PromptContext{
+		Command:         input.Command,
+		Cwd:             req.Cwd,
+		CurrentDecision: string(result.Decision),
+		Reason:          result.Reason,
+		RuleID:          result.RuleID,
+		ToolName:        "Bash",
+	}
+	if scriptPath := core.DetectReferencedFile(input.Command); scriptPath != "" {
+		if content, readErr := os.ReadFile(scriptPath); readErr == nil {
+			promptCtx.ScriptContents = string(content)
+			promptCtx.ScriptPath = scriptPath
+		}
+	}
+	var verdict *judge.Verdict
+	result, verdict = judge.MaybeJudge(context.Background(), cfg, result, promptCtx)
+
 	// Log per-tag dryrun matches for observability.
 	for i := range result.DryRunMatches {
 		m := &result.DryRunMatches[i]
@@ -254,7 +291,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 	// In dryrun mode, only enforce decisions from tag_overrides.
 	// Without TagOverrideEnforced, log and allow all commands.
 	if dryRun && !result.TagOverrideEnforced {
-		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		if result.Decision == core.DecisionCaution {
 			fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
 		}
@@ -263,18 +300,18 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 
 	switch result.Decision {
 	case core.DecisionSafe:
-		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		return 0
 
 	case core.DecisionBlocked:
 		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", result.Reason)
 		fmt.Fprintln(stderr, msg)
-		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		return 2
 
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
-		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		return 0
 
 	case core.DecisionApproval:
@@ -385,6 +422,41 @@ func logHookEventFields(sessionID, command, cwd, decision, ruleID, reason string
 		Agent:     "claude",
 		Cwd:       cwd,
 	})
+	cleanupExecutionState(database, loadRuntimeConfig())
+}
+
+// applyVerdict populates the LLM judge fields on an EventRecord from a Verdict.
+func applyVerdict(event *db.EventRecord, verdict *judge.Verdict) {
+	if verdict != nil {
+		event.JudgeDecision = string(verdict.JudgeDecision)
+		event.JudgeConfidence = verdict.Confidence
+		event.JudgeReasoning = verdict.Reasoning
+		event.JudgeApplied = verdict.Applied
+		event.JudgeProvider = verdict.ProviderName
+		event.JudgeLatencyMs = verdict.LatencyMs
+		event.JudgeError = verdict.Error
+	}
+}
+
+// logHookEventWithVerdict logs a hook event with judge verdict fields. Best-effort.
+func logHookEventWithVerdict(sessionID, command, cwd string, result *core.ClassifyResult, verdict *judge.Verdict) {
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		return // best-effort: skip if DB unavailable
+	}
+	defer func() { _ = database.Close() }()
+	event := &db.EventRecord{
+		SessionID: sessionID,
+		Command:   command,
+		Decision:  string(result.Decision),
+		RuleID:    result.RuleID,
+		Reason:    result.Reason,
+		Source:    "hook",
+		Agent:     "claude",
+		Cwd:       cwd,
+	}
+	applyVerdict(event, verdict)
+	_ = database.LogEvent(event)
 	cleanupExecutionState(database, loadRuntimeConfig())
 }
 

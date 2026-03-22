@@ -6,7 +6,7 @@ import (
 )
 
 // currentSchemaVersion is the latest schema version applied by migrate.
-const currentSchemaVersion = "5"
+const currentSchemaVersion = "6"
 
 // migrate creates or updates the database schema.
 func migrate(db *sql.DB) error {
@@ -62,6 +62,13 @@ func migrate(db *sql.DB) error {
 
 	if version == "4" {
 		if err := applyV5(db); err != nil {
+			return err
+		}
+		version = "5"
+	}
+
+	if version == "5" {
+		if err := applyV6(db); err != nil {
 			return err
 		}
 	}
@@ -180,6 +187,27 @@ func applyV5(db *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_pending_created ON pending_requests(created_at)`,
 		`INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', '5')`,
+	}
+
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyV6 adds LLM judge columns to the events table.
+func applyV6(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE events ADD COLUMN judge_decision TEXT DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN judge_confidence REAL DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN judge_reasoning TEXT DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN judge_applied INTEGER DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN judge_provider TEXT DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN judge_latency_ms INTEGER DEFAULT 0`,
+		`ALTER TABLE events ADD COLUMN judge_error TEXT DEFAULT ''`,
+		`INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', '6')`,
 	}
 
 	for _, stmt := range stmts {
