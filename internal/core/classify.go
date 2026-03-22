@@ -21,6 +21,17 @@ type ClassifyResult struct {
 	TagOverrideEnforced bool           // true when the decision was enforced by a tag_override (should block even in dryrun)
 }
 
+// WithDecision returns a deep copy of the result with a new decision and reason.
+// Slices are deep-copied to avoid aliasing with the original.
+func (r *ClassifyResult) WithDecision(d Decision, reason string) *ClassifyResult {
+	result := *r
+	result.Decision = d
+	result.Reason = reason
+	result.SubResults = append([]SubCommandResult(nil), r.SubResults...)
+	result.DryRunMatches = append([]BuiltinMatch(nil), r.DryRunMatches...)
+	return &result
+}
+
 // SubCommandResult holds the classification result for a single sub-command.
 type SubCommandResult struct {
 	Command             string
