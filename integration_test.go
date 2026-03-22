@@ -3,6 +3,7 @@ package fuse_test
 import (
 	"bytes"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/runger/fuse/internal/adapters"
 	"github.com/runger/fuse/internal/approve"
+	"github.com/runger/fuse/internal/config"
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/db"
 	"github.com/runger/fuse/internal/policy"
@@ -20,6 +22,23 @@ func skipIfShort(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
+	}
+}
+
+// withIsolatedHome sets FUSE_HOME and HOME to a temp directory so
+// integration tests don't read/write the user's real fuse state.
+// Creates the enabled marker so fuse is active.
+func withIsolatedHome(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("FUSE_HOME", filepath.Join(home, ".fuse"))
+	t.Setenv("HOME", home)
+	marker := config.EnabledMarkerPath()
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		t.Fatalf("mkdir for enabled marker: %v", err)
+	}
+	if err := os.WriteFile(marker, []byte("1"), 0o600); err != nil {
+		t.Fatalf("write enabled marker: %v", err)
 	}
 }
 
@@ -55,6 +74,7 @@ func TestIntegration_RunUsageErrorsExitTwo(t *testing.T) {
 
 func TestIntegration_HookFlow(t *testing.T) {
 	skipIfShort(t)
+	withIsolatedHome(t)
 
 	t.Run("safe command returns exit 0", func(t *testing.T) {
 		input := `{"tool_name":"Bash","tool_input":{"command":"ls -la"},"session_id":"integ-test","cwd":"/tmp"}`
@@ -99,6 +119,7 @@ func TestIntegration_HookFlow(t *testing.T) {
 
 func TestIntegration_HookFlow_MCP(t *testing.T) {
 	skipIfShort(t)
+	withIsolatedHome(t)
 
 	t.Run("safe MCP read tool returns exit 0", func(t *testing.T) {
 		input := `{"tool_name":"mcp__server__read_file","tool_input":{"path":"/tmp/test.txt"},"session_id":"integ-test","cwd":"/tmp"}`
@@ -113,7 +134,7 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 
 	t.Run("destructive MCP delete tool returns caution/approval", func(t *testing.T) {
 		t.Setenv("FUSE_NON_INTERACTIVE", "1")
-		t.Setenv("FUSE_HOOK_TIMEOUT", "5s") // short timeout for tests (must be > 3s)
+		t.Setenv("FUSE_HOOK_TIMEOUT", "3.5s") // short timeout for tests (must be > 3s)
 		input := `{"tool_name":"mcp__server__delete_database","tool_input":{"name":"prod"},"session_id":"integ-test","cwd":"/tmp"}`
 		stdin := strings.NewReader(input)
 		stderr := &bytes.Buffer{}
@@ -149,6 +170,7 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 
 func TestIntegration_FileInspection(t *testing.T) {
 	skipIfShort(t)
+	withIsolatedHome(t)
 
 	evaluator := policy.NewEvaluator(nil)
 
@@ -387,6 +409,7 @@ func TestIntegration_LazyDB(t *testing.T) {
 
 func TestIntegration_DirectiveMessaging(t *testing.T) {
 	skipIfShort(t)
+	withIsolatedHome(t)
 
 	t.Run("blocked command stderr contains POLICY_BLOCK directive", func(t *testing.T) {
 		input := `{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"integ-test","cwd":"/tmp"}`
@@ -650,6 +673,7 @@ func TestIntegration_DecisionKeyDeterminism(t *testing.T) {
 
 func TestIntegration_NonBashToolAllowed(t *testing.T) {
 	skipIfShort(t)
+	withIsolatedHome(t)
 
 	// Non-Bash, non-MCP tools should always be allowed through the hook.
 	tools := []string{"Read", "Write", "Edit", "Grep", "Glob"}
