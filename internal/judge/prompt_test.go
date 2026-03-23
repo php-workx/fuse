@@ -74,8 +74,8 @@ func TestBuildUserPrompt_WithScriptContents(t *testing.T) {
 }
 
 func TestBuildUserPrompt_TruncatedScript(t *testing.T) {
-	// Create a script larger than maxScriptBytes.
-	bigScript := strings.Repeat("echo hello\n", maxScriptBytes/11+1)
+	// Create a script larger than MaxScriptBytes.
+	bigScript := strings.Repeat("echo hello\n", MaxScriptBytes/11+1)
 	ctx := PromptContext{
 		Command:         "bash big.sh",
 		Cwd:             "/workspace",

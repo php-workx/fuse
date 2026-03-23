@@ -71,7 +71,7 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 
 	resultCh := make(chan int, 1)
 	go func() {
-		resultCh <- runHookInternal(stdin, stderr)
+		resultCh <- runHookInternal(ctx, stdin, stderr)
 	}()
 
 	select {
@@ -84,7 +84,7 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 }
 
 // runHookInternal contains the core hook logic without timeout management.
-func runHookInternal(stdin io.Reader, stderr io.Writer) int {
+func runHookInternal(ctx context.Context, stdin io.Reader, stderr io.Writer) int {
 	mode := config.Mode()
 	if mode == config.ModeDisabled {
 		return 0 // fully disabled: zero processing
@@ -122,9 +122,9 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 	var exitCode int
 	switch {
 	case strings.HasPrefix(req.ToolName, "mcp__"):
-		exitCode = handleMCPTool(req, stderr, cfg, dryRun)
+		exitCode = handleMCPTool(ctx, req, stderr, cfg, dryRun)
 	case req.ToolName == "Bash":
-		exitCode = handleBashTool(req, stderr, cfg, dryRun)
+		exitCode = handleBashTool(ctx, req, stderr, cfg, dryRun)
 	case isNativeClaudeFileTool(req.ToolName):
 		exitCode = handleNativeFileTool(req, stderr, cfg, dryRun)
 	default:
@@ -136,7 +136,7 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 }
 
 // handleMCPTool handles MCP tool classification.
-func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+func handleMCPTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Parse tool_input as a generic map for MCP argument scanning.
 	var args map[string]interface{}
 	if len(req.ToolInput) > 0 {
@@ -166,7 +166,7 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 		ToolName:        req.ToolName,
 	}
 	var mcpVerdict *judge.Verdict
-	mcpResult, mcpVerdict = judge.MaybeJudge(context.Background(), cfg, mcpResult, mcpPromptCtx)
+	mcpResult, mcpVerdict = judge.MaybeJudge(ctx, cfg, mcpResult, mcpPromptCtx)
 	decision = mcpResult.Decision
 
 	// MCP tools don't use tag_overrides — dryrun always allows.
@@ -221,7 +221,7 @@ func extractMCPAction(toolName string) string {
 }
 
 // handleBashTool handles Bash tool classification.
-func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Parse tool_input to extract command.
 	if len(req.ToolInput) == 0 {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Missing tool_input. Do not retry this exact command. Ask the user for guidance.")
@@ -268,7 +268,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 	var verdict *judge.Verdict
 	if !result.TagOverrideEnforced {
 		promptCtx := buildJudgeContext(input.Command, req.Cwd, "Bash", result)
-		result, verdict = judge.MaybeJudge(context.Background(), cfg, result, promptCtx)
+		result, verdict = judge.MaybeJudge(ctx, cfg, result, promptCtx)
 	}
 
 	// Log per-tag dryrun matches for observability.
@@ -433,33 +433,47 @@ func buildJudgeContext(command, cwd, toolName string, result *core.ClassifyResul
 	}
 	if cwd != "" {
 		if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
-			absPath := filepath.Clean(filepath.Join(cwd, scriptPath))
-			// Resolve symlinks so the check can't be bypassed with a symlink
-			// pointing outside cwd.
-			resolved, evalErr := filepath.EvalSymlinks(absPath)
-			if evalErr != nil {
-				resolved = absPath // file doesn't exist, use cleaned path
-			}
-			cleanCwd := filepath.Clean(cwd)
-			if cwdResolved, err := filepath.EvalSymlinks(cleanCwd); err == nil {
-				cleanCwd = cwdResolved
-			}
-			// Only read scripts that resolve within cwd to prevent path traversal.
-			if strings.HasPrefix(resolved, cleanCwd+string(filepath.Separator)) || resolved == cleanCwd {
-				if content, readErr := os.ReadFile(resolved); readErr == nil {
-					ctx.ScriptContents = string(content)
-					ctx.ScriptPath = scriptPath
-				}
+			if content := readScriptSafe(cwd, scriptPath); content != "" {
+				ctx.ScriptContents = content
+				ctx.ScriptPath = scriptPath
 			}
 		}
 	}
 	return ctx
 }
 
+// readScriptSafe reads a script file only if it's a regular file within cwd,
+// resolving symlinks to prevent escaping the workspace. Returns empty string
+// if the file is outside cwd, not a regular file, too large, or unreadable.
+func readScriptSafe(cwd, scriptPath string) string {
+	absPath := filepath.Clean(filepath.Join(cwd, scriptPath))
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "" // file doesn't exist
+	}
+	cleanCwd := filepath.Clean(cwd)
+	if cwdResolved, evalErr := filepath.EvalSymlinks(cleanCwd); evalErr == nil {
+		cleanCwd = cwdResolved
+	}
+	if !strings.HasPrefix(resolved, cleanCwd+string(filepath.Separator)) && resolved != cleanCwd {
+		return "" // path traversal
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > judge.MaxScriptBytes {
+		return "" // not a regular file or too large
+	}
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return ""
+	}
+	return string(content)
+}
+
 // applyVerdict populates the LLM judge fields on an EventRecord from a Verdict.
-// When the verdict was applied, restores the original classifier decision in the
-// event record so that judge accuracy queries can compare judge_decision against
-// the pre-judge classification.
+// When the verdict was applied, event.Decision is set to the original classifier
+// output (pre-judge) so accuracy queries can compare judge_decision vs the
+// classifier's opinion. The enforced outcome is recoverable: if judge_applied,
+// the enforced decision = judge_decision; otherwise enforced = decision.
 func applyVerdict(event *db.EventRecord, verdict *judge.Verdict) {
 	if verdict != nil {
 		event.JudgeDecision = string(verdict.JudgeDecision)

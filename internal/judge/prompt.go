@@ -47,10 +47,10 @@ Important:
 Respond with ONLY this JSON (no markdown, no explanation):
 {"decision":"SAFE|CAUTION|APPROVAL","confidence":0.0-1.0,"reasoning":"one sentence"}`
 
-// maxScriptBytes is the maximum script content to send to the judge.
+// MaxScriptBytes is the maximum script content to send to the judge.
 // Above this, the judge sees a truncation notice and should keep the original
 // classification. 50KB covers virtually all real scripts.
-const maxScriptBytes = 50 * 1024
+const MaxScriptBytes = 50 * 1024
 
 // PromptContext holds all context needed for the judge to make an informed decision.
 type PromptContext struct {
@@ -81,9 +81,9 @@ func BuildUserPrompt(ctx PromptContext) string {
 	}
 	if ctx.ScriptContents != "" {
 		scrubbed := db.ScrubCredentials(ctx.ScriptContents)
-		if len(scrubbed) > maxScriptBytes {
+		if len(scrubbed) > MaxScriptBytes {
 			fmt.Fprintf(&b, "\nScript contents (%s, TRUNCATED at 50KB — cannot fully assess):\n%s\n",
-				ctx.ScriptPath, scrubbed[:maxScriptBytes])
+				ctx.ScriptPath, scrubbed[:MaxScriptBytes])
 		} else {
 			fmt.Fprintf(&b, "\nScript contents (%s):\n%s\n", ctx.ScriptPath, scrubbed)
 		}
