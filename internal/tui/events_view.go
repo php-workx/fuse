@@ -274,7 +274,7 @@ func (m EventsModel) renderDetail(e *db.EventRecord) string {
 		fmt.Fprintf(&b, "  Judge:       ERROR -- %s\n", sanitize(e.JudgeError))
 	} else if e.JudgeDecision != "" {
 		judgeLine := fmt.Sprintf("%s (%d%%) via %s",
-			e.JudgeDecision,
+			sanitize(e.JudgeDecision),
 			int(e.JudgeConfidence*100),
 			sanitize(fallbackValue(e.JudgeProvider)))
 		if e.JudgeReasoning != "" {
@@ -345,7 +345,7 @@ func writeWrapped(b *strings.Builder, label, value string, maxWidth int) {
 }
 
 // formatJudgeColumn returns an 11-char wide judge indicator for the table row.
-// Format: "=SAFE  94%" (agree) or "→APPR  88%" (disagree). Empty if no judge.
+// Format: "=SAFE  94%" (agree) or ">APPR  88%" (disagree). Empty if no judge.
 func formatJudgeColumn(e *db.EventRecord) string {
 	if e.JudgeDecision == "" {
 		return fmt.Sprintf("%-11s", "")
@@ -366,7 +366,7 @@ func formatJudgeColumn(e *db.EventRecord) string {
 	return styleDim.Render(fmt.Sprintf("%-11s", text))
 }
 
-// abbreviateDecision shortens "APPROVAL" to "APPR" and leaves others as-is (max 4 chars).
+// abbreviateDecision shortens decision names to max 4 chars for the judge column.
 func abbreviateDecision(d string) string {
 	upper := strings.ToUpper(d)
 	switch upper {
@@ -377,6 +377,9 @@ func abbreviateDecision(d string) string {
 	case "BLOCKED":
 		return "BLKD"
 	default:
+		if len(upper) > 4 {
+			return upper[:4]
+		}
 		return upper
 	}
 }

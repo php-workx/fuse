@@ -197,7 +197,7 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 				},
 			},
 		}
-		return handleApproval(req, result, stderr, cfg, dryRun)
+		return handleApproval(req, result, mcpVerdict, stderr, cfg, dryRun)
 	default:
 		// SAFE
 		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
@@ -264,9 +264,12 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 	}
 
 	// LLM judge: get a second opinion on the classification.
-	promptCtx := buildJudgeContext(input.Command, req.Cwd, "Bash", result)
+	// Skip for tag-override-enforced results — policy overrides are authoritative.
 	var verdict *judge.Verdict
-	result, verdict = judge.MaybeJudge(context.Background(), cfg, result, promptCtx)
+	if !result.TagOverrideEnforced {
+		promptCtx := buildJudgeContext(input.Command, req.Cwd, "Bash", result)
+		result, verdict = judge.MaybeJudge(context.Background(), cfg, result, promptCtx)
+	}
 
 	// Log per-tag dryrun matches for observability.
 	for i := range result.DryRunMatches {
@@ -302,7 +305,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 		return 0
 
 	case core.DecisionApproval:
-		return handleApproval(req, result, stderr, cfg, dryRun)
+		return handleApproval(req, result, verdict, stderr, cfg, dryRun)
 
 	default:
 		// Unknown decision: fail-closed.
@@ -312,7 +315,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 }
 
 // handleApproval handles the APPROVAL decision path, which requires DB access.
-func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge.Verdict, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Lazy DB access: only APPROVAL path opens the database.
 	database, secret, err := openDBAndSecret()
 	if err != nil {
@@ -372,16 +375,20 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 	cmd := extractCommandFromResult(result)
 	switch decision {
 	case core.DecisionApproval, core.DecisionSafe, core.DecisionCaution:
-		_ = database.LogEvent(&db.EventRecord{
+		event := &db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: string(decision),
 			RuleID: result.RuleID, Reason: result.Reason, Source: "hook", Agent: "claude", Cwd: req.Cwd,
-		})
+		}
+		applyVerdict(event, verdict)
+		_ = database.LogEvent(event)
 		return 0
 	default:
-		_ = database.LogEvent(&db.EventRecord{
+		event := &db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: "BLOCKED",
 			RuleID: result.RuleID, Reason: "user denied", Source: "hook", Agent: "claude", Cwd: req.Cwd,
-		})
+		}
+		applyVerdict(event, verdict)
+		_ = database.LogEvent(event)
 		fmt.Fprintln(stderr, "fuse:USER_DENIED STOP. Do not retry this exact command without new user input.")
 		return 2
 	}
@@ -427,10 +434,19 @@ func buildJudgeContext(command, cwd, toolName string, result *core.ClassifyResul
 	if cwd != "" {
 		if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
 			absPath := filepath.Clean(filepath.Join(cwd, scriptPath))
+			// Resolve symlinks so the check can't be bypassed with a symlink
+			// pointing outside cwd.
+			resolved, evalErr := filepath.EvalSymlinks(absPath)
+			if evalErr != nil {
+				resolved = absPath // file doesn't exist, use cleaned path
+			}
 			cleanCwd := filepath.Clean(cwd)
+			if cwdResolved, err := filepath.EvalSymlinks(cleanCwd); err == nil {
+				cleanCwd = cwdResolved
+			}
 			// Only read scripts that resolve within cwd to prevent path traversal.
-			if strings.HasPrefix(absPath, cleanCwd+string(filepath.Separator)) || absPath == cleanCwd {
-				if content, readErr := os.ReadFile(absPath); readErr == nil {
+			if strings.HasPrefix(resolved, cleanCwd+string(filepath.Separator)) || resolved == cleanCwd {
+				if content, readErr := os.ReadFile(resolved); readErr == nil {
 					ctx.ScriptContents = string(content)
 					ctx.ScriptPath = scriptPath
 				}

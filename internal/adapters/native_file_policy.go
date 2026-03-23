@@ -54,7 +54,7 @@ func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config,
 		logHookEvent(req.SessionID, extractCommandFromResult(result), req.Cwd, result)
 		return 2
 	case core.DecisionApproval:
-		return handleApproval(req, result, stderr, cfg, dryRun)
+		return handleApproval(req, result, nil, stderr, cfg, dryRun)
 	default:
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Unknown classification result. Do not retry this exact command. Ask the user for guidance.")
 		return 2

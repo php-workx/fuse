@@ -68,7 +68,7 @@ type PromptContext struct {
 // BuildUserPrompt constructs the user prompt from the given context.
 func BuildUserPrompt(ctx PromptContext) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Command: %s\n", ctx.Command)
+	fmt.Fprintf(&b, "Command: %s\n", db.ScrubCredentials(ctx.Command))
 	fmt.Fprintf(&b, "Working directory: %s\n", ctx.Cwd)
 	if ctx.WorkspaceRoot != "" {
 		fmt.Fprintf(&b, "Workspace: %s\n", ctx.WorkspaceRoot)

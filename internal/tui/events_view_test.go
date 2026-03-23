@@ -442,7 +442,7 @@ func TestAbbreviateDecision(t *testing.T) {
 		{"SAFE", "SAFE"},
 		{"safe", "SAFE"},
 		{"approval", "APPR"},
-		{"UNKNOWN", "UNKNOWN"},
+		{"UNKNOWN", "UNKN"},
 	}
 	for _, tt := range tests {
 		got := abbreviateDecision(tt.input)
