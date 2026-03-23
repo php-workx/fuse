@@ -18,6 +18,7 @@ import (
 	"github.com/runger/fuse/internal/config"
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/db"
+	"github.com/runger/fuse/internal/judge"
 	"github.com/runger/fuse/internal/policy"
 )
 
@@ -141,6 +142,11 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 		return 1, fmt.Errorf("classify command: %w", err)
 	}
 
+	// LLM judge: get a second opinion on the classification.
+	promptCtx := buildJudgeContext(command, cwd, "Bash", result)
+	var verdict *judge.Verdict
+	result, verdict = judge.MaybeJudge(context.Background(), cfg, result, promptCtx)
+
 	// Open database for event logging and approvals.
 	database, dbErr := db.OpenDB(config.DBPath())
 	if dbErr != nil {
@@ -151,10 +157,17 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 		defer func() { _ = database.Close() }()
 	}
 
+	// logWithVerdict is a helper to log events with judge verdict fields.
+	logWithVerdict := func(outcome string) {
+		event := newEvent(result, "run", "manual", "", command, cwd, outcome)
+		applyVerdict(event, verdict)
+		logEvent(database, event)
+	}
+
 	// Handle classification result.
 	switch result.Decision {
 	case core.DecisionBlocked:
-		logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "blocked"))
+		logWithVerdict("blocked")
 		cleanupExecutionState(database, cfg)
 		if !dryRun {
 			fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
@@ -195,12 +208,12 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 			}
 			if decision == core.DecisionBlocked {
 				fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
-				logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "denied"))
+				logWithVerdict("denied")
 				cleanupExecutionState(database, cfg)
 				return 1, nil
 			}
 		} else {
-			logEvent(database, newEvent(result, "run", "manual", "", command, cwd, "dry-run"))
+			logWithVerdict("dry-run")
 		}
 
 	default:
@@ -221,7 +234,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	if err != nil {
 		outcome = "error"
 	}
-	logEvent(database, newEvent(result, "run", "manual", "", command, cwd, outcome))
+	logWithVerdict(outcome)
 	cleanupExecutionState(database, cfg)
 
 	return exitCode, err

@@ -105,6 +105,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.events.SetData(msg.events)
 			case viewStats:
 				m.stats.SetData(msg.summary)
+				m.stats.SetJudgeSummary(msg.judgeSummary)
 			case viewApprovals:
 				m.approvals.SetData(msg.approvals)
 				m.approvals.SetPending(msg.pending)
@@ -272,13 +273,14 @@ func tickCmd(view viewMode) tea.Cmd {
 }
 
 type dataMsg struct {
-	reqGen    uint64
-	view      viewMode
-	events    []db.EventRecord
-	summary   db.EventSummary
-	approvals []db.Approval
-	pending   []db.PendingRequest
-	err       error
+	reqGen       uint64
+	view         viewMode
+	events       []db.EventRecord
+	summary      db.EventSummary
+	judgeSummary db.JudgeSummary
+	approvals    []db.Approval
+	pending      []db.PendingRequest
+	err          error
 }
 
 func (m Model) fetchData() tea.Cmd {
@@ -292,6 +294,9 @@ func (m Model) fetchData() tea.Cmd {
 			msg.events, msg.err = database.ListEvents(&db.EventFilter{Limit: 200})
 		case viewStats:
 			msg.summary, msg.err = database.SummarizeEvents()
+			// Fetch judge accuracy summary independently — a transient error
+			// should not block the main stats update.
+			msg.judgeSummary, _ = database.SummarizeJudgeAccuracy()
 		case viewApprovals:
 			msg.approvals, msg.err = database.ListApprovals(50)
 			// Fetch pending requests independently — a transient pending error

@@ -33,6 +33,15 @@ func MaxDecision(a, b Decision) Decision {
 	return b
 }
 
+// DecisionSeverity returns the numeric severity level for a decision.
+// SAFE=0, CAUTION=1, APPROVAL=2, BLOCKED=3, unknown=-1.
+func DecisionSeverity(d Decision) int {
+	if s, ok := decisionSeverity[d]; ok {
+		return s
+	}
+	return -1
+}
+
 // BuiltinMatch holds the result of a builtin rule evaluation,
 // including whether the match should be enforced or only logged.
 type BuiltinMatch struct {

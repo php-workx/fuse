@@ -53,10 +53,10 @@ func withFuseHome(t *testing.T) string {
 func shortTestDrains(t *testing.T) {
 	t.Helper()
 	oldDrain, oldPost := codexDrainTimeout, codexDrainPostCancel
-	codexDrainTimeout = 500 * time.Millisecond
-	codexDrainPostCancel = 200 * time.Millisecond
+	codexDrainTimeout = 750 * time.Millisecond
+	codexDrainPostCancel = 100 * time.Millisecond
 	oldHook := hookTimeout
-	hookTimeout = 500 * time.Millisecond
+	hookTimeout = 750 * time.Millisecond
 	t.Cleanup(func() {
 		codexDrainTimeout = oldDrain
 		codexDrainPostCancel = oldPost
@@ -287,7 +287,7 @@ func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	enableFuseForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
 	defer cancel()
 	_, _, exitCode, err := executeCodexShellCommand(ctx, "python nonexistent_script.py", "", "test-session", time.Minute)
 	if err == nil {
@@ -703,14 +703,14 @@ func TestRunCodexShellServer_SlowRequestDoesNotBlockFast(t *testing.T) {
 		done <- RunCodexShellServer(pr, &output)
 	}()
 
-	// Send slow command (sleep 0.5).
+	// Send slow command (sleep 0.2).
 	slow := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(1), "method": "tools/call", "params": map[string]interface{}{
-		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 0.5 && printf slow"},
+		"name": "run_command", "arguments": map[string]interface{}{"command": "sleep 0.2 && printf slow"},
 	}}
 	writeFramedRequest(t, pw, slow)
 
 	// Small delay to ensure slow request is being processed.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	// Send fast command.
 	fast := jsonRPCMessage{"jsonrpc": "2.0", "id": float64(2), "method": "tools/call", "params": map[string]interface{}{
@@ -719,7 +719,7 @@ func TestRunCodexShellServer_SlowRequestDoesNotBlockFast(t *testing.T) {
 	writeFramedRequest(t, pw, fast)
 
 	// Close stdin after a brief delay to let both process.
-	time.Sleep(1 * time.Second)
+	time.Sleep(400 * time.Millisecond)
 	_ = pw.Close()
 	<-done
 
@@ -839,8 +839,8 @@ func TestRunCodexShellServer_ShutdownKillsInFlight(t *testing.T) {
 	select {
 	case <-done:
 		// Good — server shut down promptly.
-	case <-time.After(3 * time.Second):
-		t.Fatal("RunCodexShellServer did not shut down within 3s after stdin close")
+	case <-time.After(1500 * time.Millisecond):
+		t.Fatal("RunCodexShellServer did not shut down within 1.5s after stdin close")
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/runger/fuse/internal/config"
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/db"
+	"github.com/runger/fuse/internal/judge"
 	"github.com/runger/fuse/internal/policy"
 )
 
@@ -282,6 +283,10 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 		return "", "", 0, err
 	}
 
+	// LLM judge: get a second opinion on the classification.
+	var verdict *judge.Verdict
+	result, verdict = judge.MaybeJudge(ctx, cfg, result, buildJudgeContext(command, cwd, "Bash", result))
+
 	if ctx.Err() != nil {
 		return "", "", 0, ctx.Err()
 	}
@@ -294,9 +299,16 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 		defer func() { _ = database.Close() }()
 	}
 
+	// logWithVerdict is a helper to log events with judge verdict fields.
+	logWithVerdict := func(outcome string) {
+		event := newEvent(result, "codex-shell", "codex", sessionID, command, cwd, outcome)
+		applyVerdict(event, verdict)
+		logEvent(database, event)
+	}
+
 	switch result.Decision {
 	case core.DecisionBlocked:
-		logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "blocked"))
+		logWithVerdict("blocked")
 		cleanupExecutionState(database, cfg)
 		if !dryRun {
 			return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
@@ -329,12 +341,12 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 				return "", "", 0, promptErr
 			}
 			if decision == core.DecisionBlocked {
-				logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "denied"))
+				logWithVerdict("denied")
 				cleanupExecutionState(database, cfg)
 				return "", "", 0, errApprovalDenied
 			}
 		} else {
-			logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, "dry-run"))
+			logWithVerdict("dry-run")
 		}
 
 	default:
@@ -356,7 +368,7 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 	if err != nil {
 		outcome = "error"
 	}
-	logEvent(database, newEvent(result, "codex-shell", "codex", sessionID, command, cwd, outcome))
+	logWithVerdict(outcome)
 	cleanupExecutionState(database, cfg)
 	return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
 }

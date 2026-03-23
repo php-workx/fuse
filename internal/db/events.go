@@ -29,6 +29,15 @@ type EventRecord struct {
 	ApprovalID        string `json:"approval_id,omitempty"`
 	UserResponse      string `json:"user_response,omitempty"`
 	ExecutionExitCode *int64 `json:"execution_exit_code,omitempty"`
+
+	// LLM judge fields (empty when judge is off or not triggered).
+	JudgeDecision   string  `json:"judge_decision,omitempty"`
+	JudgeConfidence float64 `json:"judge_confidence,omitempty"`
+	JudgeReasoning  string  `json:"judge_reasoning,omitempty"`
+	JudgeApplied    bool    `json:"judge_applied,omitempty"`
+	JudgeProvider   string  `json:"judge_provider,omitempty"`
+	JudgeLatencyMs  int64   `json:"judge_latency_ms,omitempty"`
+	JudgeError      string  `json:"judge_error,omitempty"`
 }
 
 // EventFilter limits ListEvents results.
@@ -103,9 +112,10 @@ func (d *DB) LogEvent(record *EventRecord) error {
 	_, err := d.db.Exec(`
 		INSERT INTO events (
 			session_id, command, decision, rule_id, reason, duration_ms, metadata,
-			source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code
+			source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code,
+			judge_decision, judge_confidence, judge_reasoning, judge_applied, judge_provider, judge_latency_ms, judge_error
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		record.SessionID,
 		record.Command,
@@ -122,6 +132,13 @@ func (d *DB) LogEvent(record *EventRecord) error {
 		record.ApprovalID,
 		record.UserResponse,
 		executionExitCode,
+		record.JudgeDecision,
+		record.JudgeConfidence,
+		record.JudgeReasoning,
+		boolToInt(record.JudgeApplied),
+		record.JudgeProvider,
+		record.JudgeLatencyMs,
+		record.JudgeError,
 	)
 	if err != nil {
 		return fmt.Errorf("log event: %w", err)
@@ -161,7 +178,8 @@ func (d *DB) ListEvents(filter *EventFilter) ([]EventRecord, error) {
 
 	var qb strings.Builder
 	qb.WriteString(`SELECT id, timestamp, session_id, command, decision, rule_id, reason, duration_ms, metadata,
-		source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code
+		source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code,
+		judge_decision, judge_confidence, judge_reasoning, judge_applied, judge_provider, judge_latency_ms, judge_error
 		FROM events`)
 	if len(clauses) > 0 {
 		qb.WriteString(" WHERE ")
@@ -178,48 +196,9 @@ func (d *DB) ListEvents(filter *EventFilter) ([]EventRecord, error) {
 
 	var events []EventRecord
 	for rows.Next() {
-		var event EventRecord
-		var sessionID, command, decision, ruleID, reason, metadata sql.NullString
-		var source, agent, cwd, workspaceRoot, approvalID, userResponse sql.NullString
-		var fileInspected sql.NullInt64
-		var executionExitCode sql.NullInt64
-		if err := rows.Scan(
-			&event.ID,
-			&event.Timestamp,
-			&sessionID,
-			&command,
-			&decision,
-			&ruleID,
-			&reason,
-			&event.DurationMs,
-			&metadata,
-			&source,
-			&agent,
-			&cwd,
-			&workspaceRoot,
-			&fileInspected,
-			&approvalID,
-			&userResponse,
-			&executionExitCode,
-		); err != nil {
-			return nil, fmt.Errorf("scan event: %w", err)
-		}
-		event.SessionID = sessionID.String
-		event.Command = command.String
-		event.Decision = decision.String
-		event.RuleID = ruleID.String
-		event.Reason = reason.String
-		event.Metadata = metadata.String
-		event.Source = source.String
-		event.Agent = agent.String
-		event.Cwd = cwd.String
-		event.WorkspaceRoot = workspaceRoot.String
-		event.ApprovalID = approvalID.String
-		event.UserResponse = userResponse.String
-		event.FileInspected = fileInspected.Valid && fileInspected.Int64 != 0
-		if executionExitCode.Valid {
-			code := executionExitCode.Int64
-			event.ExecutionExitCode = &code
+		event, err := scanEventRow(rows)
+		if err != nil {
+			return nil, err
 		}
 		events = append(events, event)
 	}
@@ -227,6 +206,71 @@ func (d *DB) ListEvents(filter *EventFilter) ([]EventRecord, error) {
 		return nil, fmt.Errorf("iterate events: %w", err)
 	}
 	return events, nil
+}
+
+// scanEventRow scans a single row from an events query into an EventRecord.
+func scanEventRow(rows *sql.Rows) (EventRecord, error) {
+	var event EventRecord
+	var sessionID, command, decision, ruleID, reason, metadata sql.NullString
+	var source, agent, cwd, workspaceRoot, approvalID, userResponse sql.NullString
+	var fileInspected sql.NullInt64
+	var executionExitCode sql.NullInt64
+	var judgeDecision, judgeReasoning, judgeProvider, judgeError sql.NullString
+	var judgeConfidence sql.NullFloat64
+	var judgeApplied, judgeLatencyMs sql.NullInt64
+	if err := rows.Scan(
+		&event.ID,
+		&event.Timestamp,
+		&sessionID,
+		&command,
+		&decision,
+		&ruleID,
+		&reason,
+		&event.DurationMs,
+		&metadata,
+		&source,
+		&agent,
+		&cwd,
+		&workspaceRoot,
+		&fileInspected,
+		&approvalID,
+		&userResponse,
+		&executionExitCode,
+		&judgeDecision,
+		&judgeConfidence,
+		&judgeReasoning,
+		&judgeApplied,
+		&judgeProvider,
+		&judgeLatencyMs,
+		&judgeError,
+	); err != nil {
+		return EventRecord{}, fmt.Errorf("scan event: %w", err)
+	}
+	event.SessionID = sessionID.String
+	event.Command = command.String
+	event.Decision = decision.String
+	event.RuleID = ruleID.String
+	event.Reason = reason.String
+	event.Metadata = metadata.String
+	event.Source = source.String
+	event.Agent = agent.String
+	event.Cwd = cwd.String
+	event.WorkspaceRoot = workspaceRoot.String
+	event.ApprovalID = approvalID.String
+	event.UserResponse = userResponse.String
+	event.FileInspected = fileInspected.Valid && fileInspected.Int64 != 0
+	if executionExitCode.Valid {
+		code := executionExitCode.Int64
+		event.ExecutionExitCode = &code
+	}
+	event.JudgeDecision = judgeDecision.String
+	event.JudgeConfidence = judgeConfidence.Float64
+	event.JudgeReasoning = judgeReasoning.String
+	event.JudgeApplied = judgeApplied.Valid && judgeApplied.Int64 != 0
+	event.JudgeProvider = judgeProvider.String
+	event.JudgeLatencyMs = judgeLatencyMs.Int64
+	event.JudgeError = judgeError.String
+	return event, nil
 }
 
 // SummarizeEvents aggregates counts across the full local event table

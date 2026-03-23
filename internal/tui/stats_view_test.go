@@ -1,6 +1,11 @@
 package tui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/runger/fuse/internal/db"
+)
 
 // --- shortenToLastN tests ---
 
@@ -138,5 +143,132 @@ func TestSortedCounts_NilMap(t *testing.T) {
 	got := sortedCounts(nil)
 	if len(got) != 0 {
 		t.Errorf("nil map: got %d pairs, want 0", len(got))
+	}
+}
+
+// --- SetData / SetJudgeSummary / View tests ---
+
+func TestStatsView_SetData(t *testing.T) {
+	m := NewStatsModel()
+	m.SetSize(80, 40)
+	m.SetData(db.EventSummary{
+		Total:       100,
+		ByDecision:  map[string]int{"SAFE": 80, "CAUTION": 15, "APPROVAL": 5},
+		ByAgent:     map[string]int{"claude": 100},
+		BySource:    map[string]int{"hook": 90, "codex-shell": 10},
+		ByWorkspace: map[string]int{"/Users/dev/project": 100},
+	})
+
+	got := m.View()
+	if !strings.Contains(got, "100") {
+		t.Error("View should show total count")
+	}
+	if !strings.Contains(got, "SAFE") {
+		t.Error("View should show SAFE decision")
+	}
+}
+
+func TestStatsView_WithJudgeSummary(t *testing.T) {
+	m := NewStatsModel()
+	m.SetSize(80, 40)
+	m.SetData(db.EventSummary{
+		Total:       50,
+		ByDecision:  map[string]int{"CAUTION": 50},
+		ByAgent:     map[string]int{"claude": 50},
+		BySource:    map[string]int{"hook": 50},
+		ByWorkspace: map[string]int{"/tmp": 50},
+	})
+	m.SetJudgeSummary(db.JudgeSummary{
+		Evaluated:      42,
+		Agreed:         35,
+		WouldUpgrade:   3,
+		WouldDowngrade: 4,
+		Errors:         0,
+		AvgLatencyMs:   487,
+	})
+
+	got := m.View()
+	if !strings.Contains(got, "Judge Accuracy") {
+		t.Error("View should show Judge Accuracy section when evaluated > 0")
+	}
+	if !strings.Contains(got, "42") {
+		t.Error("View should show evaluated count")
+	}
+	if !strings.Contains(got, "35") {
+		t.Error("View should show agreed count")
+	}
+	if !strings.Contains(got, "487") {
+		t.Error("View should show avg latency")
+	}
+}
+
+func TestStatsView_NoJudgeSummary(t *testing.T) {
+	m := NewStatsModel()
+	m.SetSize(80, 40)
+	m.SetData(db.EventSummary{
+		Total:       10,
+		ByDecision:  map[string]int{"SAFE": 10},
+		ByAgent:     map[string]int{"claude": 10},
+		BySource:    map[string]int{"hook": 10},
+		ByWorkspace: map[string]int{"/tmp": 10},
+	})
+	// No SetJudgeSummary — Evaluated stays 0.
+
+	got := m.View()
+	if strings.Contains(got, "Judge Accuracy") {
+		t.Error("View should NOT show Judge Accuracy section when evaluated == 0")
+	}
+}
+
+func TestStatsView_NoData(t *testing.T) {
+	m := NewStatsModel()
+	m.SetSize(80, 40)
+	got := m.View()
+	if !strings.Contains(got, "No data") {
+		t.Error("View should show 'No data' when no data set")
+	}
+}
+
+func TestStatsView_RenderSection(t *testing.T) {
+	counts := map[string]int{"alpha": 10, "beta": 5}
+	lines := renderSection("Test Section", counts, 40, 10, labelWidthShort, false)
+	if len(lines) < 3 {
+		t.Fatalf("renderSection: expected at least 3 lines (title + 2 entries), got %d", len(lines))
+	}
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(joined, "Test Section") {
+		t.Error("renderSection should contain title")
+	}
+	if !strings.Contains(joined, "alpha") {
+		t.Error("renderSection should contain 'alpha'")
+	}
+}
+
+func TestStatsView_SideBySide(t *testing.T) {
+	left := []string{"left-1", "left-2"}
+	right := []string{"right-1", "right-2", "right-3"}
+	got := sideBySide(left, right, 30)
+	lines := strings.Split(got, "\n")
+	// Should have max(2,3) = 3 non-empty lines.
+	nonEmpty := 0
+	for _, l := range lines {
+		if strings.TrimSpace(l) != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty < 3 {
+		t.Errorf("sideBySide: expected at least 3 non-empty lines, got %d", nonEmpty)
+	}
+}
+
+func TestStatsView_ShortenWorkspacePaths(t *testing.T) {
+	input := map[string]int{
+		"/Users/runger/workspaces/fuse":    50,
+		"/Users/runger/workspaces/project": 30,
+	}
+	got := shortenWorkspacePaths(input)
+	// Should shorten to last 2 components.
+	if _, ok := got[".../workspaces/fuse"]; !ok {
+		t.Errorf("shortenWorkspacePaths: expected '.../workspaces/fuse', got keys %v", got)
 	}
 }

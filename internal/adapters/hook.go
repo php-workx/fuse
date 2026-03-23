@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/runger/fuse/internal/core"
 	"github.com/runger/fuse/internal/db"
 	"github.com/runger/fuse/internal/events"
+	"github.com/runger/fuse/internal/judge"
 	"github.com/runger/fuse/internal/policy"
 )
 
@@ -69,7 +71,7 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 
 	resultCh := make(chan int, 1)
 	go func() {
-		resultCh <- runHookInternal(stdin, stderr)
+		resultCh <- runHookInternal(ctx, stdin, stderr)
 	}()
 
 	select {
@@ -82,7 +84,7 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 }
 
 // runHookInternal contains the core hook logic without timeout management.
-func runHookInternal(stdin io.Reader, stderr io.Writer) int {
+func runHookInternal(ctx context.Context, stdin io.Reader, stderr io.Writer) int {
 	mode := config.Mode()
 	if mode == config.ModeDisabled {
 		return 0 // fully disabled: zero processing
@@ -120,9 +122,9 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 	var exitCode int
 	switch {
 	case strings.HasPrefix(req.ToolName, "mcp__"):
-		exitCode = handleMCPTool(req, stderr, cfg, dryRun)
+		exitCode = handleMCPTool(ctx, req, stderr, cfg, dryRun)
 	case req.ToolName == "Bash":
-		exitCode = handleBashTool(req, stderr, cfg, dryRun)
+		exitCode = handleBashTool(ctx, req, stderr, cfg, dryRun)
 	case isNativeClaudeFileTool(req.ToolName):
 		exitCode = handleNativeFileTool(req, stderr, cfg, dryRun)
 	default:
@@ -134,7 +136,7 @@ func runHookInternal(stdin io.Reader, stderr io.Writer) int {
 }
 
 // handleMCPTool handles MCP tool classification.
-func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+func handleMCPTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Parse tool_input as a generic map for MCP argument scanning.
 	var args map[string]interface{}
 	if len(req.ToolInput) > 0 {
@@ -150,20 +152,37 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 	decision := core.ClassifyMCPTool(toolAction, args)
 	mcpCommand := formatMCPCommand(req.ToolName, args)
 
+	// LLM judge: get a second opinion on MCP tool classification.
+	mcpResult := &core.ClassifyResult{
+		Decision: decision,
+		Reason:   fmt.Sprintf("MCP tool %s classified as %s", req.ToolName, decision),
+	}
+	mcpPromptCtx := judge.PromptContext{
+		Command:         mcpCommand,
+		Cwd:             req.Cwd,
+		WorkspaceRoot:   judge.ShortenToLastN(req.Cwd, 2),
+		CurrentDecision: string(decision),
+		Reason:          mcpResult.Reason,
+		ToolName:        req.ToolName,
+	}
+	var mcpVerdict *judge.Verdict
+	mcpResult, mcpVerdict = judge.MaybeJudge(ctx, cfg, mcpResult, mcpPromptCtx)
+	decision = mcpResult.Decision
+
 	// MCP tools don't use tag_overrides — dryrun always allows.
 	if dryRun {
-		logHookEventFields(req.SessionID, mcpCommand, "", string(decision), "", "")
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
 		return 0
 	}
 
 	switch decision {
 	case core.DecisionBlocked:
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. MCP tool call blocked by policy. Do not retry this exact command. Ask the user for guidance.")
-		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionBlocked), "", "MCP tool blocked by policy")
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
 		return 2
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s classified as CAUTION\n", req.ToolName)
-		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionCaution), "", fmt.Sprintf("MCP tool %s classified as CAUTION", req.ToolName))
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
 		return 0
 	case core.DecisionApproval:
 		result := &core.ClassifyResult{
@@ -178,10 +197,10 @@ func handleMCPTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun
 				},
 			},
 		}
-		return handleApproval(req, result, stderr, cfg, dryRun)
+		return handleApproval(req, result, mcpVerdict, stderr, cfg, dryRun)
 	default:
 		// SAFE
-		logHookEventFields(req.SessionID, mcpCommand, "", string(core.DecisionSafe), "", "")
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
 		return 0
 	}
 }
@@ -202,7 +221,7 @@ func extractMCPAction(toolName string) string {
 }
 
 // handleBashTool handles Bash tool classification.
-func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Parse tool_input to extract command.
 	if len(req.ToolInput) == 0 {
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. Missing tool_input. Do not retry this exact command. Ask the user for guidance.")
@@ -244,6 +263,14 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 		return 2 // fail-closed
 	}
 
+	// LLM judge: get a second opinion on the classification.
+	// Skip for tag-override-enforced results — policy overrides are authoritative.
+	var verdict *judge.Verdict
+	if !result.TagOverrideEnforced {
+		promptCtx := buildJudgeContext(input.Command, req.Cwd, "Bash", result)
+		result, verdict = judge.MaybeJudge(ctx, cfg, result, promptCtx)
+	}
+
 	// Log per-tag dryrun matches for observability.
 	for i := range result.DryRunMatches {
 		m := &result.DryRunMatches[i]
@@ -254,7 +281,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 	// In dryrun mode, only enforce decisions from tag_overrides.
 	// Without TagOverrideEnforced, log and allow all commands.
 	if dryRun && !result.TagOverrideEnforced {
-		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		if result.Decision == core.DecisionCaution {
 			fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
 		}
@@ -263,22 +290,22 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 
 	switch result.Decision {
 	case core.DecisionSafe:
-		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		return 0
 
 	case core.DecisionBlocked:
 		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", result.Reason)
 		fmt.Fprintln(stderr, msg)
-		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		return 2
 
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
-		logHookEvent(req.SessionID, input.Command, req.Cwd, result)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		return 0
 
 	case core.DecisionApproval:
-		return handleApproval(req, result, stderr, cfg, dryRun)
+		return handleApproval(req, result, verdict, stderr, cfg, dryRun)
 
 	default:
 		// Unknown decision: fail-closed.
@@ -288,7 +315,7 @@ func handleBashTool(req HookRequest, stderr io.Writer, cfg *config.Config, dryRu
 }
 
 // handleApproval handles the APPROVAL decision path, which requires DB access.
-func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge.Verdict, stderr io.Writer, cfg *config.Config, dryRun bool) int {
 	// Lazy DB access: only APPROVAL path opens the database.
 	database, secret, err := openDBAndSecret()
 	if err != nil {
@@ -348,16 +375,20 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, stderr io.Writ
 	cmd := extractCommandFromResult(result)
 	switch decision {
 	case core.DecisionApproval, core.DecisionSafe, core.DecisionCaution:
-		_ = database.LogEvent(&db.EventRecord{
+		event := &db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: string(decision),
 			RuleID: result.RuleID, Reason: result.Reason, Source: "hook", Agent: "claude", Cwd: req.Cwd,
-		})
+		}
+		applyVerdict(event, verdict)
+		_ = database.LogEvent(event)
 		return 0
 	default:
-		_ = database.LogEvent(&db.EventRecord{
+		event := &db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: "BLOCKED",
 			RuleID: result.RuleID, Reason: "user denied", Source: "hook", Agent: "claude", Cwd: req.Cwd,
-		})
+		}
+		applyVerdict(event, verdict)
+		_ = database.LogEvent(event)
 		fmt.Fprintln(stderr, "fuse:USER_DENIED STOP. Do not retry this exact command without new user input.")
 		return 2
 	}
@@ -385,6 +416,98 @@ func logHookEventFields(sessionID, command, cwd, decision, ruleID, reason string
 		Agent:     "claude",
 		Cwd:       cwd,
 	})
+	cleanupExecutionState(database, loadRuntimeConfig())
+}
+
+// buildJudgeContext builds a judge PromptContext for shell commands, including
+// script contents when a referenced file is detected. Used by all shell adapters.
+func buildJudgeContext(command, cwd, toolName string, result *core.ClassifyResult) judge.PromptContext {
+	ctx := judge.PromptContext{
+		Command:         command,
+		Cwd:             cwd,
+		WorkspaceRoot:   judge.ShortenToLastN(cwd, 2),
+		CurrentDecision: string(result.Decision),
+		Reason:          result.Reason,
+		RuleID:          result.RuleID,
+		ToolName:        toolName,
+	}
+	if cwd != "" {
+		if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
+			if content := readScriptSafe(cwd, scriptPath); content != "" {
+				ctx.ScriptContents = content
+				ctx.ScriptPath = scriptPath
+			}
+		}
+	}
+	return ctx
+}
+
+// readScriptSafe reads a script file only if it's a regular file within cwd,
+// resolving symlinks to prevent escaping the workspace. Returns empty string
+// if the file is outside cwd, not a regular file, too large, or unreadable.
+func readScriptSafe(cwd, scriptPath string) string {
+	absPath := filepath.Clean(filepath.Join(cwd, scriptPath))
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "" // file doesn't exist
+	}
+	cleanCwd := filepath.Clean(cwd)
+	if cwdResolved, evalErr := filepath.EvalSymlinks(cleanCwd); evalErr == nil {
+		cleanCwd = cwdResolved
+	}
+	if !strings.HasPrefix(resolved, cleanCwd+string(filepath.Separator)) && resolved != cleanCwd {
+		return "" // path traversal
+	}
+	info, err := os.Stat(resolved)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > judge.MaxScriptBytes {
+		return "" // not a regular file or too large
+	}
+	content, err := os.ReadFile(resolved)
+	if err != nil {
+		return ""
+	}
+	return string(content)
+}
+
+// applyVerdict populates the LLM judge fields on an EventRecord from a Verdict.
+// When the verdict was applied, event.Decision is set to the original classifier
+// output (pre-judge) so accuracy queries can compare judge_decision vs the
+// classifier's opinion. The enforced outcome is recoverable: if judge_applied,
+// the enforced decision = judge_decision; otherwise enforced = decision.
+func applyVerdict(event *db.EventRecord, verdict *judge.Verdict) {
+	if verdict != nil {
+		event.JudgeDecision = string(verdict.JudgeDecision)
+		event.JudgeConfidence = verdict.Confidence
+		event.JudgeReasoning = verdict.Reasoning
+		event.JudgeApplied = verdict.Applied
+		event.JudgeProvider = verdict.ProviderName
+		event.JudgeLatencyMs = verdict.LatencyMs
+		event.JudgeError = verdict.Error
+		if verdict.Applied {
+			event.Decision = string(verdict.OriginalDecision)
+		}
+	}
+}
+
+// logHookEventWithVerdict logs a hook event with judge verdict fields. Best-effort.
+func logHookEventWithVerdict(sessionID, command, cwd string, result *core.ClassifyResult, verdict *judge.Verdict) {
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		return // best-effort: skip if DB unavailable
+	}
+	defer func() { _ = database.Close() }()
+	event := &db.EventRecord{
+		SessionID: sessionID,
+		Command:   command,
+		Decision:  string(result.Decision),
+		RuleID:    result.RuleID,
+		Reason:    result.Reason,
+		Source:    "hook",
+		Agent:     "claude",
+		Cwd:       cwd,
+	}
+	applyVerdict(event, verdict)
+	_ = database.LogEvent(event)
 	cleanupExecutionState(database, loadRuntimeConfig())
 }
 
