@@ -6,10 +6,9 @@
 Output assets/hero-light.gif
 
 Set Shell "bash"
-Set FontSize 16
-Set Width 900
-Set Height 500
-Set Padding 20
+Set FontSize 22
+Set Width 800
+Set Height 450
 Set Theme "Catppuccin Latte"
 Set TypingSpeed 40ms
 Set CursorBlink false
@@ -17,21 +16,24 @@ Set CursorBlink false
 # Title
 Type "# fuse — a local firewall for AI agent commands"
 Enter
+Enter
 Sleep 1s
 
 # Dangerous command — BLOCKED
-Type `echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"demo","cwd":"/tmp"}' | fuse hook evaluate`
+Type `echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' | fuse hook evaluate`
 Sleep 500ms
 Enter
-Sleep 2s
+Sleep 2.5s
+Enter
 
 # Safe command — allowed silently
-Type `echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"session_id":"demo","cwd":"/tmp"}' | fuse hook evaluate && echo "✓ allowed"`
+Type `echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | fuse hook evaluate && echo "✓ allowed"`
 Sleep 500ms
 Enter
-Sleep 2s
-
-# Show classification speed
-Type "# Classification: sub-millisecond. No cloud. No API keys."
+Sleep 2.5s
 Enter
-Sleep 2s
+
+# Closing
+Type "# Sub-millisecond. No cloud. No API keys."
+Enter
+Sleep 2.5s

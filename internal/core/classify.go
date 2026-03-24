@@ -466,7 +466,9 @@ func detectInlineScript(cmd string) (Decision, string) {
 // read-only modules and contains no dangerous patterns.
 // reSafeHeredocCmd matches commands that safely use heredocs for message bodies,
 // not for code execution. Covers git commit, gh pr create, and similar.
-var reSafeHeredocCmd = regexp.MustCompile(`^\s*(git\s+commit|git\s+tag|gh\s+pr\s+create|gh\s+issue\s+create)\b`)
+// Uses \b word boundary (not ^) because classification normalization may strip
+// env var prefixes, leaving residual tokens before the actual command.
+var reSafeHeredocCmd = regexp.MustCompile(`\b(git\s+commit|git\s+tag|gh\s+pr\s+create|gh\s+issue\s+create)\b`)
 
 func isSafeHeredocUsage(cmd string) bool {
 	return reSafeHeredocCmd.MatchString(cmd)

@@ -24,14 +24,12 @@ A local firewall for AI agent commands.
 ---
 
 AI coding agents run shell commands on your machine. Without a safety layer,
-one bad autocomplete away from `rm -rf ~/` and there's nothing between the
-agent's intent and your filesystem.
+a single bad command can delete your files, data, or cloud resources before
+you notice.
 
-Fuse classifies every shell command and MCP tool call into **SAFE**, **CAUTION**,
-**APPROVAL**, or **BLOCKED** — and gates execution before it happens. Runs
-locally, no cloud, no API keys. Works as a Claude Code hook, Codex MCP server,
-or generic MCP proxy. In proxy and run modes, fuse controls execution directly.
-In hook mode, fuse advises the agent — a guardrail, not a hard block.
+Fuse sits between your AI agent and your shell. It classifies every command,
+blocks the dangerous ones, and asks for approval before running anything risky.
+No cloud, no API keys, everything local.
 
 ## Install
 
@@ -62,13 +60,11 @@ go install github.com/php-workx/fuse/cmd/fuse@latest
 fuse enable
 
 # Block a dangerous command
-echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"demo","cwd":"/tmp"}' \
-  | fuse hook evaluate 2>&1
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' | fuse hook evaluate 2>&1
 # => fuse:POLICY_BLOCK STOP. Recursive force-remove of root, home, or variable path ...
 
 # Safe commands pass silently (exit 0, no output)
-echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"session_id":"demo","cwd":"/tmp"}' \
-  | fuse hook evaluate 2>&1
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | fuse hook evaluate 2>&1
 
 # Integrate with your agent
 fuse install claude    # or: fuse install codex

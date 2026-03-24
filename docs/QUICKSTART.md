@@ -30,8 +30,7 @@ fuse enable
 Block a dangerous command:
 
 ```bash
-echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"demo","cwd":"/tmp"}' \
-  | fuse hook evaluate 2>&1
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' | fuse hook evaluate 2>&1
 ```
 
 Expected output:
@@ -43,8 +42,7 @@ fuse:POLICY_BLOCK STOP. Recursive force-remove of root, home, or variable path D
 Allow a safe command (no output = allowed):
 
 ```bash
-echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"session_id":"demo","cwd":"/tmp"}' \
-  | fuse hook evaluate 2>&1
+echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | fuse hook evaluate 2>&1
 ```
 
 Expected: no output, exit code 0.
