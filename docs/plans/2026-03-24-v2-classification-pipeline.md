@@ -1,4 +1,4 @@
-# Plan: V2 Classification Pipeline — Inline Analysis, Network Awareness, Judge Daemon
+# Plan: V2 Classification Pipeline — Inline Analysis, Network Awareness, Policy LKG
 
 ## Context
 
@@ -10,18 +10,24 @@ APPROVAL because of the `<<EOF` pattern, not because of the `rm -rf /` inside. M
 The LLM judge can evaluate semantic risk, but it only triggers on CAUTION/APPROVAL, has
 1-3s latency per call (process spawn overhead), and doesn't receive inline script content.
 
-This plan upgrades three layers in one cohesive pass:
+This plan upgrades the classification pipeline in three areas:
 
 1. **Inline script extraction** — extract heredoc bodies and `$()` contents using the
    `mvdan.cc/sh` shell parser (already a dependency), classify them through the existing
    pipeline, and pass them to the judge
 2. **Network/URL awareness** — detect SSRF targets (cloud metadata, loopback, private
    networks), untrusted destinations, and insecure flags in curl/wget/httpie commands
-3. **Judge daemon** — Unix socket daemon with a long-lived `claude` process using
-   stream-json, eliminating per-call spawn overhead. Based on the proven clai daemon
-   pattern (`~/workspaces/clai/internal/claude/daemon.go`)
-4. **Policy LKG (last-known-good)** — filesystem-based fallback to prevent silent rule
+3. **Policy LKG (last-known-good)** — filesystem-based fallback to prevent silent rule
    loss when policy.yaml has errors
+
+**Judge daemon deferred to v2.1.** An ecosystem review (ECO-001 through ECO-011)
+found critical issues with the persistent `claude` process approach:
+- ECO-001: Multi-turn history contaminates classifications across workspaces
+- ECO-002: Init handshake ordering differs from plan assumption on live CLI
+- ECO-004: Judge process isn't sterile (loads hooks, plugins, skills)
+- ECO-010: Memory growth (~34MB over 5 turns) makes global daemon risky on laptops
+The v2.1 daemon will either use direct Anthropic API calls (truly stateless) or a
+supervisor managing fresh per-query worker processes. See Deferred section.
 
 Source research: `docs/research/openshell-patterns-for-fuse.md` (patterns #1, #2, #4, #5)
 
@@ -52,9 +58,6 @@ Pre-mortem applied: `.agents/council/2026-03-24-pre-mortem-v2-classification.md`
 | `internal/core/normalize_test.go` | Add heredoc/cmd-substitution extraction tests |
 | `internal/core/classify_test.go` | Add inline body classification tests |
 | `internal/policy/builtins_security.go` | Add URL-aware rules (SSRF, insecure certs) |
-| `internal/judge/daemon.go` | **NEW** — Unix socket daemon with long-lived claude process (stream-json) |
-| `internal/judge/daemon_test.go` | **NEW** — daemon tests |
-| `internal/judge/provider.go` | Add `DaemonProvider` to detection logic, add `Close()` to Provider interface |
 | `internal/judge/prompt.go` | Add `InlineScriptBody` to PromptContext |
 | `internal/config/config.go` | Add `URLTrustPolicy`, `PolicyLKG` config |
 | `internal/adapters/hook.go` | Update `buildJudgeContext()` for inline bodies |
@@ -80,10 +83,9 @@ Pre-mortem applied: `.agents/council/2026-03-24-pre-mortem-v2-classification.md`
 - Non-canonical numeric hosts (hex, octal, decimal IP) → CAUTION (SEC-002 partial fix)
 - Scrub inline bodies with expanded patterns: PEM blocks, SSH keys, vendor tokens,
   URL userinfo, high-entropy blobs. Skip sending body to judge if still secret-heavy (SEC-010)
-- Daemon falls back to spawn-per-call if socket unavailable
 - LKG is filesystem-based (`policy.yaml.lkg`), no schema migration needed
+- LKG fallback is loud: stderr warning + `fuse doctor` reports active policy hash (ECO-009)
 - BLOCKED decisions are never downgraded, regardless of extracted content
-- Daemon auto-disables in hook mode (short-lived process, no amortization benefit)
 
 **Never:**
 - DNS resolution or network calls during classification
@@ -91,7 +93,6 @@ Pre-mortem applied: `.agents/council/2026-03-24-pre-mortem-v2-classification.md`
 - Send raw inline script content to judge without scrubbing
 - Replace the structural classifier — the judge augments, doesn't replace
 - Store LKG in SQLite (policy loads before DB is available)
-- Change system prompt mid-daemon-session (it's a CLI startup flag)
 - Leave URLs with shell variables as SAFE — always escalate (SEC-001)
 - Leave unknown hostnames in network commands as SAFE — always CAUTION (SEC-004)
 - Gate URL scanning on command basename only — scan all extracted bodies (SEC-006)
@@ -258,126 +259,7 @@ func hasRedirectFlags(cmd string) bool
   inline bodies are scanned for blocked IPs/hostnames but language-specific API detection
   is v3.
 
-### 3. Judge Daemon (`internal/judge/daemon.go`)
-
-**NEW file.** Unix socket daemon managing a long-lived `claude` process with
-stream-json protocol. Based on the proven clai pattern
-(`~/workspaces/clai/internal/claude/daemon.go`).
-
-**Pre-mortem fixes applied:**
-- pm-101: Uses `--print --verbose --input-format stream-json --output-format stream-json`
-  (not `--bare` — `--verbose` is required for stream-json). Multi-turn is confirmed working
-  in clai production.
-- pm-106: Daemon auto-detects adapter mode. In hook mode (short-lived), connects to an
-  already-running daemon (instant) or falls back to spawn-per-call. In codex-shell mode
-  (long-lived), starts the daemon if not running.
-- pm-101: `--system-prompt` is a CLI startup flag. The judge system prompt is static, so
-  this is fine — set once at daemon start.
-- pm-101: Stream-json message format uses `StreamMessage{Type:"user", Message:{Role:"user", Content:"..."}}`
-  and reads `StreamResponse` lines until `Type:"result"`.
-
-**Architecture:**
-
-```
-fuse daemon start (background process)
-  └─→ listens on ~/.fuse/state/judge-daemon.sock
-  └─→ spawns: claude --print --verbose --system-prompt "..." \
-       --input-format stream-json --output-format stream-json \
-       --model <model>
-  └─→ init handshake (send "Ready", wait for system init + result)
-  └─→ idle timeout: shuts down after 5 min inactivity
-
-fuse hook evaluate (short-lived)
-  └─→ MaybeJudge → DaemonProvider.Query
-       └─→ connect to ~/.fuse/state/judge-daemon.sock
-       └─→ send DaemonRequest{Prompt}
-       └─→ read DaemonResponse{Result}
-       └─→ ~500ms (inference only, no startup)
-       └─→ if socket unavailable: fall back to claudeProvider (spawn-per-call)
-```
-
-```go
-// --- Daemon server (runs as background process) ---
-
-type claudeProcess struct {
-    cmd     *exec.Cmd
-    stdin   io.WriteCloser
-    scanner *bufio.Scanner
-    mu      sync.Mutex
-}
-
-type StreamMessage struct {
-    Type    string `json:"type"`
-    Message struct {
-        Role    string `json:"role"`
-        Content string `json:"content"`
-    } `json:"message"`
-}
-
-type StreamResponse struct {
-    Type    string `json:"type"`
-    Subtype string `json:"subtype,omitempty"`
-    Result  string `json:"result,omitempty"`
-    Message struct {
-        Content []struct {
-            Type string `json:"type"`
-            Text string `json:"text"`
-        } `json:"content"`
-    } `json:"message,omitempty"`
-}
-
-type DaemonRequest struct {
-    Prompt       string `json:"prompt"`
-    SystemPrompt string `json:"system_prompt,omitempty"` // ignored after first query
-}
-
-type DaemonResponse struct {
-    Result string `json:"result,omitempty"`
-    Error  string `json:"error,omitempty"`
-}
-
-func RunDaemon(ctx context.Context, model, systemPrompt string) error
-func startClaudeProcess(ctx context.Context, model, systemPrompt string) (*claudeProcess, error)
-func (c *claudeProcess) query(prompt string) (string, error)
-
-// --- Daemon client (used by DaemonProvider) ---
-
-type DaemonProvider struct {
-    model string
-}
-
-func (p *DaemonProvider) Query(ctx context.Context, systemPrompt, userPrompt string) (string, error)
-func (p *DaemonProvider) Name() string
-func (p *DaemonProvider) Close() error // no-op for client, daemon manages process
-
-// --- Daemon lifecycle ---
-
-func StartDaemonProcess(model, systemPrompt string) error  // starts background process
-func IsDaemonRunning() bool                                 // checks socket
-func StopDaemon() error                                     // sends shutdown
-```
-
-**Provider interface change:** Add `Close() error` to `Provider` interface.
-`claudeProvider.Close()` and `codexProvider.Close()` are no-ops. This lets
-`MaybeJudge` clean up the old provider on config hot-reload (pm-106 from
-pre-mortem — process leak prevention).
-
-**Daemon start integration:**
-- `fuse enable` starts the daemon if `llm_judge.daemon: true` in config
-- `fuse disable` stops the daemon
-- `fuse install claude` adds daemon auto-start hint
-- CLI command: `fuse daemon start`, `fuse daemon stop`, `fuse daemon status`
-
-**Config:**
-```yaml
-llm_judge:
-  mode: shadow
-  provider: auto
-  daemon: true       # NEW — use Unix socket daemon for low-latency judge
-  model: claude-haiku-4-5-20251001
-```
-
-### 4. Policy LKG Fallback (`internal/policy/policy.go`)
+### 3. Policy LKG Fallback (`internal/policy/policy.go`)
 
 **Pre-mortem fix applied (pm-102):** Filesystem-based, not SQLite. Policy loads
 before DB is available in all adapters. No schema migration needed.
@@ -400,7 +282,11 @@ rules:
 
 On successful `LoadPolicy`: copy `policy.yaml` to `policy.yaml.lkg` with timestamp.
 On failed `LoadPolicy`: try `policy.yaml.lkg`, check timestamp freshness
-(default 7 days), parse and return with `slog.Warn`.
+(default 7 days), parse and return with **loud warning** (ECO-009):
+- `slog.Warn` on every hook invocation while LKG is active
+- `fuse doctor` shows "WARNING: using fallback policy (policy.yaml has errors)"
+- `fuse doctor` shows active policy hash so users can verify which rules are live
+- stderr message on CAUTION/APPROVAL decisions: "[fuse] WARNING: using fallback policy"
 
 **Config:**
 ```yaml
@@ -409,7 +295,7 @@ policy_lkg:
   max_age_days: 7         # LKG must be recent
 ```
 
-### 5. Judge Inline Content (`internal/judge/prompt.go`)
+### 4. Judge Inline Content (`internal/judge/prompt.go`)
 
 Extend `PromptContext` to carry extracted inline script bodies:
 
@@ -430,7 +316,7 @@ Inline script body (extracted from command):
 from `ClassifyResult.InlineBody` after classification. The field is a string
 (immutable in Go), so `WithDecision` shallow copy is safe.
 
-### 6. Config Extensions (`internal/config/config.go`)
+### 5. Config Extensions (`internal/config/config.go`)
 
 ```go
 type Config struct {
@@ -449,11 +335,6 @@ type PolicyLKGConfig struct {
     MaxAgeDays int  `yaml:"max_age_days"` // default 7
 }
 
-// LLMJudgeConfig gets new field:
-type LLMJudgeConfig struct {
-    // ... existing fields ...
-    Daemon bool `yaml:"daemon"` // use Unix socket daemon for low-latency judge
-}
 ```
 
 ## Tests
@@ -496,12 +377,6 @@ type LLMJudgeConfig struct {
 - `TestInspectURLs_MCPArguments`: MCP tool with metadata URL arg → BLOCKED
 - `TestInspectURLs_InlineBodyURL`: Python heredoc with `urlopen("http://169.254.169.254")` → BLOCKED (SEC-006)
 
-**`internal/judge/daemon_test.go`** — add:
-- `TestDaemonProvider_QueryViaMock`: mock socket server, send/receive JSON
-- `TestDaemonProvider_Timeout`: slow response → context timeout
-- `TestDaemonProvider_SocketUnavailable`: no daemon → fallback to spawn-per-call
-- `TestDaemonProvider_IsDaemonRunning`: check socket existence
-
 **`internal/policy/policy_lkg_test.go`** — add:
 - `TestLoadPolicyWithLKG_Success`: valid policy → loads and writes .lkg file
 - `TestLoadPolicyWithLKG_ParseError_FallsBack`: broken YAML → uses .lkg
@@ -517,10 +392,8 @@ type LLMJudgeConfig struct {
 | 2 (URL inspection) | files_exist + content_check | `["internal/core/urlinspect.go"]` + `{pattern: "BlockedHostnames"}` |
 | 2 (MCP URL) | content_check | `{file: "internal/core/mcpclassify.go", pattern: "InspectURLsInArgs"}` |
 | 3 (judge inline) | content_check | `{file: "internal/judge/prompt.go", pattern: "InlineScriptBody"}` + `{file: "internal/core/classify.go", pattern: "InlineBody"}` |
-| 4 (daemon) | files_exist | `["internal/judge/daemon.go"]` |
-| 4 (provider close) | content_check | `{file: "internal/judge/provider.go", pattern: "Close"}` |
-| 5 (policy LKG) | content_check | `{file: "internal/policy/policy.go", pattern: "LoadPolicyWithLKG"}` |
-| 6 (config) | content_check | `{file: "internal/config/config.go", pattern: "URLTrustPolicy"}` |
+| 4 (policy LKG) | content_check | `{file: "internal/policy/policy.go", pattern: "LoadPolicyWithLKG"}` |
+| 5 (config) | content_check | `{file: "internal/config/config.go", pattern: "URLTrustPolicy"}` |
 | full suite | tests | `go test ./... -short -timeout 120s` |
 
 ## Verification
@@ -532,9 +405,8 @@ type LLMJudgeConfig struct {
 5. `fuse test classify 'curl http://10.0.0.1:8500/'` → CAUTION (RFC1918)
 6. `fuse test classify 'curl -k https://example.com'` → CAUTION (insecure cert)
 7. `fuse test classify 'curl https://api.github.com/repos'` → SAFE (normal URL)
-8. Corrupt `policy.yaml` → fuse warns and uses `.lkg`, classification still works
-9. `fuse daemon start && fuse daemon status` → daemon running
-10. `go test ./... -short -timeout 120s` → all pass
+8. Corrupt `policy.yaml` → fuse warns LOUDLY (stderr + doctor) and uses `.lkg`
+9. `go test ./... -short -timeout 120s` → all pass
 
 ## Issues
 
@@ -554,53 +426,48 @@ truncated bodies keep structural APPROVAL, 11 new tests pass
 
 ### Issue 3: Inline Body to Judge
 **Dependencies:** Issue 1
-**Acceptance:** `InlineScriptBody` in PromptContext, `InlineBody` in ClassifyResult,
-`buildJudgeContext` populates from ClassifyResult, `BuildUserPrompt` includes it
-**Description:** See Implementation §5
-
-### Issue 4: Judge Daemon
-**Dependencies:** None
-**Acceptance:** `daemon.go` exists with Unix socket server + claude stream-json process,
-`DaemonProvider` implements `Provider` interface with `Close()`, `Provider` interface has
-`Close()`, daemon auto-disabled in hook mode, fallback to spawn-per-call, 4 new tests pass
-**Description:** See Implementation §3
-
-### Issue 5: Policy LKG Fallback (filesystem)
-**Dependencies:** None
-**Acceptance:** `LoadPolicyWithLKG` uses `policy.yaml.lkg` file (no DB), saves on success,
-falls back on parse error, respects max_age_days, 4 new tests pass
+**Acceptance:** `InlineScriptBody` in PromptContext, `InlineBody` and
+`ExtractionIncomplete` in ClassifyResult, `buildJudgeContext` populates from
+ClassifyResult, `BuildUserPrompt` includes it, `MaybeJudge` skips downgrade
+when `ExtractionIncomplete` is true
 **Description:** See Implementation §4
 
-### Issue 6: Config Extensions + Integration
-**Dependencies:** Issues 1, 2, 4, 5
-**Acceptance:** URLTrustPolicy, PolicyLKG, Daemon fields in config, DefaultConfig populated,
-all adapters use new config fields
-**Description:** See Implementation §6
+### Issue 4: Policy LKG Fallback (filesystem)
+**Dependencies:** None
+**Acceptance:** `LoadPolicyWithLKG` uses `policy.yaml.lkg` file (no DB), saves on success,
+falls back on parse error with loud warning (stderr + doctor), respects max_age_days,
+4 new tests pass
+**Description:** See Implementation §3
 
-### Issue 7: Test Fixtures + Integration Tests
-**Dependencies:** Issues 1-6
+### Issue 5: Config Extensions + Integration
+**Dependencies:** Issues 1, 2, 4
+**Acceptance:** URLTrustPolicy, PolicyLKG fields in config, DefaultConfig populated
+with secure defaults (blocked schemes, LKG enabled), all adapters use new config fields
+**Description:** See Implementation §5
+
+### Issue 6: Test Fixtures + Integration Tests
+**Dependencies:** Issues 1-5
 **Acceptance:** `testdata/fixtures/commands.yaml` has heredoc, URL, inline script entries.
 All verification commands produce expected output.
 **Description:** Add golden fixtures for new classification patterns
 
 ## Execution Order
 
-**Wave 1** (parallel): Issue 1, Issue 2, Issue 4, Issue 5
+**Wave 1** (parallel): Issue 1, Issue 2, Issue 4
 - Issue 1 and Issue 2 both touch classify.go — extract changes into named functions
   (`classifyInlineBodies`, `classifyURLs`) called from `classifySingleCommand` to
   minimize merge conflict. **Serialize if any overlap in classifySingleCommand body.**
 
-**Wave 2** (after Wave 1): Issue 3, Issue 6
-**Wave 3** (after Wave 2): Issue 7
+**Wave 2** (after Wave 1): Issue 3, Issue 5
+**Wave 3** (after Wave 2): Issue 6
 
 ## Cross-Wave Shared Files
 
 | File | Wave 1 Issues | Wave 2+ Issues | Mitigation |
 |------|---------------|----------------|------------|
-| `internal/core/classify.go` | Issue 1 (`classifyInlineBodies`), Issue 2 (`classifyURLs`) | Issue 7 (fixtures) | Named functions minimize conflict; serialize if needed |
-| `internal/config/config.go` | — | Issue 6 | No Wave 1 dependency |
+| `internal/core/classify.go` | Issue 1 (`classifyInlineBodies`), Issue 2 (`classifyURLs`) | Issue 6 (fixtures) | Named functions minimize conflict; serialize if needed |
+| `internal/config/config.go` | — | Issue 5 | No Wave 1 dependency |
 | `internal/judge/prompt.go` | — | Issue 3 | No Wave 1 dependency |
-| `internal/judge/provider.go` | Issue 4 (`Close()` on interface) | — | Only Issue 4 touches this |
 
 ## v2 Scope vs Deferred
 
@@ -608,15 +475,29 @@ All verification commands produce expected output.
 - Heredoc body extraction + classification (via shell parser)
 - Command substitution extraction (via shell parser)
 - SSRF/cloud metadata + loopback + localhost + RFC1918 detection
+- Default-blocked URL schemes (file, gopher, dict, ftp, scp, ldap, smb)
+- Shell variables in URLs → APPROVAL (not SAFE)
+- Non-allowlisted hostnames → CAUTION (not SAFE)
+- Redirect flags → CAUTION
 - URL trust policy (domain list)
 - Insecure cert detection (curl -k, wget --no-check-certificate)
 - MCP tool argument URL inspection
-- Judge daemon (Unix socket, stream-json, idle timeout)
-- Policy LKG fallback (filesystem)
+- URL scanning on extracted inline bodies (not just top-level commands)
+- Pre-parse input cap + parser panic recovery
+- ExtractionIncomplete flag prevents judge downgrade on partial bodies
+- Policy LKG fallback (filesystem, loud warnings)
 - Judge receives inline script content
+- Expanded credential scrubbing for inline bodies
+
+**Deferred (v2.1 — judge latency optimization):**
+- Judge daemon with stateless per-query workers (not shared conversation)
+  - ECO-001: Multi-turn history contamination requires fresh process per query
+  - ECO-004: Need sterile judge environment (no hooks, plugins, skills)
+  - Options: direct Anthropic API from Go, or supervisor managing worker pool
+- `Close()` on Provider interface (needed for daemon cleanup)
 
 **Deferred (v3+):**
-- Full IP canonicalization (hex/octal/decimal → canonical dotted-quad). v2 flags non-canonical as CAUTION.
+- Full IP canonicalization (hex/octal/decimal → canonical dotted-quad)
 - DNS-based SSRF bypass detection (bounded A/AAAA resolution before execution)
 - HTTP redirect chain following (runtime redirect blocking for curl -L)
 - Multi-language URL extraction (Python urlopen, Go http.Get, Node fetch)
@@ -624,6 +505,7 @@ All verification commands produce expected output.
 - Binary identity TOFU (hash verification for interpreters)
 - Denial aggregation → policy recommendations
 - Credential injection in MCP proxy
+- Server-specific MCP classifiers keyed by full tool name (ECO-008)
 - Judge trigger on SAFE for network commands
 - URL glob/regex patterns (v2 uses simple domain list)
 - Differential testing: parser extraction vs bash -n for shell syntax edge cases
