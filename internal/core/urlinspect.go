@@ -152,41 +152,54 @@ func inspectSingleURL(rawURL, cmd string) (Decision, string) {
 		return DecisionBlocked, "blocked hostname: " + host
 	}
 
-	// Parse as IP and check ranges.
-	ip := net.ParseIP(host)
-	if ip != nil {
-		for _, cidr := range BlockedIPRanges {
-			if cidr.Contains(ip) {
-				return DecisionBlocked, "blocked IP range: " + host
-			}
-		}
-		for _, cidr := range CautionIPRanges {
-			if cidr.Contains(ip) {
-				return DecisionCaution, "private/internal IP: " + host
-			}
-		}
-	}
-
-	// IPv6 bracket notation: [::1], [fd00:ec2::254]
-	if strings.HasPrefix(parsed.Host, "[") {
-		bracketHost := strings.TrimPrefix(host, "[")
-		bracketHost = strings.TrimSuffix(bracketHost, "]")
-		if bracketIP := net.ParseIP(bracketHost); bracketIP != nil {
-			for _, cidr := range BlockedIPRanges {
-				if cidr.Contains(bracketIP) {
-					return DecisionBlocked, "blocked IP range: " + bracketHost
-				}
-			}
-		}
+	// Check IP ranges (direct host and bracket notation).
+	if d, reason := classifyIPHost(host, parsed.Host); d != "" {
+		return d, reason
 	}
 
 	// Non-allowlisted hostname in network commands → CAUTION (SEC-004).
 	basename := extractCmdBasename(cmd)
-	if networkCommandBasenames[basename] && host != "" && ip == nil {
-		// Not an IP — it's a hostname. Non-allowlisted → CAUTION.
+	if networkCommandBasenames[basename] && host != "" && net.ParseIP(host) == nil {
 		return DecisionCaution, "non-allowlisted hostname in network command: " + host
 	}
 
+	return "", ""
+}
+
+// classifyIPHost checks a host against blocked and caution IP ranges.
+// Handles both direct IPs and IPv6 bracket notation.
+func classifyIPHost(host, rawHost string) (Decision, string) {
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if d, reason := matchIPRanges(ip, host); d != "" {
+			return d, reason
+		}
+	}
+
+	// IPv6 bracket notation: [::1], [fd00:ec2::254]
+	if strings.HasPrefix(rawHost, "[") {
+		bracketHost := strings.TrimPrefix(host, "[")
+		bracketHost = strings.TrimSuffix(bracketHost, "]")
+		if bracketIP := net.ParseIP(bracketHost); bracketIP != nil {
+			return matchIPRanges(bracketIP, bracketHost)
+		}
+	}
+
+	return "", ""
+}
+
+// matchIPRanges checks an IP against blocked and caution ranges.
+func matchIPRanges(ip net.IP, label string) (Decision, string) {
+	for _, cidr := range BlockedIPRanges {
+		if cidr.Contains(ip) {
+			return DecisionBlocked, "blocked IP range: " + label
+		}
+	}
+	for _, cidr := range CautionIPRanges {
+		if cidr.Contains(ip) {
+			return DecisionCaution, "private/internal IP: " + label
+		}
+	}
 	return "", ""
 }
 

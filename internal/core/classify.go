@@ -640,53 +640,13 @@ func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd st
 		return "", "", "", true // nothing to extract
 	}
 
-	complete := heredocComplete
-	bestDecision := Decision("")
-	bestReason := ""
+	acc := &inlineAccumulator{complete: heredocComplete}
 
 	if heredocBody != "" {
-		subCmds, err := SplitCompoundCommand(heredocBody)
-		if err != nil {
-			// Can't parse body — classify whole body as-is
-			d, reason, _, _, _ := classifySingleCommand(heredocBody, evaluator, cwd)
-			if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
-				bestDecision = d
-				bestReason = "inline heredoc: " + reason
-			}
-		} else {
-			for _, sub := range subCmds {
-				d, reason, _, _, _ := classifySingleCommand(sub, evaluator, cwd)
-				if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
-					bestDecision = d
-					bestReason = "inline heredoc: " + reason
-				}
-				// Recurse into nested inline content
-				nd, nr, _, nc := classifyInlineBodiesRecursive(sub, evaluator, cwd, depth+1)
-				if !nc {
-					complete = false
-				}
-				if nd != "" && (bestDecision == "" || DecisionSeverity(nd) > DecisionSeverity(bestDecision)) {
-					bestDecision = nd
-					bestReason = nr
-				}
-			}
-		}
+		acc.classifyHeredocBody(heredocBody, evaluator, cwd, depth)
 	}
-
 	for _, subst := range cmdSubsts {
-		d, reason, _, _, _ := classifySingleCommand(subst, evaluator, cwd)
-		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
-			bestDecision = d
-			bestReason = "inline $(): " + reason
-		}
-		nd, nr, _, nc := classifyInlineBodiesRecursive(subst, evaluator, cwd, depth+1)
-		if !nc {
-			complete = false
-		}
-		if nd != "" && (bestDecision == "" || DecisionSeverity(nd) > DecisionSeverity(bestDecision)) {
-			bestDecision = nd
-			bestReason = nr
-		}
+		acc.classifyExtractedCmd(subst, "inline $()", evaluator, cwd, depth)
 	}
 
 	var allBodies []string
@@ -695,7 +655,44 @@ func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd st
 	}
 	allBodies = append(allBodies, cmdSubsts...)
 
-	return bestDecision, bestReason, strings.Join(allBodies, "\n---\n"), complete
+	return acc.bestDecision, acc.bestReason, strings.Join(allBodies, "\n---\n"), acc.complete
+}
+
+// inlineAccumulator tracks the most restrictive decision across inline body classifications.
+type inlineAccumulator struct {
+	bestDecision Decision
+	bestReason   string
+	complete     bool
+}
+
+func (a *inlineAccumulator) update(d Decision, reason string) {
+	if d != "" && (a.bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(a.bestDecision)) {
+		a.bestDecision = d
+		a.bestReason = reason
+	}
+}
+
+func (a *inlineAccumulator) classifyHeredocBody(body string, evaluator PolicyEvaluator, cwd string, depth int) {
+	subCmds, err := SplitCompoundCommand(body)
+	if err != nil {
+		d, reason, _, _, _ := classifySingleCommand(body, evaluator, cwd)
+		a.update(d, "inline heredoc: "+reason)
+		return
+	}
+	for _, sub := range subCmds {
+		a.classifyExtractedCmd(sub, "inline heredoc", evaluator, cwd, depth)
+	}
+}
+
+func (a *inlineAccumulator) classifyExtractedCmd(cmd, label string, evaluator PolicyEvaluator, cwd string, depth int) {
+	d, reason, _, _, _ := classifySingleCommand(cmd, evaluator, cwd)
+	a.update(d, label+": "+reason)
+
+	nd, nr, _, nc := classifyInlineBodiesRecursive(cmd, evaluator, cwd, depth+1)
+	if !nc {
+		a.complete = false
+	}
+	a.update(nd, nr)
 }
 
 func isInspectTriggerRule(ruleID string) bool {
