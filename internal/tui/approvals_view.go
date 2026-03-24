@@ -107,8 +107,8 @@ func (m ApprovalsModel) Update(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
 		}
 
 		switch {
-		// Toggle focus between pending and history.
-		case key.Matches(k, keys.Tab):
+		// Toggle focus between pending and history (left/right arrows).
+		case key.Matches(k, keys.Left), key.Matches(k, keys.Right):
 			if m.focus == focusPending {
 				m.focus = focusHistory
 			} else {

@@ -131,14 +131,14 @@ func TestModel_ViewSwitching(t *testing.T) {
 		t.Errorf("after Tab: got %d, want viewApprovals", m.activeView)
 	}
 
-	// Tab on approvals view stays on approvals (delegates to focus toggle).
+	// Tab on approvals view cycles to events (no longer trapped).
 	updated, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
 	m = updated.(Model)
-	if m.activeView != viewApprovals {
-		t.Errorf("Tab on approvals should stay (focus toggle): got %d, want viewApprovals", m.activeView)
+	if m.activeView != viewEvents {
+		t.Errorf("Tab on approvals should cycle to events: got %d, want viewEvents", m.activeView)
 	}
 
-	// Use number key '1' to switch back to events.
+	// Number key '1' also goes to events.
 	updated, _ = m.Update(tea.KeyPressMsg{Code: '1'})
 	m = updated.(Model)
 	if m.activeView != viewEvents {
