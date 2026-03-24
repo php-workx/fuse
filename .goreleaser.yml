@@ -45,6 +45,7 @@ brews:
   - repository:
       owner: php-workx
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: https://github.com/php-workx/fuse
     description: A local firewall for AI agent commands
