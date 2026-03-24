@@ -6,6 +6,12 @@ A local firewall for AI agent commands.
 [![Go](https://img.shields.io/github/go-mod/go-version/php-workx/fuse)](https://go.dev/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/hero.gif">
+  <source media="(prefers-color-scheme: light)" srcset="assets/hero-light.gif">
+  <img alt="fuse blocking a dangerous command" src="assets/hero.gif" width="600">
+</picture>
+
 **Status: public beta**
 
 | | Status |
