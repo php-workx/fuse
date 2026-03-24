@@ -8,7 +8,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/runger/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/db"
 )
 
 type viewMode int

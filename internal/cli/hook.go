@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/runger/fuse/internal/adapters"
+	"github.com/php-workx/fuse/internal/adapters"
 )
 
 var hookCmd = &cobra.Command{

@@ -8,8 +8,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/db"
 )
 
 // Manager handles approval lifecycle: creating, consuming, and prompting.

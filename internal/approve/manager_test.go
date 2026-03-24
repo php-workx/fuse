@@ -4,8 +4,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/db"
 )
 
 func setupTestManager(t *testing.T) *Manager {

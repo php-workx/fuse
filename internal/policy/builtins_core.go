@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/runger/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 func init() {

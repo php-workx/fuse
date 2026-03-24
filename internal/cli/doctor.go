@@ -15,10 +15,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/runger/fuse/internal/adapters"
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/db"
-	"github.com/runger/fuse/internal/policy"
+	"github.com/php-workx/fuse/internal/adapters"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 var (

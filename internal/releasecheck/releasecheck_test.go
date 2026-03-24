@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/runger/fuse/internal/adapters"
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/policy"
+	"github.com/php-workx/fuse/internal/adapters"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 const releaseCheckEnv = "FUSE_RELEASE_CHECK"

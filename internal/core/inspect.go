@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/runger/fuse/internal/inspect"
+	"github.com/php-workx/fuse/internal/inspect"
 )
 
 // DefaultMaxBytes is the default maximum number of bytes to read from a file

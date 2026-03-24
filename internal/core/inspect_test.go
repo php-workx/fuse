@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/runger/fuse/internal/inspect"
+	"github.com/php-workx/fuse/internal/inspect"
 )
 
 // testdataDir returns the absolute path to the testdata/scripts directory at

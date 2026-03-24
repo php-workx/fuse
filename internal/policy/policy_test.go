@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/runger/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 // TestHardcoded_AllCompile verifies that all 22 hardcoded patterns are valid

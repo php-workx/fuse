@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/runger/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 // PolicyConfig represents user-defined policy loaded from a YAML file.

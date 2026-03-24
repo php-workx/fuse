@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/runger/fuse/internal/adapters"
-	"github.com/runger/fuse/internal/approve"
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/db"
-	"github.com/runger/fuse/internal/policy"
+	"github.com/php-workx/fuse/internal/adapters"
+	"github.com/php-workx/fuse/internal/approve"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 // skipIfShort skips the test if -short flag is set.

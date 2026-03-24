@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/db"
 )
 
 func TestRunEvents_PrintsRecentActivity(t *testing.T) {

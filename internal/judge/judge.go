@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 // Judge evaluates command classifications using an LLM provider.

@@ -4,8 +4,8 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/policy"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 func TestGoldenFixtures_HardcodedBlockedCoverage(t *testing.T) {

@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/runger/fuse/internal/approve"
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/approve"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 type inFlightRequests struct {

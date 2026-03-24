@@ -9,8 +9,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/policy"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 // testRepoRoot returns the repository root directory based on the location of this test file.

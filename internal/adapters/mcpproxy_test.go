@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/runger/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/config"
 )
 
 func TestProxyAgentToDownstream_OversizeRequestReturnsJSONRPCError(t *testing.T) {

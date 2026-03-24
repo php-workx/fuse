@@ -5,7 +5,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 
-	sanitize_pkg "github.com/runger/fuse/internal/sanitize"
+	sanitize_pkg "github.com/php-workx/fuse/internal/sanitize"
 )
 
 var (

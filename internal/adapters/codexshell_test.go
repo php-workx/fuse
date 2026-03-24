@@ -17,7 +17,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/runger/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/config"
 )
 
 func withFuseHome(t *testing.T) string {

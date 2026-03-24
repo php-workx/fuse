@@ -8,9 +8,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/db"
-	"github.com/runger/fuse/internal/tui"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/tui"
 )
 
 var monitorCmd = &cobra.Command{

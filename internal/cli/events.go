@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/db"
 )
 
 type eventsOptions struct {

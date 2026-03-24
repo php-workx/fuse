@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 // mockProvider is a test double that returns configurable responses.

@@ -1,6 +1,6 @@
 package policy
 
-import "github.com/runger/fuse/internal/core"
+import "github.com/php-workx/fuse/internal/core"
 
 // Evaluator implements core.PolicyEvaluator by delegating to the policy
 // package's hardcoded, user, and built-in rule evaluation functions.

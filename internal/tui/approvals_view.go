@@ -10,8 +10,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/runger/fuse/internal/approve"
-	"github.com/runger/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/approve"
+	"github.com/php-workx/fuse/internal/db"
 )
 
 type approvalFocus int

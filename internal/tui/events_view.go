@@ -11,7 +11,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/runger/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/db"
 )
 
 // Decision filter cycle: ALL → SAFE → CAUTION → APPROVAL → BLOCKED → ALL

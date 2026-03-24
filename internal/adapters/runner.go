@@ -14,12 +14,12 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/runger/fuse/internal/approve"
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/db"
-	"github.com/runger/fuse/internal/judge"
-	"github.com/runger/fuse/internal/policy"
+	"github.com/php-workx/fuse/internal/approve"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/judge"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 var errApprovalDenied = errors.New("fuse denied command")

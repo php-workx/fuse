@@ -1,4 +1,4 @@
-module github.com/runger/fuse
+module github.com/php-workx/fuse
 
 go 1.25.8
 

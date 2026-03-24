@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 var nativeClaudeFileTools = map[string]struct{}{

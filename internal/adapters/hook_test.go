@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/db"
-	"github.com/runger/fuse/internal/judge"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/judge"
 )
 
 func TestRunHook_SafeCommand(t *testing.T) {

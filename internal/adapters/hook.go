@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/runger/fuse/internal/approve"
-	"github.com/runger/fuse/internal/config"
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/db"
-	"github.com/runger/fuse/internal/events"
-	"github.com/runger/fuse/internal/judge"
-	"github.com/runger/fuse/internal/policy"
+	"github.com/php-workx/fuse/internal/approve"
+	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/events"
+	"github.com/php-workx/fuse/internal/judge"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 // hookTimeout is fuse's internal safety timeout.

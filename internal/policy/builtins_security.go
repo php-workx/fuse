@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/runger/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 var reNetcatScanMode = regexp.MustCompile(`(^|\s)-[a-zA-Z]*z[a-zA-Z]*(\s|$)`)

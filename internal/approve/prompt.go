@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"github.com/runger/fuse/internal/sanitize"
+	"github.com/php-workx/fuse/internal/sanitize"
 )
 
 // sanitizePrompt delegates to the shared sanitize package and additionally

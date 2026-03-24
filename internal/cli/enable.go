@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/runger/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/config"
 )
 
 var enableCmd = &cobra.Command{

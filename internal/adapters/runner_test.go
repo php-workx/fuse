@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/runger/fuse/internal/core"
-	"github.com/runger/fuse/internal/policy"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 func TestBuildChildEnv(t *testing.T) {
