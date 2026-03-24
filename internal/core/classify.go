@@ -428,16 +428,16 @@ func detectInlineScript(cmd string) (Decision, string) {
 		if p.re == reInlinePythonC && isSafePythonInline(cmd) {
 			continue
 		}
-		// Skip heredoc detection for git commit / gh pr create — the heredoc
-		// is just a message body, not code execution.
-		if p.re == reInlineHeredoc && isSafeHeredocUsage(cmd) {
+		// Skip heredoc detection when the heredoc is inside a $(cat <<...)
+		// substitution — that's a string-quoting technique, not code execution.
+		// Also skip for known safe commands (git commit, gh pr create).
+		if p.re == reInlineHeredoc && (isCatHeredocSubstitution(cmd) || isSafeHeredocUsage(cmd)) {
 			continue
 		}
-		// Skip $() detection when the command substitution is a safe heredoc
-		// pattern: $(cat <<'EOF'...EOF) inside git commit / gh pr create.
-		// The cat<<heredoc is just passing a multi-line string literal.
+		// Skip $() detection when it's a cat<<heredoc pattern.
+		// $(cat <<'EOF'...EOF) is just passing a multi-line string literal.
 		// Dangerous $() like $(rm -rf /) are still caught by hardcoded rules.
-		if p.re == reInlineCmdSubst && isSafeHeredocUsage(cmd) && isCatHeredocSubstitution(cmd) {
+		if p.re == reInlineCmdSubst && isCatHeredocSubstitution(cmd) {
 			continue
 		}
 
