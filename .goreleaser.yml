@@ -41,6 +41,19 @@ changelog:
       - "^test:"
       - "^chore:"
 
+brews:
+  - repository:
+      owner: php-workx
+      name: homebrew-tap
+    directory: Formula
+    homepage: https://github.com/php-workx/fuse
+    description: A local firewall for AI agent commands
+    license: MIT
+    install: |
+      bin.install "fuse"
+    test: |
+      system "#{bin}/fuse", "--help"
+
 release:
   github:
     owner: php-workx
