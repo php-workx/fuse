@@ -65,15 +65,24 @@ Pre-mortem applied: `.agents/council/2026-03-24-pre-mortem-v2-classification.md`
 ## Boundaries
 
 **Always:**
+- Hard-cap raw command length (64KB, matching existing `maxInputSize`) before parser (SEC-007)
 - Inline extraction uses `mvdan.cc/sh` parser (not manual tokenization) for correctness
 - Extraction is bounded (50KB max body, depth 3 max recursion — shared counter)
+- Track `ExtractionIncomplete` flag when body truncated or depth exhausted (SEC-009)
+- When `ExtractionIncomplete`, structural decision stands — never downgrade (SEC-009)
+- Fail-closed on parse errors: unparseable syntax → APPROVAL with reason (SEC-008)
 - URL inspection is pattern-based with `net/url.Parse` + `net.ParseIP` (no DNS resolution)
+- URLs with shell expansion tokens (`$`, `${`, backticks, `$()`) → APPROVAL (SEC-001)
+- Non-allowlisted hostnames in network commands → CAUTION minimum (SEC-004)
+- Redirect-following flags (`curl -L`, `wget` default, `httpie --follow`) → CAUTION (SEC-003)
+- URL scanning runs on extracted inline bodies too, not just top-level commands (SEC-006)
+- Default-blocked URL schemes: `file`, `gopher`, `dict`, `ftp`, `scp`, `sftp`, `ldap`, `smb` (SEC-011)
+- Non-canonical numeric hosts (hex, octal, decimal IP) → CAUTION (SEC-002 partial fix)
+- Scrub inline bodies with expanded patterns: PEM blocks, SSH keys, vendor tokens,
+  URL userinfo, high-entropy blobs. Skip sending body to judge if still secret-heavy (SEC-010)
 - Daemon falls back to spawn-per-call if socket unavailable
 - LKG is filesystem-based (`policy.yaml.lkg`), no schema migration needed
 - BLOCKED decisions are never downgraded, regardless of extracted content
-- When heredoc body is truncated, structural APPROVAL stands (never downgrade on partial)
-- URLs containing unresolved shell variables (`$HOST`) are treated as opaque (skip inspection)
-- All extracted content is scrubbed via `ScrubCredentials` before judge
 - Daemon auto-disables in hook mode (short-lived process, no amortization benefit)
 
 **Never:**
@@ -83,6 +92,11 @@ Pre-mortem applied: `.agents/council/2026-03-24-pre-mortem-v2-classification.md`
 - Replace the structural classifier — the judge augments, doesn't replace
 - Store LKG in SQLite (policy loads before DB is available)
 - Change system prompt mid-daemon-session (it's a CLI startup flag)
+- Leave URLs with shell variables as SAFE — always escalate (SEC-001)
+- Leave unknown hostnames in network commands as SAFE — always CAUTION (SEC-004)
+- Gate URL scanning on command basename only — scan all extracted bodies (SEC-006)
+- Skip pre-parse input size validation — cap before parser (SEC-007)
+- Allow downgrade when extraction is incomplete (SEC-009)
 
 ## Implementation
 
@@ -109,12 +123,37 @@ func extractHeredocBody(cmd string) (string, bool)
 func extractCommandSubstitutions(cmd string) []string
 ```
 
-**Integration point:** New function `classifyInlineBodies(cmd string, evaluator PolicyEvaluator, cwd string)` in `classify.go`. Called from `classifySingleCommand` after `detectInlineScript` (step 5). Extracts bodies, classifies them recursively through the same pipeline. Stores bodies in `ClassifyResult.InlineBody` for the judge.
+**Pre-parse safety (SEC-007):** Before feeding any command to `mvdan.cc/sh`, enforce
+the existing `maxInputSize` cap (64KB, `classify.go:11`). Commands exceeding this are
+already rejected as BLOCKED. Additionally, recover from parser panics (the mvdan.cc/sh
+parser is well-tested but untrusted input demands defense-in-depth). On parse error or
+panic → fail-closed to APPROVAL with reason "unparseable inline script" (SEC-008).
 
-**Depth limiting (pm-108 fix):** The extraction functions share the recursion counter
-with `classificationNormalizeRecursive` (`maxRecursionDepth = 3`). Heredoc extraction
+**Integration point:** New function `classifyInlineBodies(cmd string, evaluator
+PolicyEvaluator, cwd string)` in `classify.go`. Called from `classifySingleCommand`
+after `detectInlineScript` (step 5). Extracts bodies, classifies them recursively
+through the same pipeline. Stores bodies in `ClassifyResult.InlineBody` for the judge.
+Also runs `InspectCommandURLs` on each extracted body (SEC-006).
+
+**ExtractionIncomplete flag (SEC-009):** New field on `ClassifyResult`:
+```go
+type ClassifyResult struct {
+    // ... existing fields ...
+    InlineBody           string // extracted inline script content
+    ExtractionIncomplete bool   // true when body truncated or depth exhausted
+}
+```
+When `ExtractionIncomplete` is true:
+- The structural decision (APPROVAL from heredoc/inline pattern) stands
+- The judge may still evaluate the partial body but CANNOT downgrade
+- `MaybeJudge` checks `result.ExtractionIncomplete` and skips downgrade even if the
+  judge says SAFE with high confidence
+
+**Depth limiting:** The extraction functions share the recursion counter with
+`classificationNormalizeRecursive` (`maxRecursionDepth = 3`). Heredoc extraction
 counts as 1 depth level. `$()` extraction counts as 1 depth level. Combined nesting
-beyond depth 3 stops extraction (structural classification stands).
+beyond depth 3 stops extraction, sets `ExtractionIncomplete`, structural classification
+stands.
 
 ### 2. URL/Network Awareness (`internal/core/urlinspect.go`)
 
@@ -127,55 +166,97 @@ beyond depth 3 stops extraction (structural classification stands).
 - pm-110: Skip URL inspection when URL contains unresolved shell variables (`$`, `{`).
 
 ```go
-// BlockedHostnames are always-blocked destination names.
+// BlockedHostnames are always-blocked destination names → BLOCKED.
+// Includes trailing-dot and case variants (matched after lowercasing + dot-trimming).
 var BlockedHostnames = []string{
-    "169.254.169.254",          // AWS/GCP metadata
-    "metadata.google.internal", // GCP metadata
+    "169.254.169.254",          // AWS/GCP metadata (IPv4)
+    "metadata.google.internal", // GCP metadata (hostname)
     "100.100.100.200",          // Alibaba metadata
     "169.254.170.2",            // ECS task metadata
+    "192.0.0.192",              // OCI metadata
+    "168.63.129.16",            // Azure WireServer / IMDS
     "localhost",                // loopback
     "0.0.0.0",                  // all interfaces
 }
 
-// BlockedIPRanges are always-blocked IP ranges → BLOCKED.
+// BlockedIPRanges → BLOCKED.
 var BlockedIPRanges = []net.IPNet{
-    parseCIDR("127.0.0.0/8"),     // loopback (IPv4)
-    parseCIDR("169.254.0.0/16"),  // link-local
+    parseCIDR("127.0.0.0/8"),          // loopback (IPv4)
+    parseCIDR("169.254.0.0/16"),       // link-local (IPv4)
+    parseCIDR("::1/128"),              // loopback (IPv6)
+    parseCIDR("fe80::/10"),            // link-local (IPv6)
+    parseCIDR("::ffff:169.254.0.0/112"), // IPv4-mapped link-local
+    parseCIDR("fd00:ec2::254/128"),    // AWS IMDS IPv6
+    parseCIDR("fd20:ce::254/128"),     // GCP metadata IPv6
 }
 
-// CautionIPRanges are private network ranges → CAUTION.
+// CautionIPRanges → CAUTION (private networks, carrier-grade NAT, benchmarking).
 var CautionIPRanges = []net.IPNet{
     parseCIDR("10.0.0.0/8"),      // RFC1918
     parseCIDR("172.16.0.0/12"),   // RFC1918
     parseCIDR("192.168.0.0/16"),  // RFC1918
+    parseCIDR("100.64.0.0/10"),   // carrier-grade NAT (RFC6598)
+    parseCIDR("198.18.0.0/15"),   // benchmarking (RFC2544)
+    parseCIDR("fc00::/7"),        // IPv6 unique-local (private)
 }
 
-// IPv6 blocked ranges.
-var BlockedIPv6Ranges = []net.IPNet{
-    parseCIDR("::1/128"),         // loopback (IPv6)
-    parseCIDR("fe80::/10"),       // link-local (IPv6)
-    parseCIDR("::ffff:169.254.169.254/128"), // IPv4-mapped metadata
+// BlockedSchemes are always-blocked URL schemes → BLOCKED.
+// These are not configurable — dangerous schemes are never safe.
+var BlockedSchemes = []string{
+    "file", "gopher", "dict", "ftp", "ftps",
+    "scp", "sftp", "tftp", "ldap", "ldaps", "smb",
 }
 
-// InspectCommandURLs extracts URLs from curl/wget/httpie commands and classifies them.
+// InspectCommandURLs extracts URLs from a command string and classifies them.
+// Runs on any command text, not gated by basename (SEC-006).
 func InspectCommandURLs(cmd string) (Decision, string)
 
 // InspectURLsInArgs scans MCP tool argument strings for suspicious URLs.
+// Walks nested JSON to find string values containing URLs.
 func InspectURLsInArgs(args map[string]interface{}) (Decision, string)
+
+// isShellExpansion returns true if a URL host contains shell variable syntax.
+// These URLs cannot be statically inspected → force APPROVAL (SEC-001).
+func isShellExpansion(host string) bool
+
+// isNonCanonicalNumericHost detects hex/octal/decimal IP encodings → CAUTION (SEC-002).
+func isNonCanonicalNumericHost(host string) bool
+
+// hasRedirectFlags returns true if the command enables HTTP redirects (SEC-003).
+func hasRedirectFlags(cmd string) bool
 ```
 
-**Integration points:**
-- `classifySingleCommand` in classify.go: new `classifyURLs(cmd)` function called
-  between inline detection (step 5) and builtin evaluation (step 8). Runs only when
-  command basename is `curl`, `wget`, `http`, or `httpie`.
-- `ClassifyMCPTool` in mcpclassify.go: call `InspectURLsInArgs(args)` on the flattened
-  argument map.
+**URL pre-processing pipeline:**
+1. Parse URL with `net/url.Parse`
+2. Lowercase host, trim trailing dots
+3. Strip `userinfo@` (SEC-010: also scrub before logging)
+4. Check scheme against `BlockedSchemes` → BLOCKED
+5. If host contains shell expansion tokens (`$`, `` ` ``) → APPROVAL (SEC-001)
+6. If host is non-canonical numeric (hex/octal/decimal) → CAUTION (SEC-002)
+7. Resolve host against `BlockedHostnames` → BLOCKED
+8. Parse IP with `net.ParseIP`, check `BlockedIPRanges` → BLOCKED
+9. Check `CautionIPRanges` (RFC1918, carrier-grade NAT) → CAUTION
+10. If redirect flags present and host not in `TrustedDomains` → CAUTION (SEC-003)
+11. If host not in `TrustedDomains` and is a network command → CAUTION (SEC-004)
 
-**Known v2 limitations (documented, not fixed):**
-- Exotic IP encodings (hex `0xA9FEA9FE`, decimal `2852039166`, octal `0251.0376...`)
-  are not normalized. Go's `net.ParseIP` doesn't handle these. Full normalization deferred to v3.
-- DNS-based bypasses (`attacker.com` resolving to `169.254.169.254`) not detectable without
-  DNS resolution, which is out of scope.
+**Integration points:**
+- `classifySingleCommand` in classify.go: new `classifyURLs(cmd)` function.
+  For commands with basename `curl`, `wget`, `http`, `httpie`: full URL pipeline.
+  For ALL commands and extracted inline bodies: scan for URLs matching blocked
+  hostnames/IPs (SEC-006). This catches `python -c "urllib.request.urlopen(...)"`.
+- `ClassifyMCPTool` in mcpclassify.go: call `InspectURLsInArgs(args)` which walks
+  nested JSON to find URL strings.
+
+**Known v2 limitations (documented, deferred to v3):**
+- Full numeric IP canonicalization (hex `0xA9FEA9FE`, decimal `2852039166`, octal).
+  Non-canonical numeric hosts are flagged as CAUTION in v2, fully normalized in v3.
+- DNS-based bypasses (`attacker.com` → `169.254.169.254`). Unknown hostnames in network
+  commands get CAUTION (not SAFE), which limits blast radius. Bounded DNS resolution in v3.
+- HTTP redirect chain following. Redirect flags are flagged as CAUTION. Runtime redirect
+  blocking is v3.
+- Multi-language URL extraction (Python `urlopen`, Go `http.Get`). URLs in extracted
+  inline bodies are scanned for blocked IPs/hostnames but language-specific API detection
+  is v3.
 
 ### 3. Judge Daemon (`internal/judge/daemon.go`)
 
@@ -394,13 +475,26 @@ type LLMJudgeConfig struct {
 - `TestInspectURLs_MetadataEndpoint`: `curl http://169.254.169.254/latest/meta-data/` → BLOCKED
 - `TestInspectURLs_Localhost`: `curl http://localhost:8080/admin` → BLOCKED
 - `TestInspectURLs_IPv6Loopback`: `curl http://[::1]:8080/` → BLOCKED
+- `TestInspectURLs_AzureWireServer`: `curl http://168.63.129.16/metadata` → BLOCKED
+- `TestInspectURLs_OracleMetadata`: `curl http://192.0.0.192/opc/v2/` → BLOCKED
+- `TestInspectURLs_AWSIPv6Metadata`: `curl http://[fd00:ec2::254]/latest/` → BLOCKED
 - `TestInspectURLs_RFC1918`: `curl http://10.0.0.1:8500/secrets` → CAUTION
+- `TestInspectURLs_CarrierGradeNAT`: `curl http://100.64.0.1/` → CAUTION
 - `TestInspectURLs_NormalURL`: `curl https://api.github.com/repos` → SAFE
 - `TestInspectURLs_InsecureFlag`: `curl -k https://example.com` → CAUTION
 - `TestInspectURLs_URLWithCredentials`: `curl http://admin:pass@169.254.169.254/` → BLOCKED
-- `TestInspectURLs_ShellVariable`: `curl https://$HOST/api` → SAFE (opaque, skip)
+- `TestInspectURLs_ShellVariable`: `curl https://$HOST/api` → APPROVAL (SEC-001)
+- `TestInspectURLs_ShellSubstitution`: `curl http://$(echo host)/` → APPROVAL (SEC-001)
+- `TestInspectURLs_RedirectFlag`: `curl -L https://untrusted.com` → CAUTION (SEC-003)
+- `TestInspectURLs_WgetFollowsRedirects`: `wget https://untrusted.com` → CAUTION (SEC-003)
+- `TestInspectURLs_UnknownHostname`: `curl https://random-host.tld/` → CAUTION (SEC-004)
+- `TestInspectURLs_NonCanonicalIP`: `curl http://0x7f000001/` → CAUTION (SEC-002)
+- `TestInspectURLs_BlockedScheme_File`: `curl file:///etc/passwd` → BLOCKED (SEC-011)
+- `TestInspectURLs_BlockedScheme_Gopher`: `curl gopher://127.0.0.1:25/` → BLOCKED (SEC-011)
+- `TestInspectURLs_TrailingDotHostname`: `curl http://metadata.google.internal./` → BLOCKED
 - `TestInspectURLs_NonNetworkCommand`: `git commit` → no inspection
 - `TestInspectURLs_MCPArguments`: MCP tool with metadata URL arg → BLOCKED
+- `TestInspectURLs_InlineBodyURL`: Python heredoc with `urlopen("http://169.254.169.254")` → BLOCKED (SEC-006)
 
 **`internal/judge/daemon_test.go`** — add:
 - `TestDaemonProvider_QueryViaMock`: mock socket server, send/receive JSON
@@ -522,14 +616,17 @@ All verification commands produce expected output.
 - Judge receives inline script content
 
 **Deferred (v3+):**
-- Exotic IP encoding normalization (hex, octal, decimal bypass)
-- DNS-based SSRF bypass detection
+- Full IP canonicalization (hex/octal/decimal → canonical dotted-quad). v2 flags non-canonical as CAUTION.
+- DNS-based SSRF bypass detection (bounded A/AAAA resolution before execution)
+- HTTP redirect chain following (runtime redirect blocking for curl -L)
+- Multi-language URL extraction (Python urlopen, Go http.Get, Node fetch)
 - Progressive enforcement L4→L7 (HTTP method + path inspection for curl)
 - Binary identity TOFU (hash verification for interpreters)
 - Denial aggregation → policy recommendations
 - Credential injection in MCP proxy
 - Judge trigger on SAFE for network commands
 - URL glob/regex patterns (v2 uses simple domain list)
+- Differential testing: parser extraction vs bash -n for shell syntax edge cases
 - Ollama provider for fully offline judge
 
 ## Next Steps
