@@ -664,9 +664,6 @@ func extractHeredocBody(cmd string) (body string, complete bool) {
 		if !ok {
 			return true
 		}
-		if isStmtCatCommand(stmt) {
-			return true // skip cat heredocs (string quoting)
-		}
 		for _, redir := range stmt.Redirs {
 			if redir.Op != syntax.Hdoc && redir.Op != syntax.DashHdoc {
 				continue

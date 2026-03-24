@@ -178,7 +178,9 @@ func LoadPolicyWithLKG(path string, maxAge time.Duration) (*PolicyConfig, error)
 	cfg, err := loadPolicyFromBytes(data)
 	if err == nil {
 		// Success — save the already-read bytes as LKG (no TOCTOU).
-		saveLKGBytes(data, path, lkgPath)
+		if saveErr := saveLKGBytes(data, path, lkgPath); saveErr != nil {
+			slog.Warn("failed to refresh policy LKG", "path", lkgPath, "error", saveErr)
+		}
 		return cfg, nil
 	}
 
@@ -224,13 +226,18 @@ func loadPolicyFromBytes(data []byte) (*PolicyConfig, error) {
 
 // saveLKGBytes writes already-read policy bytes to the LKG path with a timestamp header.
 // Uses pre-read bytes to avoid TOCTOU race with the filesystem.
-func saveLKGBytes(data []byte, sourcePath, lkgPath string) {
+// Writes atomically via temp file + rename to prevent partial LKG on crash.
+func saveLKGBytes(data []byte, sourcePath, lkgPath string) error {
 	hash := fmt.Sprintf("%x", sha256.Sum256(data))
 	header := fmt.Sprintf("# LKG saved: %s\n# Original: %s (sha256: %s)\n",
 		time.Now().UTC().Format(time.RFC3339), sourcePath, hash)
 
 	lkgData := header + string(data)
-	_ = os.WriteFile(lkgPath, []byte(lkgData), 0o600)
+	tmpPath := lkgPath + ".tmp"
+	if err := os.WriteFile(tmpPath, []byte(lkgData), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, lkgPath)
 }
 
 // loadLKG loads and validates an LKG policy file.

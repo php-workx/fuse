@@ -765,13 +765,14 @@ func TestExtractHeredocBody_Empty(t *testing.T) {
 	}
 }
 
-func TestExtractHeredocBody_CatExempt(t *testing.T) {
-	body, complete := extractHeredocBody("echo \"$(cat <<'EOF'\nhello world\nEOF\n)\"")
+func TestExtractHeredocBody_CatPipedToBash(t *testing.T) {
+	// cat <<EOF | bash — NOT string quoting, body should be extracted for analysis
+	body, complete := extractHeredocBody("cat <<EOF\nrm -rf /\nEOF")
 	if !complete {
 		t.Error("expected complete=true")
 	}
-	if body != "" {
-		t.Errorf("got body=%q, want empty (cat heredoc should be skipped)", body)
+	if !strings.Contains(body, "rm -rf") {
+		t.Errorf("got body=%q, want it to contain 'rm -rf' (cat heredoc piped to shell should be extracted)", body)
 	}
 }
 

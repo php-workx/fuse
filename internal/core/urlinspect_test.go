@@ -178,7 +178,9 @@ func TestInspectURLs_NonCanonicalIPHex(t *testing.T) {
 
 func TestInspectURLs_InlineBodyURL(t *testing.T) {
 	// Test that URL scanning works on inline body content (SEC-006)
-	d, _ := InspectCommandURLs("curl http://169.254.169.254/latest/meta-data/")
+	// Use a Python-like body string, not a curl command
+	body := "import urllib.request\nurllib.request.urlopen(\"http://169.254.169.254/latest/meta-data/\")"
+	d, _ := InspectCommandURLs(body)
 	if d != DecisionBlocked {
 		t.Errorf("got %s, want BLOCKED for metadata URL in inline body", d)
 	}

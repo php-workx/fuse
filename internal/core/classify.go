@@ -320,37 +320,40 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 		if combined != sub.Decision {
 			sub.Decision = combined
 			sub.Reason = inlineR
+			sub.RuleID = "" // inline analysis wins — clear stale RuleID
 		}
 	}
 
 	// URL inspection: scan command and extracted inline bodies for URLs (SEC-006).
-	urlD, urlR := InspectCommandURLs(subCmd)
-	if urlD != "" {
-		combined := MaxDecision(sub.Decision, urlD)
+	applyURLInspection(&sub, subCmd, inlineBody)
+
+	return sub
+}
+
+// applyURLInspection scans the command and inline body for URL-based threats.
+func applyURLInspection(sub *SubCommandResult, cmd, inlineBody string) {
+	escalate := func(d Decision, r string) {
+		combined := MaxDecision(sub.Decision, d)
 		if combined != sub.Decision {
 			sub.Decision = combined
-			sub.Reason = urlR
+			sub.Reason = r
+			sub.RuleID = ""
 		}
 	}
-	// Scan inline body lines individually for SEC-004 hostname detection.
+	if d, r := InspectCommandURLs(cmd); d != "" {
+		escalate(d, r)
+	}
 	if inlineBody != "" {
 		for _, line := range strings.Split(inlineBody, "\n") {
 			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
 			}
-			urlD, urlR = InspectCommandURLs(line)
-			if urlD != "" {
-				combined := MaxDecision(sub.Decision, urlD)
-				if combined != sub.Decision {
-					sub.Decision = combined
-					sub.Reason = urlR
-				}
+			if d, r := InspectCommandURLs(line); d != "" {
+				escalate(d, r)
 			}
 		}
 	}
-
-	return sub
 }
 
 // classifySingleCommand classifies a single (already classification-normalized) command string.
@@ -683,7 +686,7 @@ func (a *inlineAccumulator) update(d Decision, reason string) {
 func (a *inlineAccumulator) classifyHeredocBody(body string, evaluator PolicyEvaluator, cwd string, depth int) {
 	subCmds, err := SplitCompoundCommand(body)
 	if err != nil {
-		d, reason, _, _, _ := classifySingleCommand(body, evaluator, cwd)
+		d, reason := classifyExtractedSubCommand(body, evaluator, cwd)
 		a.update(d, "inline heredoc: "+reason)
 		return
 	}
@@ -693,7 +696,7 @@ func (a *inlineAccumulator) classifyHeredocBody(body string, evaluator PolicyEva
 }
 
 func (a *inlineAccumulator) classifyExtractedCmd(cmd, label string, evaluator PolicyEvaluator, cwd string, depth int) {
-	d, reason, _, _, _ := classifySingleCommand(cmd, evaluator, cwd)
+	d, reason := classifyExtractedSubCommand(cmd, evaluator, cwd)
 	a.update(d, label+": "+reason)
 
 	nd, nr, _, nc := classifyInlineBodiesRecursive(cmd, evaluator, cwd, depth+1)
@@ -701,6 +704,54 @@ func (a *inlineAccumulator) classifyExtractedCmd(cmd, label string, evaluator Po
 		a.complete = false
 	}
 	a.update(nd, nr)
+}
+
+// classifyExtractedSubCommand runs the full classification pipeline on an extracted
+// inline command (heredoc body line or $() content). Unlike classifySingleCommand,
+// this runs ClassificationNormalize first (wrapper stripping, bash -c extraction,
+// sudo/doas escalation) and checks sensitive env vars — matching the full
+// classifySubCommand pipeline. Does NOT recurse into inline extraction (that's
+// handled by the caller via classifyInlineBodiesRecursive).
+func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) (Decision, string) {
+	classified := ClassificationNormalize(subCmd)
+
+	if classified.ExtractionFailed {
+		return DecisionApproval, "inline bash -c extraction failed (fail-closed)"
+	}
+
+	allCmds := []string{classified.Outer}
+	allCmds = append(allCmds, classified.Inner...)
+
+	bestDecision := DecisionSafe
+	bestReason := "default safe"
+
+	for _, cmd := range allCmds {
+		if cmd == "" {
+			continue
+		}
+		d, reason, _, _, _ := classifySingleCommand(cmd, evaluator, cwd)
+		combined := MaxDecision(bestDecision, d)
+		if combined != bestDecision {
+			bestDecision = combined
+			bestReason = reason
+		}
+	}
+
+	// Apply sudo/doas escalation.
+	if classified.EscalateClassification {
+		bestDecision, bestReason = escalateDecision(bestDecision, bestReason)
+	}
+
+	// Sensitive env var detection.
+	if reSensitiveEnvVar.MatchString(subCmd) {
+		escalated := MaxDecision(bestDecision, DecisionCaution)
+		if escalated != bestDecision {
+			bestDecision = escalated
+			bestReason = "references sensitive environment variable"
+		}
+	}
+
+	return bestDecision, bestReason
 }
 
 func isInspectTriggerRule(ruleID string) bool {

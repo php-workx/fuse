@@ -113,8 +113,9 @@ var reURLPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'"` + "`" +
 // reNonCanonicalNumeric detects hex (0x), octal (0-prefixed), or decimal IPs.
 var reNonCanonicalNumeric = regexp.MustCompile(`^(0x[0-9a-fA-F]+|0[0-7]+\d|[0-9]{10,})$`)
 
-// reInsecureCertFlags detects flags that disable TLS verification.
-var reInsecureCertFlag = regexp.MustCompile(`\b(-k|--insecure|--no-check-certificate|--no-verify-ssl)\b`)
+// insecureCertFlags are flags that disable TLS verification.
+// Checked via substring matching (not regex \b which fails on hyphen-prefixed flags).
+var insecureCertFlags = []string{" -k ", " -k\t", "--insecure", "--no-check-certificate", "--no-verify-ssl"}
 
 // InspectCommandURLs extracts URLs from a command string and classifies them.
 // Runs on any command text, not gated by basename (SEC-006).
@@ -129,7 +130,7 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 	bestReason := ""
 
 	for _, rawURL := range urls {
-		d, reason := inspectSingleURL(rawURL, cmd)
+		d, reason := inspectSingleURL(rawURL, cmd, false)
 		if d != "" && (bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision)) {
 			bestDecision = d
 			bestReason = reason
@@ -137,7 +138,7 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 	}
 
 	// Check insecure cert flags
-	if reInsecureCertFlag.MatchString(cmd) {
+	if hasInsecureCertFlag(cmd) {
 		d := DecisionCaution
 		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
 			bestDecision = d
@@ -158,7 +159,9 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 }
 
 // inspectSingleURL classifies a single URL through the inspection pipeline.
-func inspectSingleURL(rawURL, cmd string) (Decision, string) {
+// When networkContext is true, SEC-004 (non-allowlisted hostname) applies
+// regardless of the command basename (used for MCP arg scanning).
+func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string) {
 	// Check for shell expansion tokens BEFORE url.Parse (SEC-001).
 	// url.Parse fails on $() and backtick syntax, so this must come first.
 	if isShellExpansion(rawURL) {
@@ -199,7 +202,7 @@ func inspectSingleURL(rawURL, cmd string) (Decision, string) {
 	// Non-allowlisted hostname in network commands → CAUTION (SEC-004).
 	// Exempt user-configured trusted domains.
 	basename := extractCmdBasename(cmd)
-	if networkCommandBasenames[basename] && host != "" && net.ParseIP(host) == nil {
+	if (networkContext || networkCommandBasenames[basename]) && host != "" && net.ParseIP(host) == nil {
 		if !isTrustedDomain(host) {
 			return DecisionCaution, "non-allowlisted hostname in network command: " + host
 		}
@@ -246,7 +249,7 @@ func InspectURLsInArgs(args map[string]interface{}) (Decision, string) {
 	for _, v := range values {
 		urls := reURLPattern.FindAllString(v, -1)
 		for _, rawURL := range urls {
-			d, reason := inspectSingleURL(rawURL, v)
+			d, reason := inspectSingleURL(rawURL, v, true) // MCP args are always network context
 			if d != "" && (bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision)) {
 				bestDecision = d
 				bestReason = reason
@@ -284,6 +287,18 @@ func hasRedirectFlags(cmd string) bool {
 	// httpie --follow
 	if strings.Contains(cmd, "--follow") {
 		return true
+	}
+	return false
+}
+
+// hasInsecureCertFlag checks if the command contains TLS verification bypass flags.
+func hasInsecureCertFlag(cmd string) bool {
+	// Pad command for boundary matching on -k (short flag)
+	padded := " " + cmd + " "
+	for _, flag := range insecureCertFlags {
+		if strings.Contains(padded, flag) {
+			return true
+		}
 	}
 	return false
 }
