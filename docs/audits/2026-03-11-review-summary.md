@@ -99,3 +99,31 @@ If a release had to happen today, the honest statement would be:
 1. Resolve the remaining `PERF-003` long-input miss now that it is a measured release blocker.
 2. Expand or explicitly narrow the remaining per-rule golden-fixture contract; `182` rows is still below the written full-rule target for `225` built-in IDs.
 3. Add stronger Codex end-to-end and dogfood evidence, then add the remaining prompt/sqlite/memory proof before RC1.
+
+---
+
+## Posture Update: 2026-03-24
+
+**Updated posture: public beta.**
+
+Since the original audit (2026-03-11), the following changes have been made:
+
+- LLM judge feature (shadow + active modes) with full test coverage
+- 4 security hardening rounds (path traversal, symlink resolution, credential scrubbing, context propagation)
+- Integration tests isolated from production state
+- Pre-existing lint violations resolved
+- Test suite runs clean with `-race` across all 13 packages
+- Module path corrected to `github.com/php-workx/fuse`
+- goreleaser release pipeline added
+
+**Current posture:**
+
+| | Status |
+|---|--------|
+| Platforms | macOS, Linux |
+| Claude Code | primary integration |
+| Codex CLI | beta |
+| Windows | planned, not supported in v1 |
+
+The project is past internal-only use. Fuse is a guardrail, not a sandbox.
+See [docs/TRUST_MODEL.md](../TRUST_MODEL.md) for security boundaries.

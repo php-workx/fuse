@@ -10,7 +10,7 @@ actionlint_ver    := "v1.7.11"
 version    := `git describe --tags --always --dirty 2>/dev/null || echo "dev"`
 commit     := `git rev-parse --short HEAD 2>/dev/null || echo "unknown"`
 build_date := `date -u +"%Y-%m-%dT%H:%M:%SZ"`
-ldflags    := "-X github.com/runger/fuse/internal/cli.Version=" + version + " -X github.com/runger/fuse/internal/cli.GitCommit=" + commit + " -X github.com/runger/fuse/internal/cli.BuildDate=" + build_date
+ldflags    := "-X github.com/php-workx/fuse/internal/cli.Version=" + version + " -X github.com/php-workx/fuse/internal/cli.GitCommit=" + commit + " -X github.com/php-workx/fuse/internal/cli.BuildDate=" + build_date
 
 default:
     @just --list

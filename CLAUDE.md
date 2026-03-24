@@ -2,7 +2,7 @@
 
 ## What is Fuse?
 
-Fuse is a local safety runtime for AI coding agents (Claude Code, Codex CLI). It classifies shell commands and MCP tool calls into four decision levels — `SAFE`, `CAUTION`, `APPROVAL`, `BLOCKED` — and gates execution accordingly. Everything runs locally with no cloud dependencies.
+Fuse is a local firewall for AI agent commands. It classifies shell commands and MCP tool calls into four decision levels — `SAFE`, `CAUTION`, `APPROVAL`, `BLOCKED` — and gates execution accordingly. In proxy and run modes, fuse controls execution directly. In hook mode, fuse advises the agent. Everything runs locally with no cloud dependencies.
 
 ## Tech Stack
 

@@ -244,6 +244,9 @@ Until goreleaser is set up (Wave 1), the only documented install path is
 # Install (requires Go 1.25+)
 go install github.com/php-workx/fuse/cmd/fuse@latest
 
+# Enable fuse (ships disabled by default)
+fuse enable
+
 # See it work: block a dangerous command
 echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"},"session_id":"demo","cwd":"/tmp"}' \
   | fuse hook evaluate 2>&1
@@ -257,6 +260,9 @@ echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"},"session_id":"demo",
 fuse install claude    # or: fuse install codex
 fuse doctor            # verify the setup
 ```
+
+> **Note:** Use the installed `fuse` binary, not `go run ./cmd/fuse`. The exit
+> codes differ (`go run` wraps exit 2 as exit 1).
 
 #### What fuse is / what it is not
 
@@ -457,7 +463,6 @@ reported. No version badge until releases exist.
 
 **Never:**
 - Document install paths that don't work yet (no brew until tap exists)
-- Use "firewall" without immediately qualifying enforcement model per mode
 - Hide limitations in a footer — state them prominently
 - Prioritize star count over adoption quality
 - Let marketing copy outrun evidence

@@ -1,0 +1,49 @@
+version: 2
+
+project_name: fuse
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: fuse
+    main: ./cmd/fuse
+    binary: fuse
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/php-workx/fuse/internal/cli.Version={{.Version}}
+      - -X github.com/php-workx/fuse/internal/cli.GitCommit={{.Commit}}
+      - -X github.com/php-workx/fuse/internal/cli.BuildDate={{.Date}}
+
+archives:
+  - id: default
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+release:
+  github:
+    owner: php-workx
+    name: fuse
+  draft: false
+  prerelease: auto
