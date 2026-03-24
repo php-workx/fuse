@@ -157,10 +157,24 @@ func LoadPolicyWithLKG(path string, maxAge time.Duration) (*PolicyConfig, error)
 	lkgPath := path + lkgSuffix
 
 	// Try loading the primary policy.
-	cfg, err := LoadPolicy(path)
+	data, readErr := os.ReadFile(path)
+	if readErr != nil {
+		// File missing or unreadable — try LKG.
+		slog.Warn("policy file unreadable, attempting LKG fallback",
+			"path", path, "error", readErr)
+		lkgCfg, lkgErr := loadLKG(lkgPath, maxAge)
+		if lkgErr != nil {
+			return nil, fmt.Errorf("policy unreadable (%w) and no valid LKG fallback (%w)", readErr, lkgErr)
+		}
+		slog.Warn("[fuse] WARNING: using fallback policy (policy file unreadable)",
+			"lkg_path", lkgPath)
+		return lkgCfg, nil
+	}
+
+	cfg, err := loadPolicyFromBytes(data)
 	if err == nil {
-		// Success — save as LKG.
-		saveLKG(path, lkgPath)
+		// Success — save the already-read bytes as LKG (no TOCTOU).
+		saveLKGBytes(data, path, lkgPath)
 		return cfg, nil
 	}
 
@@ -178,13 +192,35 @@ func LoadPolicyWithLKG(path string, maxAge time.Duration) (*PolicyConfig, error)
 	return lkgCfg, nil
 }
 
-// saveLKG copies the policy file to the LKG path with a timestamp header.
-func saveLKG(sourcePath, lkgPath string) {
-	data, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return // best-effort
+// loadPolicyFromBytes parses and validates a policy from already-read bytes.
+func loadPolicyFromBytes(data []byte) (*PolicyConfig, error) {
+	var cfg PolicyConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing policy YAML: %w", err)
 	}
 
+	for i := range cfg.Rules {
+		r := &cfg.Rules[i]
+		compiled, err := regexp.Compile(r.Pattern)
+		if err != nil {
+			return nil, fmt.Errorf("compiling rule pattern %q: %w", r.Pattern, err)
+		}
+		r.compiled = compiled
+		if _, ok := actionToDecision[r.Action]; !ok {
+			return nil, fmt.Errorf("invalid action %q in rule with pattern %q", r.Action, r.Pattern)
+		}
+	}
+
+	if _, err := ParseTagOverrides(&cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+// saveLKGBytes writes already-read policy bytes to the LKG path with a timestamp header.
+// Uses pre-read bytes to avoid TOCTOU race with the filesystem.
+func saveLKGBytes(data []byte, sourcePath, lkgPath string) {
 	hash := fmt.Sprintf("%x", sha256.Sum256(data))
 	header := fmt.Sprintf("# LKG saved: %s\n# Original: %s (sha256: %s)\n",
 		time.Now().UTC().Format(time.RFC3339), sourcePath, hash)

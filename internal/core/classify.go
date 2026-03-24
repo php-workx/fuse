@@ -332,13 +332,20 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 			sub.Reason = urlR
 		}
 	}
+	// Scan inline body lines individually for SEC-004 hostname detection.
 	if inlineBody != "" {
-		urlD, urlR = InspectCommandURLs(inlineBody)
-		if urlD != "" {
-			combined := MaxDecision(sub.Decision, urlD)
-			if combined != sub.Decision {
-				sub.Decision = combined
-				sub.Reason = urlR
+		for _, line := range strings.Split(inlineBody, "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			urlD, urlR = InspectCommandURLs(line)
+			if urlD != "" {
+				combined := MaxDecision(sub.Decision, urlD)
+				if combined != sub.Decision {
+					sub.Decision = combined
+					sub.Reason = urlR
+				}
 			}
 		}
 	}

@@ -475,3 +475,97 @@ func TestClassify_InterpreterBackedMissingScriptRequiresApproval(t *testing.T) {
 		t.Fatalf("expected missing script execution to require APPROVAL, got %s (reason: %s)", result.Decision, result.Reason)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// V2: Inline body extraction + URL inspection tests
+// ---------------------------------------------------------------------------
+
+func TestClassify_InlineBodyIsPopulated(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\necho hello\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.InlineBody == "" {
+		t.Error("expected InlineBody to be populated for heredoc command")
+	}
+}
+
+func TestClassify_InlineBodyURLBlocked(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\ncurl http://169.254.169.254/latest/\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Errorf("expected BLOCKED for heredoc with metadata URL, got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestClassify_PercentEncodedURLFailsClosed(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "curl http://%31%36%39%2e%32%35%34%2e%31%36%39%2e%32%35%34/",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	// Must not be SAFE — fail-closed to at least APPROVAL
+	if result.Decision == core.DecisionSafe {
+		t.Errorf("expected non-SAFE for percent-encoded URL, got SAFE (reason: %s)",
+			result.Reason)
+	}
+}
+
+func TestClassify_ShellSubstitutionInURL(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "curl http://$(echo host)/api",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionApproval {
+		t.Errorf("expected APPROVAL for shell substitution in URL (SEC-001), got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestClassify_MultiLineInlineBodyURLDetection(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\napt-get update\ncurl http://169.254.169.254/latest/\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Errorf("expected BLOCKED for multi-line heredoc with metadata URL on non-first line, got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}

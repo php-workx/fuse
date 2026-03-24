@@ -523,12 +523,13 @@ func extractCommandFromResult(result *core.ClassifyResult) string {
 }
 
 // loadPolicyEvaluator loads user policy and returns a PolicyEvaluator.
-// Returns a default evaluator if no policy file exists.
+// Uses LKG fallback when policy.yaml has errors (loud warning via slog.Warn).
+// Returns a default evaluator if no policy file and no LKG exists.
 func loadPolicyEvaluator() core.PolicyEvaluator {
 	policyPath := config.PolicyPath()
-	policyCfg, err := policy.LoadPolicy(policyPath)
+	policyCfg, err := policy.LoadPolicyWithLKG(policyPath, 0)
 	if err != nil {
-		// No policy file or parse error: use default (no user rules).
+		// No policy file, no LKG fallback: use default (no user rules).
 		slog.Debug("no user policy loaded", "path", policyPath, "error", err)
 		return policy.NewEvaluator(nil)
 	}

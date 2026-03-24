@@ -118,9 +118,16 @@ func flattenStringValues(m map[string]interface{}) []string {
 	return result
 }
 
+// maxExtractDepth limits recursion into nested JSON structures.
+const maxExtractDepth = 32
+
 // extractStrings recursively extracts string values from an arbitrary value.
 func extractStrings(v interface{}) []string {
-	if v == nil {
+	return extractStringsDepth(v, 0)
+}
+
+func extractStringsDepth(v interface{}, depth int) []string {
+	if v == nil || depth > maxExtractDepth {
 		return nil
 	}
 
@@ -130,17 +137,16 @@ func extractStrings(v interface{}) []string {
 	case map[string]interface{}:
 		var result []string
 		for _, mv := range val {
-			result = append(result, extractStrings(mv)...)
+			result = append(result, extractStringsDepth(mv, depth+1)...)
 		}
 		return result
 	case []interface{}:
 		var result []string
 		for _, av := range val {
-			result = append(result, extractStrings(av)...)
+			result = append(result, extractStringsDepth(av, depth+1)...)
 		}
 		return result
 	default:
-		// Convert other types to string representation for scanning.
 		s := fmt.Sprintf("%v", val)
 		if s != "" {
 			return []string{s}

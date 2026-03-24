@@ -46,9 +46,10 @@ func init() {
 	}
 	for _, cidr := range blockedCIDRs {
 		_, ipNet, err := net.ParseCIDR(cidr)
-		if err == nil {
-			BlockedIPRanges = append(BlockedIPRanges, *ipNet)
+		if err != nil {
+			panic("invalid blocked CIDR constant: " + cidr + ": " + err.Error())
 		}
+		BlockedIPRanges = append(BlockedIPRanges, *ipNet)
 	}
 
 	cautionCIDRs := []string{
@@ -61,9 +62,10 @@ func init() {
 	}
 	for _, cidr := range cautionCIDRs {
 		_, ipNet, err := net.ParseCIDR(cidr)
-		if err == nil {
-			CautionIPRanges = append(CautionIPRanges, *ipNet)
+		if err != nil {
+			panic("invalid caution CIDR constant: " + cidr + ": " + err.Error())
 		}
+		CautionIPRanges = append(CautionIPRanges, *ipNet)
 	}
 }
 
@@ -111,10 +113,13 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 		}
 	}
 
-	// Check redirect flags for non-trusted URLs (SEC-003)
-	if hasRedirectFlags(cmd) && bestDecision == "" {
-		bestDecision = DecisionCaution
-		bestReason = "HTTP redirect following enabled"
+	// Check redirect flags (SEC-003) — always contributes CAUTION regardless of other decisions.
+	if hasRedirectFlags(cmd) {
+		d := DecisionCaution
+		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
+			bestDecision = d
+			bestReason = "HTTP redirect following enabled"
+		}
 	}
 
 	return bestDecision, bestReason
@@ -122,9 +127,16 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 
 // inspectSingleURL classifies a single URL through the inspection pipeline.
 func inspectSingleURL(rawURL, cmd string) (Decision, string) {
+	// Check for shell expansion tokens BEFORE url.Parse (SEC-001).
+	// url.Parse fails on $() and backtick syntax, so this must come first.
+	if isShellExpansion(rawURL) {
+		return DecisionApproval, "URL contains shell variable expansion"
+	}
+
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return "", ""
+		// Fail-closed: unparseable URLs get APPROVAL, not silent pass-through.
+		return DecisionApproval, "unparseable URL (fail-closed)"
 	}
 
 	// Normalize host: lowercase, trim trailing dots.
@@ -135,11 +147,6 @@ func inspectSingleURL(rawURL, cmd string) (Decision, string) {
 	scheme := strings.ToLower(parsed.Scheme)
 	if BlockedSchemes[scheme] {
 		return DecisionBlocked, "blocked URL scheme: " + scheme
-	}
-
-	// Shell expansion tokens in host → APPROVAL (SEC-001).
-	if isShellExpansion(host) || isShellExpansion(rawURL) {
-		return DecisionApproval, "URL contains shell variable expansion"
 	}
 
 	// Non-canonical numeric host → CAUTION (SEC-002).
@@ -167,25 +174,13 @@ func inspectSingleURL(rawURL, cmd string) (Decision, string) {
 }
 
 // classifyIPHost checks a host against blocked and caution IP ranges.
-// Handles both direct IPs and IPv6 bracket notation.
-func classifyIPHost(host, rawHost string) (Decision, string) {
+// Note: url.Hostname() already strips IPv6 brackets, so no bracket handling needed.
+func classifyIPHost(host, _ string) (Decision, string) {
 	ip := net.ParseIP(host)
-	if ip != nil {
-		if d, reason := matchIPRanges(ip, host); d != "" {
-			return d, reason
-		}
+	if ip == nil {
+		return "", ""
 	}
-
-	// IPv6 bracket notation: [::1], [fd00:ec2::254]
-	if strings.HasPrefix(rawHost, "[") {
-		bracketHost := strings.TrimPrefix(host, "[")
-		bracketHost = strings.TrimSuffix(bracketHost, "]")
-		if bracketIP := net.ParseIP(bracketHost); bracketIP != nil {
-			return matchIPRanges(bracketIP, bracketHost)
-		}
-	}
-
-	return "", ""
+	return matchIPRanges(ip, host)
 }
 
 // matchIPRanges checks an IP against blocked and caution ranges.
@@ -237,10 +232,13 @@ func isNonCanonicalNumericHost(host string) bool {
 	return reNonCanonicalNumeric.MatchString(host)
 }
 
+// reRedirectFlag detects curl -L (standalone or in combined short flags like -kL, -Lv).
+var reRedirectFlag = regexp.MustCompile(`(^|\s)-[a-zA-Z]*L`)
+
 // hasRedirectFlags returns true if the command enables HTTP redirects (SEC-003).
 func hasRedirectFlags(cmd string) bool {
-	// curl -L / --location
-	if strings.Contains(cmd, " -L") || strings.Contains(cmd, "--location") {
+	// curl -L / -kL / -Lv / --location
+	if reRedirectFlag.MatchString(cmd) || strings.Contains(cmd, "--location") {
 		return true
 	}
 	// wget follows redirects by default — check for wget presence
