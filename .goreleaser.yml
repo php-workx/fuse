@@ -41,6 +41,28 @@ changelog:
       - "^test:"
       - "^chore:"
 
+nfpms:
+  - id: linux-packages
+    package_name: fuse
+    vendor: php-workx
+    homepage: https://github.com/php-workx/fuse
+    maintainer: Ronny Unger <phpworkx@gmail.com>
+    description: A local firewall for AI agent commands
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    contents:
+      - src: LICENSE
+        dst: /usr/share/doc/fuse/LICENSE
+    overrides:
+      deb:
+        dependencies: []
+      rpm:
+        dependencies: []
+
 brews:
   - repository:
       owner: php-workx

@@ -30,6 +30,22 @@ In hook mode, fuse advises the agent — a guardrail, not a hard block.
 ## Install
 
 ```bash
+# macOS
+brew install php-workx/tap/fuse
+
+# Debian/Ubuntu
+curl -sSfL https://github.com/php-workx/fuse/releases/latest/download/fuse_amd64.deb -o fuse.deb
+sudo dpkg -i fuse.deb
+
+# Fedora/RHEL
+curl -sSfL https://github.com/php-workx/fuse/releases/latest/download/fuse_amd64.rpm -o fuse.rpm
+sudo rpm -i fuse.rpm
+
+# Alpine
+curl -sSfL https://github.com/php-workx/fuse/releases/latest/download/fuse_amd64.apk -o fuse.apk
+sudo apk add --allow-untrusted fuse.apk
+
+# From source (requires Go 1.25+)
 go install github.com/php-workx/fuse/cmd/fuse@latest
 ```
 
