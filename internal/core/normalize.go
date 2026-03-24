@@ -698,23 +698,24 @@ func extractHeredocBody(cmd string) (body string, complete bool) {
 
 // extractCommandSubstitutions uses the mvdan.cc/sh parser to extract $() contents.
 // Skips $(cat <<...) patterns (string quoting, not code execution).
-// Returns a slice of extracted command strings.
-// On parse error or panic, returns nil (SEC-008).
-func extractCommandSubstitutions(cmd string) (results []string) {
+// Returns (results, complete). On parse error or panic, returns (nil, false) — fail-closed (SEC-008).
+func extractCommandSubstitutions(cmd string) (results []string, complete bool) {
+	complete = true
 	if len(cmd) > maxInputSize {
-		return nil
+		return nil, false
 	}
 
 	defer func() {
 		if r := recover(); r != nil {
 			results = nil
+			complete = false
 		}
 	}()
 
 	parser := syntax.NewParser(syntax.Variant(syntax.LangPOSIX))
 	prog, err := parser.Parse(strings.NewReader(cmd), "")
 	if err != nil {
-		return nil
+		return nil, false
 	}
 
 	syntax.Walk(prog, func(node syntax.Node) bool {
@@ -739,7 +740,7 @@ func extractCommandSubstitutions(cmd string) (results []string) {
 		return false // don't recurse into nested CmdSubst
 	})
 
-	return results
+	return results, complete
 }
 
 // isStmtCatCommand returns true if the statement's command is "cat".

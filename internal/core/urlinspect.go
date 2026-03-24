@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 // BlockedHostnames are always-blocked destination names → BLOCKED.
@@ -73,6 +74,37 @@ func init() {
 var networkCommandBasenames = map[string]bool{
 	"curl": true, "wget": true, "http": true, "httpie": true,
 	"fetch": true, "aria2c": true,
+}
+
+// trustedDomains is the set of user-configured trusted domains that are exempt
+// from SEC-004 non-allowlisted hostname CAUTION. Set via SetTrustedDomains.
+// Protected by trustedDomainsMu for concurrent codex-shell access.
+var (
+	trustedDomains   map[string]bool
+	trustedDomainsMu sync.RWMutex
+)
+
+// SetTrustedDomains configures the set of trusted domains for URL inspection.
+// Domains are matched after lowercasing and trailing-dot trimming.
+// Safe for concurrent use.
+func SetTrustedDomains(domains []string) {
+	trustedDomainsMu.Lock()
+	defer trustedDomainsMu.Unlock()
+	if len(domains) == 0 {
+		trustedDomains = nil
+		return
+	}
+	m := make(map[string]bool, len(domains))
+	for _, d := range domains {
+		m[strings.ToLower(strings.TrimRight(d, "."))] = true
+	}
+	trustedDomains = m
+}
+
+func isTrustedDomain(host string) bool {
+	trustedDomainsMu.RLock()
+	defer trustedDomainsMu.RUnlock()
+	return trustedDomains[host]
 }
 
 // reURLPattern matches http/https/ftp/file URLs in command text.
@@ -165,9 +197,12 @@ func inspectSingleURL(rawURL, cmd string) (Decision, string) {
 	}
 
 	// Non-allowlisted hostname in network commands → CAUTION (SEC-004).
+	// Exempt user-configured trusted domains.
 	basename := extractCmdBasename(cmd)
 	if networkCommandBasenames[basename] && host != "" && net.ParseIP(host) == nil {
-		return DecisionCaution, "non-allowlisted hostname in network command: " + host
+		if !isTrustedDomain(host) {
+			return DecisionCaution, "non-allowlisted hostname in network command: " + host
+		}
 	}
 
 	return "", ""

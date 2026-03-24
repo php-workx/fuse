@@ -159,7 +159,11 @@ func LoadPolicyWithLKG(path string, maxAge time.Duration) (*PolicyConfig, error)
 	// Try loading the primary policy.
 	data, readErr := os.ReadFile(path)
 	if readErr != nil {
-		// File missing or unreadable — try LKG.
+		if os.IsNotExist(readErr) {
+			// File doesn't exist — this is normal (no user policy configured).
+			return nil, readErr
+		}
+		// File exists but unreadable — try LKG.
 		slog.Warn("policy file unreadable, attempting LKG fallback",
 			"path", path, "error", readErr)
 		lkgCfg, lkgErr := loadLKG(lkgPath, maxAge)

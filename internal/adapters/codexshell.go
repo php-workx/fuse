@@ -269,7 +269,7 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 		return "", "", 0, ctx.Err()
 	}
 
-	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
+	policyCfg, _ := policy.LoadPolicyWithLKG(config.PolicyPath(), 0)
 	evaluator := policy.NewEvaluator(policyCfg)
 	req := core.ShellRequest{
 		RawCommand: command,

@@ -779,42 +779,77 @@ func TestExtractHeredocBody_CatExempt(t *testing.T) {
 // Command substitution extraction tests (v2 pipeline)
 // ---------------------------------------------------------------------------
 
+func TestExtractHeredocBody_DelimiterInBody(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<EOF\necho \"not EOF\"\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if !strings.Contains(body, "not EOF") {
+		t.Errorf("got body=%q, want it to contain 'not EOF'", body)
+	}
+}
+
+func TestExtractCommandSubstitution_QuotedParen(t *testing.T) {
+	results, complete := extractCommandSubstitutions(`echo $(echo ")")`)
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1: %v", len(results), results)
+	}
+	if !strings.Contains(results[0], "echo") {
+		t.Errorf("got %q, want it to contain 'echo'", results[0])
+	}
+}
+
 func TestExtractCommandSubstitution_Simple(t *testing.T) {
-	results := extractCommandSubstitutions("echo $(whoami)")
+	results, complete := extractCommandSubstitutions("echo $(whoami)")
+	if !complete {
+		t.Error("expected complete=true")
+	}
 	if len(results) != 1 || results[0] != "whoami" {
 		t.Errorf("got %v, want [whoami]", results)
 	}
 }
 
 func TestExtractCommandSubstitution_Multiple(t *testing.T) {
-	results := extractCommandSubstitutions("echo $(whoami) $(date)")
+	results, complete := extractCommandSubstitutions("echo $(whoami) $(date)")
+	if !complete {
+		t.Error("expected complete=true")
+	}
 	if len(results) != 2 {
 		t.Errorf("got %d results, want 2: %v", len(results), results)
 	}
 }
 
 func TestExtractCommandSubstitution_Nested(t *testing.T) {
-	results := extractCommandSubstitutions("$(echo $(id))")
+	results, complete := extractCommandSubstitutions("$(echo $(id))")
+	if !complete {
+		t.Error("expected complete=true")
+	}
 	if len(results) != 1 {
 		t.Fatalf("got %d results, want 1: %v", len(results), results)
 	}
-	// Should contain the outer content including the nested $()
 	if !strings.Contains(results[0], "echo") {
 		t.Errorf("got %q, want it to contain 'echo'", results[0])
 	}
 }
 
 func TestExtractCommandSubstitution_CatExempt(t *testing.T) {
-	results := extractCommandSubstitutions("echo \"$(cat <<'EOF'\nhello\nEOF\n)\"")
+	results, complete := extractCommandSubstitutions("echo \"$(cat <<'EOF'\nhello\nEOF\n)\"")
+	if !complete {
+		t.Error("expected complete=true")
+	}
 	if len(results) != 0 {
 		t.Errorf("got %v, want empty (cat heredoc substitution should be skipped)", results)
 	}
 }
 
 func TestExtractCommandSubstitution_ParseError(t *testing.T) {
-	// Unbalanced quotes should not panic
-	results := extractCommandSubstitutions("echo $('unbalanced")
-	// Should return nil or empty on parse error
+	results, complete := extractCommandSubstitutions("echo $('unbalanced")
+	if complete {
+		t.Error("expected complete=false on parse error")
+	}
 	_ = results // no panic = pass
 }
 

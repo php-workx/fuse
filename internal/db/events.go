@@ -84,6 +84,27 @@ var credentialPatterns = []struct {
 		re:          regexp.MustCompile(`(?i)Authorization:\s*\S+`),
 		replacement: "Authorization: [REDACTED]",
 	},
+	// SEC-010: Expanded patterns for inline body scrubbing.
+	{
+		// PEM-encoded keys/certificates
+		re:          regexp.MustCompile(`-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----`),
+		replacement: "[REDACTED PEM BLOCK]",
+	},
+	{
+		// GitHub fine-grained PATs (ghp_), OAuth tokens (gho_), etc.
+		re:          regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr|glpat|xoxb|xoxp|xoxa|xoxr|sk-|rk-|whsec_|AIZA)[_-][A-Za-z0-9_-]{16,}\b`),
+		replacement: "[REDACTED VENDOR TOKEN]",
+	},
+	{
+		// URL userinfo (user:pass@host)
+		re:          regexp.MustCompile(`://[^:/?#]+:[^@/?#]+@`),
+		replacement: "://[REDACTED]@",
+	},
+	{
+		// High-entropy base64 blobs (40+ chars, likely keys/secrets)
+		re:          regexp.MustCompile(`\b[A-Za-z0-9+/]{40,}={0,3}\b`),
+		replacement: "[REDACTED BASE64]",
+	},
 }
 
 // ScrubCredentials removes potential credentials from a command string.

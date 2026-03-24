@@ -155,6 +155,59 @@ func TestInspectURLs_172Private(t *testing.T) {
 	}
 }
 
+func TestInspectURLs_URLWithCredentials(t *testing.T) {
+	d, _ := InspectCommandURLs("curl http://admin:pass@169.254.169.254/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for URL with credentials to metadata", d)
+	}
+}
+
+func TestInspectURLs_ShellSubstitutionInHost(t *testing.T) {
+	d, _ := InspectCommandURLs("curl http://$(echo host)/api")
+	if d != DecisionApproval {
+		t.Errorf("got %s, want APPROVAL for shell substitution in URL (SEC-001)", d)
+	}
+}
+
+func TestInspectURLs_NonCanonicalIPHex(t *testing.T) {
+	d, _ := InspectCommandURLs("curl http://0x7f000001/")
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for hex-encoded IP (SEC-002)", d)
+	}
+}
+
+func TestInspectURLs_InlineBodyURL(t *testing.T) {
+	// Test that URL scanning works on inline body content (SEC-006)
+	d, _ := InspectCommandURLs("curl http://169.254.169.254/latest/meta-data/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for metadata URL in inline body", d)
+	}
+}
+
+func TestInspectURLs_TrustedDomainExempt(t *testing.T) {
+	// Set trusted domains
+	SetTrustedDomains([]string{"api.github.com", "registry.npmjs.org"})
+	defer SetTrustedDomains(nil) // cleanup
+
+	d, _ := InspectCommandURLs("curl https://api.github.com/repos")
+	if d != "" {
+		t.Errorf("got %s, want empty (trusted domain should be exempt from SEC-004)", d)
+	}
+
+	// Untrusted domain should still get CAUTION
+	d2, _ := InspectCommandURLs("curl https://untrusted.tld/api")
+	if d2 != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for untrusted domain", d2)
+	}
+}
+
+func TestInspectURLs_PercentEncodedFailsClosed(t *testing.T) {
+	d, _ := InspectCommandURLs("curl http://%31%36%39%2e%32%35%34%2e%31%36%39%2e%32%35%34/")
+	if d == "" || d == DecisionSafe {
+		t.Errorf("got %s, want non-SAFE for percent-encoded URL (fail-closed)", d)
+	}
+}
+
 func TestInspectURLs_192168Private(t *testing.T) {
 	d, _ := InspectCommandURLs("curl http://192.168.1.1/admin")
 	if d != DecisionCaution {

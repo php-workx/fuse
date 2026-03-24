@@ -128,7 +128,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	dryRun := mode == config.ModeDryRun
 
 	// Load policy.
-	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
+	policyCfg, _ := policy.LoadPolicyWithLKG(config.PolicyPath(), 0)
 	evaluator := policy.NewEvaluator(policyCfg)
 
 	// Classify the command.
@@ -407,6 +407,8 @@ func loadRuntimeConfig() *config.Config {
 	if err != nil {
 		return config.DefaultConfig()
 	}
+	// Apply URL trust policy from config to the URL inspection module.
+	core.SetTrustedDomains(cfg.URLTrustPolicy.TrustedDomains)
 	return cfg
 }
 

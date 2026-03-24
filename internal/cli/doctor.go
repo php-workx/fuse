@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -241,7 +242,8 @@ func checkConfigYAML() checkResult {
 	}
 }
 
-// checkPolicyYAML checks that policy.yaml is valid if present.
+// checkPolicyYAML checks that policy.yaml is valid if present. Uses LKG fallback
+// and reports when the fallback is active (ECO-009: loud LKG warning).
 func checkPolicyYAML() checkResult {
 	policyPath := config.PolicyPath()
 
@@ -253,20 +255,44 @@ func checkPolicyYAML() checkResult {
 		}
 	}
 
+	// Try primary policy first.
 	pol, err := policy.LoadPolicy(policyPath)
-	if err != nil {
+	if err == nil {
+		policyHash := computePolicyHash(policyPath)
 		return checkResult{
 			name:   "Policy (policy.yaml)",
-			status: "FAIL",
-			detail: fmt.Sprintf("error loading policy: %v", err),
+			status: "PASS",
+			detail: fmt.Sprintf("%d rules loaded (version: %s, hash: %s)", len(pol.Rules), pol.Version, policyHash),
 		}
 	}
 
+	// Primary failed — check if LKG is available.
+	lkgPath := policyPath + ".lkg"
+	if _, statErr := os.Stat(lkgPath); statErr != nil {
+		return checkResult{
+			name:   "Policy (policy.yaml)",
+			status: "FAIL",
+			detail: fmt.Sprintf("error loading policy: %v (no LKG fallback available)", err),
+		}
+	}
+
+	// LKG exists — report warning with active policy hash.
+	lkgHash := computePolicyHash(lkgPath)
 	return checkResult{
 		name:   "Policy (policy.yaml)",
-		status: "PASS",
-		detail: fmt.Sprintf("%d rules loaded (version: %s)", len(pol.Rules), pol.Version),
+		status: "WARN",
+		detail: fmt.Sprintf("WARNING: using fallback policy (policy.yaml has errors: %v). Active LKG hash: %s", err, lkgHash),
 	}
+}
+
+// computePolicyHash returns a short SHA-256 hash of a policy file for identification.
+func computePolicyHash(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "unknown"
+	}
+	h := sha256.Sum256(data)
+	return fmt.Sprintf("%.8x", h)
 }
 
 // checkClaudeSettings checks that Claude Code's settings.json has the fuse hook.

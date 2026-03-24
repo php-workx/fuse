@@ -641,13 +641,14 @@ func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd st
 	}
 
 	heredocBody, heredocComplete := extractHeredocBody(cmd)
-	cmdSubsts := extractCommandSubstitutions(cmd)
+	cmdSubsts, cmdSubstComplete := extractCommandSubstitutions(cmd)
 
 	if heredocBody == "" && len(cmdSubsts) == 0 {
-		return "", "", "", true // nothing to extract
+		// If both extractions returned nothing but either failed, mark incomplete.
+		return "", "", "", heredocComplete && cmdSubstComplete
 	}
 
-	acc := &inlineAccumulator{complete: heredocComplete}
+	acc := &inlineAccumulator{complete: heredocComplete && cmdSubstComplete}
 
 	if heredocBody != "" {
 		acc.classifyHeredocBody(heredocBody, evaluator, cwd, depth)
