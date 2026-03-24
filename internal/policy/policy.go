@@ -1,9 +1,13 @@
 package policy
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
+	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -135,6 +139,110 @@ func DisabledTagSet(policy *PolicyConfig) map[string]bool {
 		m[tag] = true
 	}
 	return m
+}
+
+// defaultLKGMaxAge is the default maximum age for LKG policy files (7 days).
+const defaultLKGMaxAge = 7 * 24 * time.Hour
+
+// lkgSuffix is appended to the policy path to form the LKG path.
+const lkgSuffix = ".lkg"
+
+// LoadPolicyWithLKG tries to load policy.yaml. On success, saves as LKG.
+// On failure, falls back to last known good policy if available and recent.
+// maxAge controls how old the LKG can be (0 = use default 7 days).
+func LoadPolicyWithLKG(path string, maxAge time.Duration) (*PolicyConfig, error) {
+	if maxAge <= 0 {
+		maxAge = defaultLKGMaxAge
+	}
+	lkgPath := path + lkgSuffix
+
+	// Try loading the primary policy.
+	cfg, err := LoadPolicy(path)
+	if err == nil {
+		// Success — save as LKG.
+		saveLKG(path, lkgPath)
+		return cfg, nil
+	}
+
+	// Primary failed — try LKG fallback.
+	slog.Warn("policy.yaml load failed, attempting LKG fallback",
+		"path", path, "error", err)
+
+	lkgCfg, lkgErr := loadLKG(lkgPath, maxAge)
+	if lkgErr != nil {
+		return nil, fmt.Errorf("policy load failed (%w) and no valid LKG fallback (%w)", err, lkgErr)
+	}
+
+	slog.Warn("[fuse] WARNING: using fallback policy (policy.yaml has errors)",
+		"lkg_path", lkgPath)
+	return lkgCfg, nil
+}
+
+// saveLKG copies the policy file to the LKG path with a timestamp header.
+func saveLKG(sourcePath, lkgPath string) {
+	data, err := os.ReadFile(sourcePath)
+	if err != nil {
+		return // best-effort
+	}
+
+	hash := fmt.Sprintf("%x", sha256.Sum256(data))
+	header := fmt.Sprintf("# LKG saved: %s\n# Original: %s (sha256: %s)\n",
+		time.Now().UTC().Format(time.RFC3339), sourcePath, hash)
+
+	lkgData := header + string(data)
+	_ = os.WriteFile(lkgPath, []byte(lkgData), 0o600)
+}
+
+// loadLKG loads and validates an LKG policy file.
+func loadLKG(lkgPath string, maxAge time.Duration) (*PolicyConfig, error) {
+	data, err := os.ReadFile(lkgPath)
+	if err != nil {
+		return nil, fmt.Errorf("LKG file not found: %w", err)
+	}
+
+	// Check freshness from file modification time.
+	info, err := os.Stat(lkgPath)
+	if err != nil {
+		return nil, fmt.Errorf("LKG stat failed: %w", err)
+	}
+	if time.Since(info.ModTime()) > maxAge {
+		return nil, fmt.Errorf("LKG too old (modified %s, max age %s)",
+			info.ModTime().Format(time.RFC3339), maxAge)
+	}
+
+	// Strip comment lines before parsing.
+	lines := strings.Split(string(data), "\n")
+	var yamlLines []string
+	for _, line := range lines {
+		if strings.HasPrefix(line, "# LKG saved:") || strings.HasPrefix(line, "# Original:") {
+			continue
+		}
+		yamlLines = append(yamlLines, line)
+	}
+
+	var cfg PolicyConfig
+	if err := yaml.Unmarshal([]byte(strings.Join(yamlLines, "\n")), &cfg); err != nil {
+		return nil, fmt.Errorf("LKG parse failed: %w", err)
+	}
+
+	// Compile rules.
+	for i := range cfg.Rules {
+		r := &cfg.Rules[i]
+		compiled, compErr := regexp.Compile(r.Pattern)
+		if compErr != nil {
+			return nil, fmt.Errorf("LKG rule pattern %q: %w", r.Pattern, compErr)
+		}
+		r.compiled = compiled
+		if _, ok := actionToDecision[r.Action]; !ok {
+			return nil, fmt.Errorf("LKG invalid action %q", r.Action)
+		}
+	}
+
+	if _, tagErr := ParseTagOverrides(&cfg); tagErr != nil {
+		return nil, tagErr
+	}
+
+	return &cfg, nil
 }
 
 // DisabledBuiltinSet returns a map for quick lookup of disabled builtin rule IDs.

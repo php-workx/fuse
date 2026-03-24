@@ -54,15 +54,17 @@ const MaxScriptBytes = 50 * 1024
 
 // PromptContext holds all context needed for the judge to make an informed decision.
 type PromptContext struct {
-	Command         string // the shell command or MCP tool call
-	Cwd             string // working directory
-	WorkspaceRoot   string // project root (last 2 path components)
-	CurrentDecision string // CAUTION or APPROVAL
-	Reason          string // why this classification was assigned
-	RuleID          string // which rule triggered
-	ToolName        string // "Bash", "mcp__server__delete_items", etc.
-	ScriptContents  string // full script contents if file inspection triggered (scrubbed)
-	ScriptPath      string // path to the inspected script
+	Command              string // the shell command or MCP tool call
+	Cwd                  string // working directory
+	WorkspaceRoot        string // project root (last 2 path components)
+	CurrentDecision      string // CAUTION or APPROVAL
+	Reason               string // why this classification was assigned
+	RuleID               string // which rule triggered
+	ToolName             string // "Bash", "mcp__server__delete_items", etc.
+	ScriptContents       string // full script contents if file inspection triggered (scrubbed)
+	ScriptPath           string // path to the inspected script
+	InlineScriptBody     string // extracted heredoc body or $() content (scrubbed)
+	ExtractionIncomplete bool   // true if inline extraction was truncated/incomplete
 }
 
 // BuildUserPrompt constructs the user prompt from the given context.
@@ -86,6 +88,19 @@ func BuildUserPrompt(ctx PromptContext) string {
 				ctx.ScriptPath, scrubbed[:MaxScriptBytes])
 		} else {
 			fmt.Fprintf(&b, "\nScript contents (%s):\n%s\n", ctx.ScriptPath, scrubbed)
+		}
+	}
+	if ctx.InlineScriptBody != "" {
+		scrubbed := db.ScrubCredentials(ctx.InlineScriptBody)
+		if len(scrubbed) > MaxScriptBytes {
+			fmt.Fprintf(&b, "\nInline script body (extracted from command, TRUNCATED at 50KB — cannot fully assess):\n%s\n",
+				scrubbed[:MaxScriptBytes])
+		} else {
+			label := "Inline script body (extracted from command)"
+			if ctx.ExtractionIncomplete {
+				label += " [PARTIAL — extraction was truncated]"
+			}
+			fmt.Fprintf(&b, "\n%s:\n%s\n", label, scrubbed)
 		}
 	}
 	return b.String()

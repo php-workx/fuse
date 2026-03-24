@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // Compiled regexes for DisplayNormalize.
@@ -625,6 +626,150 @@ func extractBashCInner(tokens []string, i int) (string, bool) {
 		break
 	}
 	return "", false
+}
+
+// --- Inline script extraction (v2 classification pipeline) ---
+
+// maxInlineBodyBytes is the maximum size for extracted inline script bodies (50KB).
+const maxInlineBodyBytes = 50 * 1024
+
+// extractHeredocBody uses the mvdan.cc/sh parser to extract heredoc bodies.
+// Returns (body, complete). When body > maxInlineBodyBytes, truncates and returns
+// complete=false. Skips heredocs attached to cat commands (string quoting, not
+// code execution). On parse error or panic, returns ("", false) — fail-closed (SEC-008).
+func extractHeredocBody(cmd string) (body string, complete bool) {
+	complete = true
+	if len(cmd) > maxInputSize {
+		return "", false
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			body = ""
+			complete = false
+		}
+	}()
+
+	parser := syntax.NewParser(syntax.Variant(syntax.LangPOSIX))
+	prog, err := parser.Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return "", false
+	}
+
+	var parts []string
+	totalSize := 0
+
+	syntax.Walk(prog, func(node syntax.Node) bool {
+		stmt, ok := node.(*syntax.Stmt)
+		if !ok {
+			return true
+		}
+		if isStmtCatCommand(stmt) {
+			return true // skip cat heredocs (string quoting)
+		}
+		for _, redir := range stmt.Redirs {
+			if redir.Op != syntax.Hdoc && redir.Op != syntax.DashHdoc {
+				continue
+			}
+			if redir.Hdoc == nil {
+				continue
+			}
+			part := printNode(redir.Hdoc)
+			totalSize += len(part)
+			if totalSize > maxInlineBodyBytes {
+				excess := totalSize - maxInlineBodyBytes
+				if len(part) > excess {
+					part = part[:len(part)-excess]
+				} else {
+					part = ""
+				}
+				complete = false
+			}
+			if part != "" {
+				parts = append(parts, part)
+			}
+		}
+		return true
+	})
+
+	body = strings.Join(parts, "\n")
+	return body, complete
+}
+
+// extractCommandSubstitutions uses the mvdan.cc/sh parser to extract $() contents.
+// Skips $(cat <<...) patterns (string quoting, not code execution).
+// Returns a slice of extracted command strings.
+// On parse error or panic, returns nil (SEC-008).
+func extractCommandSubstitutions(cmd string) (results []string) {
+	if len(cmd) > maxInputSize {
+		return nil
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			results = nil
+		}
+	}()
+
+	parser := syntax.NewParser(syntax.Variant(syntax.LangPOSIX))
+	prog, err := parser.Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return nil
+	}
+
+	syntax.Walk(prog, func(node syntax.Node) bool {
+		cs, ok := node.(*syntax.CmdSubst)
+		if !ok {
+			return true
+		}
+		if isCmdSubstCat(cs) {
+			return false // skip cat heredoc substitutions
+		}
+		var stmtParts []string
+		for _, stmt := range cs.Stmts {
+			part := printNode(stmt)
+			if part != "" {
+				stmtParts = append(stmtParts, part)
+			}
+		}
+		content := strings.Join(stmtParts, "; ")
+		if content != "" {
+			results = append(results, content)
+		}
+		return false // don't recurse into nested CmdSubst
+	})
+
+	return results
+}
+
+// isStmtCatCommand returns true if the statement's command is "cat".
+func isStmtCatCommand(stmt *syntax.Stmt) bool {
+	if stmt == nil || stmt.Cmd == nil {
+		return false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return false
+	}
+	name := printNode(call.Args[0])
+	return filepath.Base(name) == "cat"
+}
+
+// isCmdSubstCat returns true if the command substitution is a $(cat <<...) pattern.
+func isCmdSubstCat(cs *syntax.CmdSubst) bool {
+	if len(cs.Stmts) != 1 {
+		return false
+	}
+	stmt := cs.Stmts[0]
+	if !isStmtCatCommand(stmt) {
+		return false
+	}
+	for _, redir := range stmt.Redirs {
+		if redir.Op == syntax.Hdoc || redir.Op == syntax.DashHdoc {
+			return true
+		}
+	}
+	return false
 }
 
 // extractSSHRemoteCommand extracts the remote command from an ssh invocation.

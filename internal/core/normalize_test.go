@@ -1,6 +1,7 @@
 package core
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -705,6 +706,116 @@ func TestClassificationNormalize_BashCExtractionFailure(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Heredoc body extraction tests (v2 pipeline)
+// ---------------------------------------------------------------------------
+
+func TestExtractHeredocBody_Simple(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<EOF\necho hello\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if body != "echo hello\n" && body != "echo hello" {
+		t.Errorf("got body=%q, want 'echo hello'", body)
+	}
+}
+
+func TestExtractHeredocBody_TabStripped(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<-EOF\n\techo hello\n\tEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if !strings.Contains(body, "echo hello") {
+		t.Errorf("got body=%q, want it to contain 'echo hello'", body)
+	}
+}
+
+func TestExtractHeredocBody_QuotedMarker(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<'EOF'\necho $HOME\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if !strings.Contains(body, "$HOME") {
+		t.Errorf("got body=%q, want literal $HOME preserved", body)
+	}
+}
+
+func TestExtractHeredocBody_Truncated(t *testing.T) {
+	// Create body > 50KB
+	bigBody := strings.Repeat("echo hello\n", 5500) // ~60KB
+	cmd := "bash <<EOF\n" + bigBody + "EOF"
+	body, complete := extractHeredocBody(cmd)
+	if complete {
+		t.Error("expected complete=false for truncated body")
+	}
+	if len(body) > maxInlineBodyBytes+100 { // allow small overhead from joins
+		t.Errorf("body too large: %d bytes", len(body))
+	}
+}
+
+func TestExtractHeredocBody_Empty(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<EOF\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if body != "" {
+		t.Errorf("got body=%q, want empty", body)
+	}
+}
+
+func TestExtractHeredocBody_CatExempt(t *testing.T) {
+	body, complete := extractHeredocBody("echo \"$(cat <<'EOF'\nhello world\nEOF\n)\"")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if body != "" {
+		t.Errorf("got body=%q, want empty (cat heredoc should be skipped)", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Command substitution extraction tests (v2 pipeline)
+// ---------------------------------------------------------------------------
+
+func TestExtractCommandSubstitution_Simple(t *testing.T) {
+	results := extractCommandSubstitutions("echo $(whoami)")
+	if len(results) != 1 || results[0] != "whoami" {
+		t.Errorf("got %v, want [whoami]", results)
+	}
+}
+
+func TestExtractCommandSubstitution_Multiple(t *testing.T) {
+	results := extractCommandSubstitutions("echo $(whoami) $(date)")
+	if len(results) != 2 {
+		t.Errorf("got %d results, want 2: %v", len(results), results)
+	}
+}
+
+func TestExtractCommandSubstitution_Nested(t *testing.T) {
+	results := extractCommandSubstitutions("$(echo $(id))")
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1: %v", len(results), results)
+	}
+	// Should contain the outer content including the nested $()
+	if !strings.Contains(results[0], "echo") {
+		t.Errorf("got %q, want it to contain 'echo'", results[0])
+	}
+}
+
+func TestExtractCommandSubstitution_CatExempt(t *testing.T) {
+	results := extractCommandSubstitutions("echo \"$(cat <<'EOF'\nhello\nEOF\n)\"")
+	if len(results) != 0 {
+		t.Errorf("got %v, want empty (cat heredoc substitution should be skipped)", results)
+	}
+}
+
+func TestExtractCommandSubstitution_ParseError(t *testing.T) {
+	// Unbalanced quotes should not panic
+	results := extractCommandSubstitutions("echo $('unbalanced")
+	// Should return nil or empty on parse error
+	_ = results // no panic = pass
 }
 
 // stringSliceEqual compares two string slices for equality, treating nil and empty as equal.

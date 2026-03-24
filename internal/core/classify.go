@@ -12,13 +12,15 @@ const maxInputSize = 64 * 1024
 
 // ClassifyResult holds the full result of command classification.
 type ClassifyResult struct {
-	Decision            Decision
-	Reason              string
-	RuleID              string
-	DecisionKey         string
-	SubResults          []SubCommandResult
-	DryRunMatches       []BuiltinMatch // rules that matched but were not enforced (per-tag dryrun)
-	TagOverrideEnforced bool           // true when the decision was enforced by a tag_override (should block even in dryrun)
+	Decision             Decision
+	Reason               string
+	RuleID               string
+	DecisionKey          string
+	SubResults           []SubCommandResult
+	DryRunMatches        []BuiltinMatch // rules that matched but were not enforced (per-tag dryrun)
+	TagOverrideEnforced  bool           // true when the decision was enforced by a tag_override (should block even in dryrun)
+	InlineBody           string         // extracted inline script content for judge
+	ExtractionIncomplete bool           // true when body truncated or depth exhausted
 }
 
 // WithDecision returns a deep copy of the result with a new decision and reason.
@@ -34,12 +36,14 @@ func (r *ClassifyResult) WithDecision(d Decision, reason string) *ClassifyResult
 
 // SubCommandResult holds the classification result for a single sub-command.
 type SubCommandResult struct {
-	Command             string
-	Decision            Decision
-	Reason              string
-	RuleID              string
-	DryRunMatches       []BuiltinMatch
-	TagOverrideEnforced bool // true when a tag_override explicitly enforced this decision
+	Command              string
+	Decision             Decision
+	Reason               string
+	RuleID               string
+	DryRunMatches        []BuiltinMatch
+	TagOverrideEnforced  bool   // true when a tag_override explicitly enforced this decision
+	InlineBody           string // extracted inline script body
+	ExtractionIncomplete bool   // true when extraction was incomplete
 }
 
 // PolicyEvaluator abstracts policy evaluation to avoid circular imports
@@ -203,6 +207,18 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 			result.TagOverrideEnforced = true
 		}
 
+		// Aggregate inline bodies from sub-results.
+		if sub.InlineBody != "" {
+			if result.InlineBody == "" {
+				result.InlineBody = sub.InlineBody
+			} else {
+				result.InlineBody += "\n---\n" + sub.InlineBody
+			}
+		}
+		if sub.ExtractionIncomplete {
+			result.ExtractionIncomplete = true
+		}
+
 		// Gather file hash if a referenced file was inspected.
 		refFile := DetectReferencedFile(subCmd)
 		if refFile != "" {
@@ -294,6 +310,39 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	sub.RuleID = bestRuleID
 	sub.DryRunMatches = allDryRunMatches
 	sub.TagOverrideEnforced = tagOverrideEnforced
+
+	// Extract and classify inline script bodies (heredocs, $() contents).
+	inlineD, inlineR, inlineBody, inlineComplete := classifyInlineBodies(subCmd, evaluator, cwd)
+	sub.InlineBody = inlineBody
+	sub.ExtractionIncomplete = !inlineComplete
+	if inlineD != "" {
+		combined := MaxDecision(sub.Decision, inlineD)
+		if combined != sub.Decision {
+			sub.Decision = combined
+			sub.Reason = inlineR
+		}
+	}
+
+	// URL inspection: scan command and extracted inline bodies for URLs (SEC-006).
+	urlD, urlR := InspectCommandURLs(subCmd)
+	if urlD != "" {
+		combined := MaxDecision(sub.Decision, urlD)
+		if combined != sub.Decision {
+			sub.Decision = combined
+			sub.Reason = urlR
+		}
+	}
+	if inlineBody != "" {
+		urlD, urlR = InspectCommandURLs(inlineBody)
+		if urlD != "" {
+			combined := MaxDecision(sub.Decision, urlD)
+			if combined != sub.Decision {
+				sub.Decision = combined
+				sub.Reason = urlR
+			}
+		}
+	}
+
 	return sub
 }
 
@@ -570,6 +619,83 @@ func isLetter(r rune) bool {
 
 func isDigit(r rune) bool {
 	return r >= '0' && r <= '9'
+}
+
+// classifyInlineBodies extracts inline script content (heredocs, command substitutions)
+// and classifies each extracted body through the classification pipeline.
+// Returns (decision, reason, combinedBody, complete).
+func classifyInlineBodies(cmd string, evaluator PolicyEvaluator, cwd string) (Decision, string, string, bool) {
+	return classifyInlineBodiesRecursive(cmd, evaluator, cwd, 0)
+}
+
+func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd string, depth int) (Decision, string, string, bool) {
+	if depth >= maxRecursionDepth {
+		return "", "", "", false // depth exhausted → incomplete
+	}
+
+	heredocBody, heredocComplete := extractHeredocBody(cmd)
+	cmdSubsts := extractCommandSubstitutions(cmd)
+
+	if heredocBody == "" && len(cmdSubsts) == 0 {
+		return "", "", "", true // nothing to extract
+	}
+
+	complete := heredocComplete
+	bestDecision := Decision("")
+	bestReason := ""
+
+	if heredocBody != "" {
+		subCmds, err := SplitCompoundCommand(heredocBody)
+		if err != nil {
+			// Can't parse body — classify whole body as-is
+			d, reason, _, _, _ := classifySingleCommand(heredocBody, evaluator, cwd)
+			if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
+				bestDecision = d
+				bestReason = "inline heredoc: " + reason
+			}
+		} else {
+			for _, sub := range subCmds {
+				d, reason, _, _, _ := classifySingleCommand(sub, evaluator, cwd)
+				if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
+					bestDecision = d
+					bestReason = "inline heredoc: " + reason
+				}
+				// Recurse into nested inline content
+				nd, nr, _, nc := classifyInlineBodiesRecursive(sub, evaluator, cwd, depth+1)
+				if !nc {
+					complete = false
+				}
+				if nd != "" && (bestDecision == "" || DecisionSeverity(nd) > DecisionSeverity(bestDecision)) {
+					bestDecision = nd
+					bestReason = nr
+				}
+			}
+		}
+	}
+
+	for _, subst := range cmdSubsts {
+		d, reason, _, _, _ := classifySingleCommand(subst, evaluator, cwd)
+		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
+			bestDecision = d
+			bestReason = "inline $(): " + reason
+		}
+		nd, nr, _, nc := classifyInlineBodiesRecursive(subst, evaluator, cwd, depth+1)
+		if !nc {
+			complete = false
+		}
+		if nd != "" && (bestDecision == "" || DecisionSeverity(nd) > DecisionSeverity(bestDecision)) {
+			bestDecision = nd
+			bestReason = nr
+		}
+	}
+
+	var allBodies []string
+	if heredocBody != "" {
+		allBodies = append(allBodies, heredocBody)
+	}
+	allBodies = append(allBodies, cmdSubsts...)
+
+	return bestDecision, bestReason, strings.Join(allBodies, "\n---\n"), complete
 }
 
 func isInspectTriggerRule(ruleID string) bool {

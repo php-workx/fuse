@@ -423,13 +423,15 @@ func logHookEventFields(sessionID, command, cwd, decision, ruleID, reason string
 // script contents when a referenced file is detected. Used by all shell adapters.
 func buildJudgeContext(command, cwd, toolName string, result *core.ClassifyResult) judge.PromptContext {
 	ctx := judge.PromptContext{
-		Command:         command,
-		Cwd:             cwd,
-		WorkspaceRoot:   judge.ShortenToLastN(cwd, 2),
-		CurrentDecision: string(result.Decision),
-		Reason:          result.Reason,
-		RuleID:          result.RuleID,
-		ToolName:        toolName,
+		Command:              command,
+		Cwd:                  cwd,
+		WorkspaceRoot:        judge.ShortenToLastN(cwd, 2),
+		CurrentDecision:      string(result.Decision),
+		Reason:               result.Reason,
+		RuleID:               result.RuleID,
+		ToolName:             toolName,
+		InlineScriptBody:     result.InlineBody,
+		ExtractionIncomplete: result.ExtractionIncomplete,
 	}
 	if cwd != "" {
 		if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {

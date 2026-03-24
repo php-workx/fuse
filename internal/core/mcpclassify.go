@@ -49,8 +49,16 @@ func ClassifyMCPTool(toolName string, args map[string]interface{}) Decision {
 		}
 	}
 
+	// Layer 3: URL inspection in arguments (SEC-006).
+	urlDecision := DecisionSafe
+	if args != nil {
+		if d, _ := InspectURLsInArgs(args); d != "" {
+			urlDecision = d
+		}
+	}
+
 	// Most restrictive wins.
-	return MaxDecision(nameDecision, argsDecision)
+	return MaxDecision(MaxDecision(nameDecision, argsDecision), urlDecision)
 }
 
 // classifyMCPByName classifies an MCP tool by its name prefix.

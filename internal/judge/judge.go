@@ -243,8 +243,16 @@ func MaybeJudge(ctx context.Context, cfg *config.Config, result *core.ClassifyRe
 	}
 
 	if verdict.Applied {
-		result = result.WithDecision(verdict.JudgeDecision,
-			fmt.Sprintf("LLM judge (%s): %s", verdict.ProviderName, verdict.Reasoning))
+		// When extraction was incomplete (SEC-009), never downgrade the structural
+		// decision — the judge cannot fully assess partial inline content.
+		if promptCtx.ExtractionIncomplete &&
+			core.DecisionSeverity(verdict.JudgeDecision) < core.DecisionSeverity(result.Decision) {
+			verdict.Applied = false
+			verdict.Reasoning += " (downgrade blocked: extraction incomplete)"
+		} else {
+			result = result.WithDecision(verdict.JudgeDecision,
+				fmt.Sprintf("LLM judge (%s): %s", verdict.ProviderName, verdict.Reasoning))
+		}
 	}
 
 	return result, verdict
