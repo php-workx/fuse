@@ -242,19 +242,19 @@ func saveLKGBytes(data []byte, sourcePath, lkgPath string) error {
 
 // loadLKG loads and validates an LKG policy file.
 func loadLKG(lkgPath string, maxAge time.Duration) (*PolicyConfig, error) {
-	data, err := os.ReadFile(lkgPath)
-	if err != nil {
-		return nil, fmt.Errorf("LKG file not found: %w", err)
-	}
-
-	// Check freshness from file modification time.
+	// Check freshness first to fail fast before reading content.
 	info, err := os.Stat(lkgPath)
 	if err != nil {
-		return nil, fmt.Errorf("LKG stat failed: %w", err)
+		return nil, fmt.Errorf("LKG file not found: %w", err)
 	}
 	if time.Since(info.ModTime()) > maxAge {
 		return nil, fmt.Errorf("LKG too old (modified %s, max age %s)",
 			info.ModTime().Format(time.RFC3339), maxAge)
+	}
+
+	data, err := os.ReadFile(lkgPath)
+	if err != nil {
+		return nil, fmt.Errorf("LKG read failed: %w", err)
 	}
 
 	// Strip comment lines before parsing.

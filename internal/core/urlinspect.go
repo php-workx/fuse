@@ -121,24 +121,15 @@ var insecureCertFlags = []string{" -k ", " -k\t", "--insecure", "--no-check-cert
 // Runs on any command text, not gated by basename (SEC-006).
 // Returns the most restrictive (decision, reason) from all URLs found.
 func InspectCommandURLs(cmd string) (Decision, string) {
-	urls := reURLPattern.FindAllString(cmd, -1)
-	if len(urls) == 0 {
-		return "", ""
-	}
-
 	bestDecision := Decision("")
 	bestReason := ""
 
-	for _, rawURL := range urls {
-		d, reason := inspectSingleURL(rawURL, cmd, false)
-		if d != "" && (bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision)) {
-			bestDecision = d
-			bestReason = reason
-		}
-	}
+	// Check insecure/redirect flags BEFORE URL extraction so they fire even when
+	// URLs are variable-substituted (e.g., curl -k "$URL"). Only for network commands.
+	basename := extractCmdBasename(cmd)
+	isNetCmd := networkCommandBasenames[basename]
 
-	// Check insecure cert flags
-	if hasInsecureCertFlag(cmd) {
+	if isNetCmd && hasInsecureCertFlag(cmd) {
 		d := DecisionCaution
 		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
 			bestDecision = d
@@ -146,12 +137,22 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 		}
 	}
 
-	// Check redirect flags (SEC-003) — always contributes CAUTION regardless of other decisions.
-	if hasRedirectFlags(cmd) {
+	// Check redirect flags (SEC-003).
+	if isNetCmd && hasRedirectFlags(cmd) {
 		d := DecisionCaution
 		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
 			bestDecision = d
 			bestReason = "HTTP redirect following enabled"
+		}
+	}
+
+	// Extract and inspect literal URLs.
+	urls := reURLPattern.FindAllString(cmd, -1)
+	for _, rawURL := range urls {
+		d, reason := inspectSingleURL(rawURL, cmd, false)
+		if d != "" && (bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision)) {
+			bestDecision = d
+			bestReason = reason
 		}
 	}
 
