@@ -111,14 +111,23 @@ func hashFile(path string) (string, error) {
 }
 
 // defaultTOFU is the session-scoped singleton used by the classification pipeline.
-var defaultTOFU = NewBinaryTOFU()
+// Protected by defaultTOFUMu for safe Reset during tests.
+var (
+	defaultTOFU   = NewBinaryTOFU()
+	defaultTOFUMu sync.Mutex
+)
 
 // VerifyBinaryIdentity checks the interpreter binary using the session-scoped TOFU.
 func VerifyBinaryIdentity(basename string) (Decision, string) {
-	return defaultTOFU.Verify(basename)
+	defaultTOFUMu.Lock()
+	t := defaultTOFU
+	defaultTOFUMu.Unlock()
+	return t.Verify(basename)
 }
 
-// ResetBinaryTOFU clears the session cache. Used in tests.
+// ResetBinaryTOFU clears the session cache. Safe for concurrent use.
 func ResetBinaryTOFU() {
+	defaultTOFUMu.Lock()
 	defaultTOFU = NewBinaryTOFU()
+	defaultTOFUMu.Unlock()
 }
