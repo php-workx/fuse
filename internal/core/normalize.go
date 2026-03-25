@@ -141,12 +141,8 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 		if !isEnvAssignment(tok) || strings.HasPrefix(tok, "-") {
 			break
 		}
-		// Check if this is a security-sensitive env var assignment.
-		for _, prefix := range sensitiveEnvPrefixes {
-			if strings.HasPrefix(tok, prefix) {
-				result.SensitiveEnvAssignment = true
-				break
-			}
+		if isSensitiveEnvAssignment(tok) {
+			result.SensitiveEnvAssignment = true
 		}
 		i++
 	}
@@ -400,12 +396,8 @@ func skipEnvArgs(tokens []string, i int, result *ClassifiedCommand) int {
 		}
 		// Skip VAR=val assignments (before the command)
 		if strings.Contains(t, "=") && !strings.HasPrefix(t, "-") && isEnvAssignment(t) {
-			// Check if this is a security-sensitive env var assignment.
-			for _, prefix := range sensitiveEnvPrefixes {
-				if strings.HasPrefix(t, prefix) {
-					result.SensitiveEnvAssignment = true
-					break
-				}
+			if isSensitiveEnvAssignment(t) {
+				result.SensitiveEnvAssignment = true
 			}
 			i++
 			continue
@@ -417,6 +409,16 @@ func skipEnvArgs(tokens []string, i int, result *ClassifiedCommand) int {
 		break
 	}
 	return i
+}
+
+// isSensitiveEnvAssignment checks if a VAR=value token sets a security-sensitive variable.
+func isSensitiveEnvAssignment(token string) bool {
+	for _, prefix := range sensitiveEnvPrefixes {
+		if strings.HasPrefix(token, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // isEnvAssignment checks if a token looks like a VAR=value assignment.

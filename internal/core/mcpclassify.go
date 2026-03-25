@@ -71,55 +71,31 @@ func classifyMCPByName(toolName string) Decision {
 	lower := strings.ToLower(toolName)
 
 	// Defense-in-depth: strip mcp__<server>__ prefix if present.
-	// The hook adapter already strips this via extractMCPAction(),
-	// and the proxy receives raw MCP names. This protects future callers.
 	if strings.HasPrefix(lower, "mcp__") {
-		parts := strings.SplitN(lower, "__", 3)
-		if len(parts) == 3 {
+		if parts := strings.SplitN(lower, "__", 3); len(parts) == 3 {
 			lower = parts[2]
 		}
 	}
 
-	// Check all prefix sets and take the most restrictive match.
-	bestDecision := Decision("")
+	// Check all prefix sets. Most restrictive match wins.
+	best := matchPrefixDecision(lower, mcpSafePrefixes, DecisionSafe)
+	best = MaxDecision(best, matchPrefixDecision(lower, mcpCautionPrefixes, DecisionCaution))
+	best = MaxDecision(best, matchPrefixDecision(lower, mcpApprovalPrefixes, DecisionApproval))
 
-	for _, prefix := range mcpSafePrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			if bestDecision == "" {
-				bestDecision = DecisionSafe
-			}
-			break
+	if best == "" {
+		return DecisionCaution // fallback for unmatched tool names
+	}
+	return best
+}
+
+// matchPrefixDecision returns decision if name matches any prefix, or empty Decision if none match.
+func matchPrefixDecision(name string, prefixes []string, decision Decision) Decision {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(name, prefix) {
+			return decision
 		}
 	}
-
-	for _, prefix := range mcpCautionPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			if bestDecision == "" {
-				bestDecision = DecisionCaution
-			} else {
-				bestDecision = MaxDecision(bestDecision, DecisionCaution)
-			}
-			break
-		}
-	}
-
-	for _, prefix := range mcpApprovalPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			if bestDecision == "" {
-				bestDecision = DecisionApproval
-			} else {
-				bestDecision = MaxDecision(bestDecision, DecisionApproval)
-			}
-			break
-		}
-	}
-
-	// Fallback: CAUTION for unmatched tool names.
-	if bestDecision == "" {
-		return DecisionCaution
-	}
-
-	return bestDecision
+	return ""
 }
 
 // flattenStringValues recursively extracts all string values from a map,

@@ -531,6 +531,21 @@ var safePythonInline = regexp.MustCompile(
 		`platform|sysconfig|site)\b`,
 )
 
+// isExemptInlinePattern returns true if the matched pattern should be skipped
+// for this command (safe python import, cat-heredoc substitution, safe heredoc usage).
+func isExemptInlinePattern(re *regexp.Regexp, cmd string) bool {
+	switch re {
+	case reInlinePythonC:
+		return isSafePythonInline(cmd)
+	case reInlineHeredoc:
+		return isCatHeredocSubstitution(cmd) || isSafeHeredocUsage(cmd)
+	case reInlineCmdSubst:
+		return isCatHeredocSubstitution(cmd)
+	default:
+		return false
+	}
+}
+
 // detectInlineScript checks for inline script/heredoc patterns (§5.4).
 // Returns the decision and reason if a pattern matches, or empty strings if none.
 func detectInlineScript(cmd string) (Decision, string) {
@@ -538,31 +553,13 @@ func detectInlineScript(cmd string) (Decision, string) {
 	bestReason := ""
 
 	for _, p := range inlineScriptPatterns {
-		if !p.re.MatchString(cmd) {
-			continue
-		}
-		// Check if this is a safe python -c pattern.
-		if p.re == reInlinePythonC && isSafePythonInline(cmd) {
-			continue
-		}
-		// Skip heredoc detection when the heredoc is inside a $(cat <<...)
-		// substitution — that's a string-quoting technique, not code execution.
-		// Also skip for known safe commands (git commit, gh pr create).
-		if p.re == reInlineHeredoc && (isCatHeredocSubstitution(cmd) || isSafeHeredocUsage(cmd)) {
-			continue
-		}
-		// Skip $() detection when it's a cat<<heredoc pattern.
-		// $(cat <<'EOF'...EOF) is just passing a multi-line string literal.
-		// Dangerous $() like $(rm -rf /) are still caught by hardcoded rules.
-		if p.re == reInlineCmdSubst && isCatHeredocSubstitution(cmd) {
+		if !p.re.MatchString(cmd) || isExemptInlinePattern(p.re, cmd) {
 			continue
 		}
 
-		var d Decision
+		d := DecisionCaution
 		if p.approval {
 			d = DecisionApproval
-		} else {
-			d = DecisionCaution
 		}
 		if bestDecision == "" {
 			bestDecision = d
