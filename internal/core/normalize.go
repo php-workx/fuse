@@ -696,6 +696,9 @@ func extractHeredocBody(cmd string) (body string, complete bool) {
 // extractCommandSubstitutions uses the mvdan.cc/sh parser to extract $() contents.
 // Skips $(cat <<...) patterns (string quoting, not code execution).
 // Returns (results, complete). On parse error or panic, returns (nil, false) — fail-closed (SEC-008).
+// maxCmdSubstitutions limits extracted $() count for defense-in-depth.
+const maxCmdSubstitutions = 50
+
 func extractCommandSubstitutions(cmd string) (results []string, complete bool) {
 	complete = true
 	if len(cmd) > maxInputSize {
@@ -716,6 +719,10 @@ func extractCommandSubstitutions(cmd string) (results []string, complete bool) {
 	}
 
 	syntax.Walk(prog, func(node syntax.Node) bool {
+		if len(results) >= maxCmdSubstitutions {
+			complete = false
+			return false // stop walking
+		}
 		cs, ok := node.(*syntax.CmdSubst)
 		if !ok {
 			return true

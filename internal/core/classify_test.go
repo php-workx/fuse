@@ -527,10 +527,10 @@ func TestClassify_PercentEncodedURLFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("classify error: %v", err)
 	}
-	// Must not be SAFE — fail-closed to at least APPROVAL
-	if result.Decision == core.DecisionSafe {
-		t.Errorf("expected non-SAFE for percent-encoded URL, got SAFE (reason: %s)",
-			result.Reason)
+	// Fail-closed: unparseable URL → APPROVAL (not SAFE, not just CAUTION)
+	if result.Decision != core.DecisionApproval {
+		t.Errorf("expected APPROVAL for percent-encoded URL (fail-closed), got %s (reason: %s)",
+			result.Decision, result.Reason)
 	}
 }
 

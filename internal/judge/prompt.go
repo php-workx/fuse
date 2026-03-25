@@ -92,15 +92,15 @@ func BuildUserPrompt(ctx PromptContext) string {
 	}
 	if ctx.InlineScriptBody != "" {
 		scrubbed := db.ScrubCredentials(ctx.InlineScriptBody)
+		label := "Inline script body (extracted from command"
+		if ctx.ExtractionIncomplete {
+			label += ", PARTIAL — extraction was truncated"
+		}
 		if len(scrubbed) > MaxScriptBytes {
-			fmt.Fprintf(&b, "\nInline script body (extracted from command, TRUNCATED at 50KB — cannot fully assess):\n%s\n",
-				scrubbed[:MaxScriptBytes])
+			label += ", TRUNCATED at 50KB — cannot fully assess"
+			fmt.Fprintf(&b, "\n%s):\n%s\n", label, scrubbed[:MaxScriptBytes])
 		} else {
-			label := "Inline script body (extracted from command)"
-			if ctx.ExtractionIncomplete {
-				label += " [PARTIAL — extraction was truncated]"
-			}
-			fmt.Fprintf(&b, "\n%s:\n%s\n", label, scrubbed)
+			fmt.Fprintf(&b, "\n%s):\n%s\n", label, scrubbed)
 		}
 	}
 	return b.String()

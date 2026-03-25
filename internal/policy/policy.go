@@ -248,7 +248,7 @@ func loadLKG(lkgPath string, maxAge time.Duration) (*PolicyConfig, error) {
 	// Check freshness first to fail fast before reading content.
 	info, err := os.Stat(lkgPath)
 	if err != nil {
-		return nil, fmt.Errorf("LKG file not found: %w", err)
+		return nil, fmt.Errorf("LKG file inaccessible: %w", err)
 	}
 	if time.Since(info.ModTime()) > maxAge {
 		return nil, fmt.Errorf("LKG too old (modified %s, max age %s)",

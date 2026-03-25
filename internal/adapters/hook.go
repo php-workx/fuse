@@ -529,8 +529,8 @@ func loadPolicyEvaluator() core.PolicyEvaluator {
 	policyPath := config.PolicyPath()
 	policyCfg, err := policy.LoadPolicyWithLKG(policyPath, 0)
 	if err != nil {
-		// No policy file, no LKG fallback: use default (no user rules).
-		slog.Debug("no user policy loaded", "path", policyPath, "error", err)
+		// Policy file exists but broken, and no LKG fallback: all user rules inactive.
+		slog.Warn("policy load failed, using default (no user rules)", "path", policyPath, "error", err)
 		return policy.NewEvaluator(nil)
 	}
 	return policy.NewEvaluator(policyCfg)

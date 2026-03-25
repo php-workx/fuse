@@ -266,22 +266,23 @@ func checkPolicyYAML() checkResult {
 		}
 	}
 
-	// Primary failed — check if LKG is available.
+	// Primary failed — try loading LKG to verify it's actually usable.
 	lkgPath := policyPath + ".lkg"
-	if _, statErr := os.Stat(lkgPath); statErr != nil {
+	lkgCfg, lkgErr := policy.LoadPolicy(lkgPath)
+	if lkgErr != nil {
 		return checkResult{
 			name:   "Policy (policy.yaml)",
 			status: "FAIL",
-			detail: fmt.Sprintf("error loading policy: %v (no LKG fallback available)", err),
+			detail: fmt.Sprintf("error loading policy: %v (LKG fallback also unusable)", err),
 		}
 	}
 
-	// LKG exists — report warning with active policy hash.
+	// LKG is valid and loadable — report warning with active policy hash.
 	lkgHash := computePolicyHash(lkgPath)
 	return checkResult{
 		name:   "Policy (policy.yaml)",
 		status: "WARN",
-		detail: fmt.Sprintf("WARNING: using fallback policy (policy.yaml has errors: %v). Active LKG hash: %s", err, lkgHash),
+		detail: fmt.Sprintf("WARNING: using fallback policy (policy.yaml has errors: %v). Active LKG hash: %s, %d rules", err, lkgHash, len(lkgCfg.Rules)),
 	}
 }
 

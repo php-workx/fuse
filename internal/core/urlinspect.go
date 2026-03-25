@@ -113,9 +113,12 @@ var reURLPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'"` + "`" +
 // reNonCanonicalNumeric detects hex (0x), octal (0-prefixed), or decimal IPs.
 var reNonCanonicalNumeric = regexp.MustCompile(`^(0x[0-9a-fA-F]+|0[0-7]+\d|[0-9]{10,})$`)
 
-// insecureCertFlags are flags that disable TLS verification.
-// Checked via substring matching (not regex \b which fails on hyphen-prefixed flags).
-var insecureCertFlags = []string{" -k ", " -k\t", "--insecure", "--no-check-certificate", "--no-verify-ssl"}
+// reInsecureCertFlag detects flags that disable TLS verification.
+// Uses regex to catch combined short flags (e.g., -kL, -kvs).
+var reInsecureCertFlag = regexp.MustCompile(`(^|\s)-[a-zA-Z]*k`)
+
+// insecureCertLongFlags are long-form flags that disable TLS verification.
+var insecureCertLongFlags = []string{"--insecure", "--no-check-certificate", "--no-verify-ssl"}
 
 // InspectCommandURLs extracts URLs from a command string and classifies them.
 // Runs on any command text, not gated by basename (SEC-006).
@@ -293,11 +296,13 @@ func hasRedirectFlags(cmd string) bool {
 }
 
 // hasInsecureCertFlag checks if the command contains TLS verification bypass flags.
+// Detects -k as standalone or in combined short flags (-kL, -kvs).
 func hasInsecureCertFlag(cmd string) bool {
-	// Pad command for boundary matching on -k (short flag)
-	padded := " " + cmd + " "
-	for _, flag := range insecureCertFlags {
-		if strings.Contains(padded, flag) {
+	if reInsecureCertFlag.MatchString(cmd) {
+		return true
+	}
+	for _, flag := range insecureCertLongFlags {
+		if strings.Contains(cmd, flag) {
 			return true
 		}
 	}

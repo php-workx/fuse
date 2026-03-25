@@ -665,6 +665,7 @@ func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd st
 		allBodies = append(allBodies, heredocBody)
 	}
 	allBodies = append(allBodies, cmdSubsts...)
+	allBodies = append(allBodies, acc.nestedBodies...)
 
 	return acc.bestDecision, acc.bestReason, strings.Join(allBodies, "\n---\n"), acc.complete
 }
@@ -674,6 +675,7 @@ type inlineAccumulator struct {
 	bestDecision Decision
 	bestReason   string
 	complete     bool
+	nestedBodies []string // bodies from nested extraction (depth > 0)
 }
 
 func (a *inlineAccumulator) update(d Decision, reason string) {
@@ -699,11 +701,14 @@ func (a *inlineAccumulator) classifyExtractedCmd(cmd, label string, evaluator Po
 	d, reason := classifyExtractedSubCommand(cmd, evaluator, cwd)
 	a.update(d, label+": "+reason)
 
-	nd, nr, _, nc := classifyInlineBodiesRecursive(cmd, evaluator, cwd, depth+1)
+	nd, nr, nestedBody, nc := classifyInlineBodiesRecursive(cmd, evaluator, cwd, depth+1)
 	if !nc {
 		a.complete = false
 	}
 	a.update(nd, nr)
+	if nestedBody != "" {
+		a.nestedBodies = append(a.nestedBodies, nestedBody)
+	}
 }
 
 // classifyExtractedSubCommand runs the full classification pipeline on an extracted
