@@ -75,44 +75,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		// Discard stale ticks from a previous view and reschedule.
-		if msg.view != m.activeView {
-			return m, tickCmd(m.activeView)
-		}
-		if m.fetching {
-			return m, nil // skip — previous fetch still in-flight
-		}
-		// Pause polling while the detail panel is open to avoid
-		// disrupting the user's reading (spec §6 cursor anchoring).
-		if m.activeView == viewEvents && m.events.showDetail {
-			return m, tickCmd(m.activeView) // reschedule without fetching
-		}
-		m.fetching = true
-		return m, m.fetchData()
+		return m.handleTick(msg)
 
 	case dataMsg:
-		m.fetching = false
-		if msg.reqGen < m.fetchGen {
-			// Stale result — discard and schedule next tick.
-			return m, tickCmd(m.activeView)
-		}
-		if msg.err != nil {
-			m.lastErr = msg.err
-		} else {
-			m.lastErr = nil
-			switch msg.view {
-			case viewEvents:
-				m.events.SetData(msg.events)
-			case viewStats:
-				m.stats.SetData(msg.summary)
-				m.stats.SetJudgeSummary(msg.judgeSummary)
-			case viewApprovals:
-				m.approvals.SetData(msg.approvals)
-				m.approvals.SetPending(msg.pending)
-			default:
-			}
-		}
-		return m, tickCmd(m.activeView)
+		return m.handleData(msg)
 
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -131,6 +97,50 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	default:
 	}
 	return m, cmd
+}
+
+// handleTick processes periodic tick messages for data polling.
+func (m Model) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
+	// Discard stale ticks from a previous view and reschedule.
+	if msg.view != m.activeView {
+		return m, tickCmd(m.activeView)
+	}
+	if m.fetching {
+		return m, nil // skip — previous fetch still in-flight
+	}
+	// Pause polling while the detail panel is open to avoid
+	// disrupting the user's reading (spec §6 cursor anchoring).
+	if m.activeView == viewEvents && m.events.showDetail {
+		return m, tickCmd(m.activeView) // reschedule without fetching
+	}
+	m.fetching = true
+	return m, m.fetchData()
+}
+
+// handleData processes data fetch results.
+func (m Model) handleData(msg dataMsg) (tea.Model, tea.Cmd) {
+	m.fetching = false
+	if msg.reqGen < m.fetchGen {
+		// Stale result — discard and schedule next tick.
+		return m, tickCmd(m.activeView)
+	}
+	if msg.err != nil {
+		m.lastErr = msg.err
+	} else {
+		m.lastErr = nil
+		switch msg.view {
+		case viewEvents:
+			m.events.SetData(msg.events)
+		case viewStats:
+			m.stats.SetData(msg.summary)
+			m.stats.SetJudgeSummary(msg.judgeSummary)
+		case viewApprovals:
+			m.approvals.SetData(msg.approvals)
+			m.approvals.SetPending(msg.pending)
+		default:
+		}
+	}
+	return m, tickCmd(m.activeView)
 }
 
 // handleKey processes keyboard input for the top-level model.

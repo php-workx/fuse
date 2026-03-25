@@ -23,6 +23,11 @@ import (
 	"github.com/php-workx/fuse/internal/policy"
 )
 
+const (
+	checkNameDirStructure = "Directory structure"
+	checkNameLiveRawMode  = "Live terminal raw mode"
+)
+
 var (
 	doctorLive     bool
 	doctorSecurity bool
@@ -225,20 +230,20 @@ func checkDirectoryStructure() checkResult {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return checkResult{
-					name:   "Directory structure",
+					name:   checkNameDirStructure,
 					status: "WARN",
 					detail: fmt.Sprintf("%s does not exist (will be created on first use)", d.path),
 				}
 			}
 			return checkResult{
-				name:   "Directory structure",
+				name:   checkNameDirStructure,
 				status: "FAIL",
 				detail: fmt.Sprintf("cannot stat %s: %v", d.path, err),
 			}
 		}
 		if !info.IsDir() {
 			return checkResult{
-				name:   "Directory structure",
+				name:   checkNameDirStructure,
 				status: "FAIL",
 				detail: fmt.Sprintf("%s exists but is not a directory", d.path),
 			}
@@ -247,7 +252,7 @@ func checkDirectoryStructure() checkResult {
 			actual := info.Mode().Perm()
 			if actual != d.perm {
 				return checkResult{
-					name:   "Directory structure",
+					name:   checkNameDirStructure,
 					status: "WARN",
 					detail: fmt.Sprintf("%s has permissions %o (expected %o)", d.path, actual, d.perm),
 				}
@@ -256,7 +261,7 @@ func checkDirectoryStructure() checkResult {
 	}
 
 	return checkResult{
-		name:   "Directory structure",
+		name:   checkNameDirStructure,
 		status: "PASS",
 		detail: baseDir,
 	}
@@ -813,7 +818,7 @@ func checkLiveRawMode() checkResult {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return checkResult{
-			name:   "Live terminal raw mode",
+			name:   checkNameLiveRawMode,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot open /dev/tty: %v", err),
 		}
@@ -824,7 +829,7 @@ func checkLiveRawMode() checkResult {
 	orig, err := unix.IoctlGetTermios(fd, doctorIoctlGetTermios)
 	if err != nil {
 		return checkResult{
-			name:   "Live terminal raw mode",
+			name:   checkNameLiveRawMode,
 			status: "WARN",
 			detail: fmt.Sprintf("raw mode not available: %v", err),
 		}
@@ -839,20 +844,20 @@ func checkLiveRawMode() checkResult {
 	}
 	if err := unix.IoctlSetTermios(fd, doctorIoctlSetTermios, &raw); err != nil {
 		return checkResult{
-			name:   "Live terminal raw mode",
+			name:   checkNameLiveRawMode,
 			status: "FAIL",
 			detail: fmt.Sprintf("enter raw mode: %v", err),
 		}
 	}
 	if err := unix.IoctlSetTermios(fd, doctorIoctlSetTermios, orig); err != nil {
 		return checkResult{
-			name:   "Live terminal raw mode",
+			name:   checkNameLiveRawMode,
 			status: "FAIL",
 			detail: fmt.Sprintf("restore terminal state: %v", err),
 		}
 	}
 	return checkResult{
-		name:   "Live terminal raw mode",
+		name:   checkNameLiveRawMode,
 		status: "PASS",
 		detail: "entered and restored raw mode on /dev/tty",
 	}

@@ -311,110 +311,143 @@ func (m ApprovalsModel) renderDetail(a *db.Approval) string {
 func (m ApprovalsModel) View() string {
 	var b strings.Builder
 
-	// Pending section.
-	pendingCount := len(m.pending)
-	if pendingCount > 0 {
-		fmt.Fprintf(&b, "  %s (%d)\n\n",
-			styleError.Render("⚠ Pending Approval Requests"), pendingCount)
-
-		for i := range m.pending {
-			req := &m.pending[i]
-			prefix := "  "
-			if m.focus == focusPending && i == m.pendingIdx {
-				prefix = styleCursor.Render("▶ ")
-			}
-			b.WriteString(prefix + sanitize(shorten(req.Command, max(m.width-4, 0))) + "\n")
-			fmt.Fprintf(&b, "    Source: %s  Session: %s\n", sanitize(req.Source), sanitize(shorten(req.SessionID, 12)))
-			if req.Reason != "" {
-				b.WriteString("    Reason: " + sanitize(req.Reason) + "\n")
-			}
-			elapsed := time.Since(parseTime(req.CreatedAt)).Truncate(time.Second)
-			fmt.Fprintf(&b, "    Waiting: %s\n", elapsed)
-			b.WriteByte('\n')
-		}
-
-		if m.scopeSelect {
-			b.WriteString("    Scope: [o]nce  [c]ommand  [s]ession  [f]orever\n\n")
-		} else if m.focus == focusPending {
-			b.WriteString("    [a] Approve  [d] Deny\n\n")
-		}
-	} else {
-		b.WriteString(styleDim.Render("  No pending requests") + "\n\n")
-	}
+	b.WriteString(m.renderPendingSection())
 
 	// Separator.
 	b.WriteString("  " + strings.Repeat("─", max(m.width-4, 0)) + "\n")
 
-	// History section.
-	fmt.Fprintf(&b, "  Approval History (%d)\n\n", len(m.approvals))
-
-	if len(m.approvals) == 0 {
-		b.WriteString(styleDim.Render("  No approvals yet") + "\n")
-	} else {
-		header := fmt.Sprintf("  %-19s  %-8s  %-8s  %-9s  %s",
-			"CREATED", "SCOPE", "DECISION", "STATUS", "KEY")
-		b.WriteString(styleColHeader.Render(shorten(header, m.width)) + "\n")
-
-		visibleRows := m.historyHeight()
-		if m.historyIdx < m.histOffset {
-			m.histOffset = m.historyIdx
-		}
-		if m.historyIdx >= m.histOffset+visibleRows {
-			m.histOffset = m.historyIdx - visibleRows + 1
-		}
-		end := m.histOffset + visibleRows
-		if end > len(m.approvals) {
-			end = len(m.approvals)
-		}
-
-		now := m.clock()
-		for i := m.histOffset; i < end; i++ {
-			a := &m.approvals[i]
-			created := formatApprovalTime(a.CreatedAt)
-			status, sStyle := approvalStatus(a, now)
-			keyTrunc := shorten(a.DecisionKey, m.width-55)
-
-			row := fmt.Sprintf("  %-19s  %-8s  %-8s  %s  %s",
-				created, sanitize(a.Scope), sanitize(a.Decision),
-				sStyle.Render(fmt.Sprintf("%-9s", status)), sanitize(keyTrunc))
-
-			if m.focus == focusHistory && i == m.historyIdx {
-				b.WriteString(styleCursor.Render(shorten(row, m.width)) + "\n")
-			} else {
-				b.WriteString(shorten(row, m.width) + "\n")
-			}
-		}
-	}
-
-	// Policy recommendations section.
-	if len(m.recommendations) > 0 {
-		b.WriteString("\n  " + strings.Repeat("─", max(m.width-4, 0)) + "\n")
-		fmt.Fprintf(&b, "  Policy Recommendations (%d)\n\n", len(m.recommendations))
-		for _, r := range m.recommendations {
-			cmd := shorten(sanitize(r.Command), m.width-20)
-			fmt.Fprintf(&b, "  %s  (%dx)\n", styleDim.Render(cmd), r.Count)
-		}
-		b.WriteString(styleDim.Render("\n  Run 'fuse doctor' for suggested policy.yaml rules") + "\n")
-	}
+	b.WriteString(m.renderHistorySection())
+	b.WriteString(m.renderRecommendationsSection())
 
 	// Detail panel (rendered via viewport for scrolling).
 	if m.showDetail {
 		b.WriteString(m.detailView.View())
 	}
 
-	// Confirmation dialog.
-	if m.confirming != "" {
-		b.WriteByte('\n')
-		switch m.confirming {
-		case "delete":
-			b.WriteString(styleError.Render(fmt.Sprintf("  Revoke approval %s? [y/n]", shorten(m.confirmID, 8))))
-		case "purge":
-			b.WriteString(styleError.Render("  Purge all expired/consumed? [y/n]"))
-		default:
+	b.WriteString(m.renderConfirmation())
+
+	return b.String()
+}
+
+// renderPendingSection renders the pending approval requests section.
+func (m ApprovalsModel) renderPendingSection() string {
+	var b strings.Builder
+
+	pendingCount := len(m.pending)
+	if pendingCount == 0 {
+		b.WriteString(styleDim.Render("  No pending requests") + "\n\n")
+		return b.String()
+	}
+
+	fmt.Fprintf(&b, "  %s (%d)\n\n",
+		styleError.Render("⚠ Pending Approval Requests"), pendingCount)
+
+	for i := range m.pending {
+		req := &m.pending[i]
+		prefix := "  "
+		if m.focus == focusPending && i == m.pendingIdx {
+			prefix = styleCursor.Render("▶ ")
 		}
+		b.WriteString(prefix + sanitize(shorten(req.Command, max(m.width-4, 0))) + "\n")
+		fmt.Fprintf(&b, "    Source: %s  Session: %s\n", sanitize(req.Source), sanitize(shorten(req.SessionID, 12)))
+		if req.Reason != "" {
+			b.WriteString("    Reason: " + sanitize(req.Reason) + "\n")
+		}
+		elapsed := time.Since(parseTime(req.CreatedAt)).Truncate(time.Second)
+		fmt.Fprintf(&b, "    Waiting: %s\n", elapsed)
 		b.WriteByte('\n')
 	}
 
+	if m.scopeSelect {
+		b.WriteString("    Scope: [o]nce  [c]ommand  [s]ession  [f]orever\n\n")
+	} else if m.focus == focusPending {
+		b.WriteString("    [a] Approve  [d] Deny\n\n")
+	}
+
+	return b.String()
+}
+
+// renderHistorySection renders the approval history table.
+func (m ApprovalsModel) renderHistorySection() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "  Approval History (%d)\n\n", len(m.approvals))
+
+	if len(m.approvals) == 0 {
+		b.WriteString(styleDim.Render("  No approvals yet") + "\n")
+		return b.String()
+	}
+
+	header := fmt.Sprintf("  %-19s  %-8s  %-8s  %-9s  %s",
+		"CREATED", "SCOPE", "DECISION", "STATUS", "KEY")
+	b.WriteString(styleColHeader.Render(shorten(header, m.width)) + "\n")
+
+	visibleRows := m.historyHeight()
+	if m.historyIdx < m.histOffset {
+		m.histOffset = m.historyIdx
+	}
+	if m.historyIdx >= m.histOffset+visibleRows {
+		m.histOffset = m.historyIdx - visibleRows + 1
+	}
+	end := m.histOffset + visibleRows
+	if end > len(m.approvals) {
+		end = len(m.approvals)
+	}
+
+	now := m.clock()
+	for i := m.histOffset; i < end; i++ {
+		a := &m.approvals[i]
+		created := formatApprovalTime(a.CreatedAt)
+		status, sStyle := approvalStatus(a, now)
+		keyTrunc := shorten(a.DecisionKey, m.width-55)
+
+		row := fmt.Sprintf("  %-19s  %-8s  %-8s  %s  %s",
+			created, sanitize(a.Scope), sanitize(a.Decision),
+			sStyle.Render(fmt.Sprintf("%-9s", status)), sanitize(keyTrunc))
+
+		if m.focus == focusHistory && i == m.historyIdx {
+			b.WriteString(styleCursor.Render(shorten(row, m.width)) + "\n")
+		} else {
+			b.WriteString(shorten(row, m.width) + "\n")
+		}
+	}
+
+	return b.String()
+}
+
+// renderRecommendationsSection renders the policy recommendations section.
+func (m ApprovalsModel) renderRecommendationsSection() string {
+	if len(m.recommendations) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n  " + strings.Repeat("─", max(m.width-4, 0)) + "\n")
+	fmt.Fprintf(&b, "  Policy Recommendations (%d)\n\n", len(m.recommendations))
+	for _, r := range m.recommendations {
+		cmd := shorten(sanitize(r.Command), m.width-20)
+		fmt.Fprintf(&b, "  %s  (%dx)\n", styleDim.Render(cmd), r.Count)
+	}
+	b.WriteString(styleDim.Render("\n  Run 'fuse doctor' for suggested policy.yaml rules") + "\n")
+	return b.String()
+}
+
+// renderConfirmation renders the confirmation dialog when active.
+func (m ApprovalsModel) renderConfirmation() string {
+	if m.confirming == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteByte('\n')
+	switch m.confirming {
+	case "delete":
+		b.WriteString(styleError.Render(fmt.Sprintf("  Revoke approval %s? [y/n]", shorten(m.confirmID, 8))))
+	case "purge":
+		b.WriteString(styleError.Render("  Purge all expired/consumed? [y/n]"))
+	default:
+	}
+	b.WriteByte('\n')
 	return b.String()
 }
 

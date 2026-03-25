@@ -452,6 +452,19 @@ func isAwsSafe(fields []string) bool {
 	return false
 }
 
+// skipGcloudFlags advances past leading flags (and their non-flag arguments)
+// starting at position start, returning the index of the first positional token.
+func skipGcloudFlags(fields []string, start int) int {
+	idx := start
+	for idx < len(fields) && strings.HasPrefix(fields[idx], "-") {
+		idx++
+		if idx < len(fields) && !strings.HasPrefix(fields[idx], "-") {
+			idx++
+		}
+	}
+	return idx
+}
+
 // isGcloudSafe: gcloud is safe with describe, list, config list, info, auth list.
 func isGcloudSafe(fields []string) bool {
 	if len(fields) < 2 {
@@ -459,13 +472,7 @@ func isGcloudSafe(fields []string) bool {
 	}
 
 	// Find the first non-flag token after "gcloud".
-	idx := 1
-	for idx < len(fields) && strings.HasPrefix(fields[idx], "-") {
-		idx++
-		if idx < len(fields) && !strings.HasPrefix(fields[idx], "-") {
-			idx++
-		}
-	}
+	idx := skipGcloudFlags(fields, 1)
 	if idx >= len(fields) {
 		return false
 	}

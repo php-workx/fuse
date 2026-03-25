@@ -11,6 +11,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const codexConfigDir = ".codex"
+
 var installCmd = &cobra.Command{
 	Use:     "install [claude|codex]",
 	Short:   "Install fuse as a hook for an AI coding agent",
@@ -287,7 +289,7 @@ func writeJSONFile(path string, data map[string]interface{}) error {
 
 func codexConfigPath() string {
 	if cwd, err := os.Getwd(); err == nil {
-		localPath := filepath.Join(cwd, ".codex", "config.toml")
+		localPath := filepath.Join(cwd, codexConfigDir, "config.toml")
 		if _, statErr := os.Stat(localPath); statErr == nil {
 			return localPath
 		}
@@ -297,9 +299,9 @@ func codexConfigPath() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), ".codex", "config.toml")
+		return filepath.Join(os.TempDir(), codexConfigDir, "config.toml")
 	}
-	return filepath.Join(home, ".codex", "config.toml")
+	return filepath.Join(home, codexConfigDir, "config.toml")
 }
 
 func rejectSymlinkedCodexConfigPath(configPath string) error {
@@ -320,7 +322,7 @@ func rejectSymlinkedCodexConfigPath(configPath string) error {
 		return nil //nolint:nilerr // relErr means path resolution failed, skip check gracefully
 	}
 
-	for _, candidate := range []string{filepath.Join(absCwd, ".codex"), absPath} {
+	for _, candidate := range []string{filepath.Join(absCwd, codexConfigDir), absPath} {
 		info, err := os.Lstat(candidate)
 		if err != nil {
 			if os.IsNotExist(err) {

@@ -115,6 +115,79 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 	return restore, nil
 }
 
+// runContext bundles parameters shared across ExecuteCommand helper functions.
+type runContext struct {
+	command   string
+	cwd       string
+	result    *core.ClassifyResult
+	verdict   *judge.Verdict
+	database  *db.DB
+	cfg       *config.Config
+	evaluator core.PolicyEvaluator
+	req       core.ShellRequest
+	dryRun    bool
+}
+
+// logWithVerdict logs an event with judge verdict fields.
+func (rc *runContext) logWithVerdict(outcome string) {
+	event := newEvent(rc.result, "run", "manual", "", rc.command, rc.cwd, outcome)
+	applyVerdict(event, rc.verdict)
+	logEvent(rc.database, event)
+}
+
+// handleBlockedCommand handles a BLOCKED classification result.
+func (rc *runContext) handleBlockedCommand() (int, error) {
+	rc.logWithVerdict("blocked")
+	cleanupExecutionState(rc.database, rc.cfg)
+	if !rc.dryRun {
+		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", rc.result.Reason)
+		return 1, nil
+	}
+	return 0, nil
+}
+
+// handleApprovalCommand handles an APPROVAL classification result.
+func (rc *runContext) handleApprovalCommand() (int, error) {
+	if rc.dryRun {
+		rc.logWithVerdict("dry-run")
+		return 0, nil
+	}
+
+	if rc.database == nil {
+		fmt.Fprintf(os.Stderr, "fuse: approval required but database unavailable\n")
+		return 1, fmt.Errorf("database unavailable for approval")
+	}
+
+	secret, secretErr := db.EnsureSecret(config.SecretPath())
+	if secretErr != nil {
+		return 1, fmt.Errorf("load HMAC secret: %w", secretErr)
+	}
+
+	mgr, mgrErr := approve.NewManager(rc.database, secret)
+	if mgrErr != nil {
+		return 1, fmt.Errorf("create approval manager: %w", mgrErr)
+	}
+
+	decision, promptErr := mgr.RequestApproval(context.Background(), approve.ApprovalRequest{
+		DecisionKey: rc.result.DecisionKey,
+		Command:     rc.command,
+		Reason:      rc.result.Reason,
+		Source:      "run",
+	})
+	if promptErr != nil {
+		return 1, fmt.Errorf("approval: %w", promptErr)
+	}
+
+	if decision == core.DecisionBlocked {
+		fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
+		rc.logWithVerdict("denied")
+		cleanupExecutionState(rc.database, rc.cfg)
+		return 1, nil
+	}
+
+	return 0, nil
+}
+
 // ExecuteCommand classifies and optionally runs a shell command.
 // In run mode, it: classify -> prompt if needed -> execute with safety controls.
 func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, err error) {
@@ -125,7 +198,6 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	if mode == config.ModeDisabled {
 		return executeShellCommand(command, cwd, timeout)
 	}
-	dryRun := mode == config.ModeDryRun
 
 	// Load policy.
 	policyCfg, _ := policy.LoadPolicyWithLKG(config.PolicyPath(), 0)
@@ -157,70 +229,24 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 		defer func() { _ = database.Close() }()
 	}
 
-	// logWithVerdict is a helper to log events with judge verdict fields.
-	logWithVerdict := func(outcome string) {
-		event := newEvent(result, "run", "manual", "", command, cwd, outcome)
-		applyVerdict(event, verdict)
-		logEvent(database, event)
+	rc := &runContext{
+		command:   command,
+		cwd:       cwd,
+		result:    result,
+		verdict:   verdict,
+		database:  database,
+		cfg:       cfg,
+		evaluator: evaluator,
+		req:       req,
+		dryRun:    mode == config.ModeDryRun,
 	}
 
 	// Handle classification result.
-	switch result.Decision {
-	case core.DecisionBlocked:
-		logWithVerdict("blocked")
-		cleanupExecutionState(database, cfg)
-		if !dryRun {
-			fmt.Fprintf(os.Stderr, "fuse: BLOCKED — %s\n", result.Reason)
-			return 1, nil
-		}
-
-	case core.DecisionSafe:
-		// Execute directly.
-
-	case core.DecisionCaution:
-		// Execute directly.
-
-	case core.DecisionApproval:
-		if !dryRun {
-			// Prompt user for approval.
-			if database == nil {
-				fmt.Fprintf(os.Stderr, "fuse: approval required but database unavailable\n")
-				return 1, fmt.Errorf("database unavailable for approval")
-			}
-
-			secret, secretErr := db.EnsureSecret(config.SecretPath())
-			if secretErr != nil {
-				return 1, fmt.Errorf("load HMAC secret: %w", secretErr)
-			}
-
-			mgr, mgrErr := approve.NewManager(database, secret)
-			if mgrErr != nil {
-				return 1, fmt.Errorf("create approval manager: %w", mgrErr)
-			}
-			decision, promptErr := mgr.RequestApproval(context.Background(), approve.ApprovalRequest{
-				DecisionKey: result.DecisionKey,
-				Command:     command,
-				Reason:      result.Reason,
-				Source:      "run",
-			})
-			if promptErr != nil {
-				return 1, fmt.Errorf("approval: %w", promptErr)
-			}
-			if decision == core.DecisionBlocked {
-				fmt.Fprintf(os.Stderr, "fuse: denied by user\n")
-				logWithVerdict("denied")
-				cleanupExecutionState(database, cfg)
-				return 1, nil
-			}
-		} else {
-			logWithVerdict("dry-run")
-		}
-
-	default:
-		// Unknown decision — execute directly (safe fallback).
+	if code, handleErr := rc.handleDecision(); handleErr != nil || code != 0 {
+		return code, handleErr
 	}
 
-	if !dryRun {
+	if !rc.dryRun {
 		if verifyErr := reverifyDecisionKey(req, evaluator, result.DecisionKey); verifyErr != nil {
 			return 1, verifyErr
 		}
@@ -234,10 +260,24 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	if err != nil {
 		outcome = "error"
 	}
-	logWithVerdict(outcome)
+	rc.logWithVerdict(outcome)
 	cleanupExecutionState(database, cfg)
 
 	return exitCode, err
+}
+
+// handleDecision dispatches to the appropriate handler based on the classification decision.
+// Returns (0, nil) when execution should proceed normally.
+func (rc *runContext) handleDecision() (int, error) {
+	switch rc.result.Decision {
+	case core.DecisionBlocked:
+		return rc.handleBlockedCommand()
+	case core.DecisionApproval:
+		return rc.handleApprovalCommand()
+	default:
+		// SAFE, CAUTION, or unknown — execute directly.
+		return 0, nil
+	}
 }
 
 func reverifyDecisionKey(req core.ShellRequest, evaluator core.PolicyEvaluator, expected string) error {
@@ -298,42 +338,51 @@ func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 		syscall.SIGTERM,
 		syscall.SIGHUP,
 	)
-	go func() {
-		for {
-			select {
-			case sig, ok := <-sigCh:
-				if !ok {
-					return
-				}
-				sysSig, isSyscall := sig.(syscall.Signal)
-				if !isSyscall {
-					continue
-				}
-				// Send to process group (negative PID).
-				if err := syscall.Kill(-cmd.Process.Pid, sysSig); err != nil {
-					// Fallback: retry direct child PID.
-					_ = syscall.Kill(cmd.Process.Pid, sysSig)
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
+	go forwardSignals(cmd.Process.Pid, sigCh, done)
 
 	waitErr := cmd.Wait()
 	signal.Stop(sigCh)
 	close(done)
-	if waitErr != nil {
-		var exitErr *exec.ExitError
-		if errors.As(waitErr, &exitErr) {
-			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-				return 128 + int(status.Signal()), nil
+
+	return interpretWaitError(waitErr)
+}
+
+// forwardSignals relays OS signals to a child process group until done is closed.
+func forwardSignals(pid int, sigCh <-chan os.Signal, done <-chan struct{}) {
+	for {
+		select {
+		case sig, ok := <-sigCh:
+			if !ok {
+				return
 			}
-			return exitErr.ExitCode(), nil
+			sysSig, isSyscall := sig.(syscall.Signal)
+			if !isSyscall {
+				continue
+			}
+			// Send to process group (negative PID).
+			if err := syscall.Kill(-pid, sysSig); err != nil {
+				// Fallback: retry direct child PID.
+				_ = syscall.Kill(pid, sysSig)
+			}
+		case <-done:
+			return
 		}
-		return -1, fmt.Errorf("wait for command: %w", waitErr)
 	}
-	return 0, nil
+}
+
+// interpretWaitError converts a cmd.Wait error into an exit code.
+func interpretWaitError(waitErr error) (int, error) {
+	if waitErr == nil {
+		return 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(waitErr, &exitErr) {
+		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
+			return 128 + int(status.Signal()), nil
+		}
+		return exitErr.ExitCode(), nil
+	}
+	return -1, fmt.Errorf("wait for command: %w", waitErr)
 }
 
 func executeCapturedShellCommand(ctx context.Context, command, cwd string, timeout time.Duration) (commandExecution, error) {

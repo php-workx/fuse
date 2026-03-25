@@ -53,67 +53,57 @@ func init() {
 	}
 }
 
+// stripBlockComment handles block comment state for a single line.
+// If inBlock is true, we are inside a /* ... */ block comment from a previous line.
+// It returns the effective line content after stripping commented portions,
+// and whether we are still inside a block comment.
+func stripBlockComment(line string, inBlock bool) (string, bool) {
+	if inBlock {
+		idx := strings.Index(line, "*/")
+		if idx < 0 {
+			return "", true
+		}
+		// Found closing — process the remainder for further comment markers.
+		return stripBlockComment(line[idx+2:], false)
+	}
+
+	start := strings.Index(line, "/*")
+	if start < 0 {
+		return line, false
+	}
+
+	// Check for closing on the same line (inline block comment).
+	rest := line[start+2:]
+	end := strings.Index(rest, "*/")
+	if end >= 0 {
+		// Strip the inline comment and process the remainder for more comments.
+		stripped := line[:start] + rest[end+2:]
+		return stripBlockComment(stripped, false)
+	}
+
+	// Multi-line block comment starts here; keep only content before it.
+	return line[:start], true
+}
+
 // ScanJavaScript scans JavaScript/TypeScript source content for dangerous patterns.
 // It performs a line-by-line regex scan, skipping single-line comment lines
 // (starting with //) and best-effort skipping of /* */ block comments.
 func ScanJavaScript(content []byte) []Signal {
 	var signals []Signal
-	lines := bytes.Split(content, []byte("\n"))
-
 	inBlockComment := false
 
-	for i, line := range lines {
-		lineStr := string(line)
-		trimmed := strings.TrimSpace(lineStr)
+	for i, rawLine := range bytes.Split(content, []byte("\n")) {
+		trimmed := strings.TrimSpace(string(rawLine))
 
-		// Handle block comments (best-effort).
-		if inBlockComment {
-			if idx := strings.Index(trimmed, "*/"); idx >= 0 {
-				inBlockComment = false
-				// Keep the remainder after the block comment close for scanning.
-				lineStr = trimmed[idx+2:]
-				trimmed = strings.TrimSpace(lineStr)
-			} else {
-				continue
-			}
-		}
+		trimmed, inBlockComment = stripBlockComment(trimmed, inBlockComment)
+		trimmed = strings.TrimSpace(trimmed)
 
-		// Check for block comment start.
-		if strings.Contains(trimmed, "/*") {
-			if strings.Contains(trimmed, "*/") {
-				// Single-line block comment: remove the commented portion
-				// and scan what remains.
-				start := strings.Index(trimmed, "/*")
-				end := strings.Index(trimmed, "*/")
-				if end > start {
-					lineStr = trimmed[:start] + trimmed[end+2:]
-					trimmed = strings.TrimSpace(lineStr)
-				}
-			} else {
-				// Multi-line block comment starts here.
-				// Scan only the part before the comment start.
-				start := strings.Index(trimmed, "/*")
-				if start < 0 {
-					start = 0
-				}
-				lineStr = trimmed[:start]
-				trimmed = strings.TrimSpace(lineStr)
-				inBlockComment = true
-			}
-		}
-
-		// Skip single-line comment lines.
-		if strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-
-		// Skip empty lines.
-		if trimmed == "" {
+		if inBlockComment || trimmed == "" || strings.HasPrefix(trimmed, "//") {
 			continue
 		}
 
 		for _, p := range jsPatterns {
-			match := p.re.FindString(lineStr)
+			match := p.re.FindString(trimmed)
 			if match != "" {
 				signals = append(signals, Signal{
 					Category: p.category,

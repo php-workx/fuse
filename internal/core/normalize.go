@@ -306,6 +306,20 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 	return i
 }
 
+// skipCombinedFlag checks if a token is a combined short flag (e.g., -iu, -su).
+// If it contains argFlag, the flag takes an argument so we skip 2 tokens.
+// Otherwise we skip 1 token for the flag alone.
+// Returns 0 if the token is not a combined short flag.
+func skipCombinedFlag(token string, argFlag rune) int {
+	if len(token) > 1 && token[0] == '-' && token[1] != '-' {
+		if strings.ContainsRune(token, argFlag) {
+			return 2 // skip flag + argument
+		}
+		return 1 // skip flag only
+	}
+	return 0 // not a combined flag
+}
+
 // skipSudoArgs skips sudo's flags and their arguments.
 // Handles: -u user, -i, -s, --preserve-env, -E, and other single-letter flags.
 func skipSudoArgs(tokens []string, i int) int {
@@ -330,13 +344,8 @@ func skipSudoArgs(tokens []string, i int) int {
 			continue
 		}
 		// Combined short flags like -iu, -su, etc.
-		if len(t) > 1 && t[0] == '-' && t[1] != '-' {
-			// Check if 'u' is in the combined flags (requires next arg)
-			if strings.ContainsRune(t, 'u') {
-				i += 2 // skip combined flag + user arg
-			} else {
-				i++
-			}
+		if skip := skipCombinedFlag(t, 'u'); skip > 0 {
+			i += skip
 			continue
 		}
 		break
@@ -364,12 +373,8 @@ func skipDoasArgs(tokens []string, i int) int {
 			continue
 		}
 		// Combined flags
-		if len(t) > 1 && t[0] == '-' && t[1] != '-' {
-			if strings.ContainsRune(t, 'u') {
-				i += 2
-			} else {
-				i++
-			}
+		if skip := skipCombinedFlag(t, 'u'); skip > 0 {
+			i += skip
 			continue
 		}
 		break
@@ -758,17 +763,7 @@ func extractCommandSubstitutions(cmd string) (results []string, complete bool) {
 		if !ok {
 			return true
 		}
-		if isCmdSubstCat(cs) {
-			return false // skip cat heredoc substitutions
-		}
-		var stmtParts []string
-		for _, stmt := range cs.Stmts {
-			part := printNode(stmt)
-			if part != "" {
-				stmtParts = append(stmtParts, part)
-			}
-		}
-		content := strings.Join(stmtParts, "; ")
+		content := extractCmdSubstContent(cs)
 		if content != "" {
 			results = append(results, content)
 		}
@@ -789,6 +784,21 @@ func isStmtCatCommand(stmt *syntax.Stmt) bool {
 	}
 	name := printNode(call.Args[0])
 	return filepath.Base(name) == "cat"
+}
+
+// extractCmdSubstContent extracts the textual content from a command substitution.
+// Returns "" for $(cat <<...) patterns (string quoting, not code execution).
+func extractCmdSubstContent(cs *syntax.CmdSubst) string {
+	if isCmdSubstCat(cs) {
+		return ""
+	}
+	var parts []string
+	for _, stmt := range cs.Stmts {
+		if part := printNode(stmt); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // isCmdSubstCat returns true if the command substitution is a $(cat <<...) pattern.
