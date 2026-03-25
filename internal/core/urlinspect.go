@@ -350,26 +350,11 @@ func isNonCanonicalNumericHost(host string) bool {
 		return true
 	}
 	// Detect dotted non-canonical forms: octal octets (leading zero), hex octets (0x),
-	// or short-form (fewer than 4 octets). Only trigger if the host looks fully numeric.
-	if !reNonCanonicalDotted.MatchString(host) || !strings.Contains(host, ".") {
-		return false
-	}
-	parts := strings.Split(host, ".")
-	if len(parts) < 2 || len(parts) > 4 {
-		return false
-	}
-	// Short-form: fewer than 4 octets (e.g., 127.1)
-	if len(parts) < 4 {
-		return true
-	}
-	// Check each octet for non-decimal encoding
-	for _, p := range parts {
-		if strings.HasPrefix(p, "0x") || strings.HasPrefix(p, "0X") {
-			return true // hex octet
-		}
-		if len(p) > 1 && p[0] == '0' {
-			return true // octal octet (leading zero)
-		}
+	// or short-form (fewer than 4 octets). Only trigger if the host looks fully numeric
+	// AND actually decodes to a valid IP. This avoids false positives on hex-looking
+	// hostnames like "dead.beef" or "cafe.com".
+	if reNonCanonicalDotted.MatchString(host) && strings.Contains(host, ".") {
+		return decodeNonCanonicalIP(host) != nil
 	}
 	return false
 }

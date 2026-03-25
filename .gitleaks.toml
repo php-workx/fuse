@@ -7,8 +7,10 @@
   description = "Allowed patterns"
 
   # SonarQube default credentials used in sonar-setup recipe (well-known defaults, not real secrets).
+  # Test fixtures in db_test.go use fake credential patterns for scrubbing verification.
   paths = [
     '''justfile''',
+    '''internal/db/db_test.go''',
   ]
   regexTarget = "match"
   regexes = [

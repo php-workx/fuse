@@ -45,6 +45,7 @@ type SubCommandResult struct {
 	TagOverrideEnforced  bool   // true when a tag_override explicitly enforced this decision
 	InlineBody           string // extracted inline script body
 	ExtractionIncomplete bool   // true when extraction was incomplete
+	FailClosed           bool   // true when APPROVAL is due to incomplete analysis
 }
 
 // PolicyEvaluator abstracts policy evaluation to avoid circular imports
@@ -236,6 +237,9 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 		if sub.ExtractionIncomplete {
 			result.ExtractionIncomplete = true
 		}
+		if sub.FailClosed {
+			result.FailClosed = true
+		}
 
 		// Gather file hash if a referenced file was inspected.
 		refFile := DetectReferencedFile(subCmd)
@@ -280,13 +284,7 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	if classified.ExtractionFailed {
 		sub.Decision = DecisionApproval
 		sub.Reason = "bash -c extraction failed (fail-closed)"
-		return sub
-	}
-
-	// Security-sensitive env var assignment detected during normalization.
-	if classified.SensitiveEnvAssignment {
-		sub.Decision = DecisionApproval
-		sub.Reason = "security-sensitive environment variable assignment (via env or bare prefix)"
+		sub.FailClosed = true
 		return sub
 	}
 
@@ -330,11 +328,36 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 		}
 	}
 
+	// Security-sensitive env var assignment detected during normalization.
+	// Applied after the classification loop so it doesn't short-circuit
+	// BLOCKED detection (e.g., LD_PRELOAD=/evil rm -rf / should be BLOCKED, not APPROVAL).
+	if classified.SensitiveEnvAssignment {
+		combined := MaxDecision(bestDecision, DecisionApproval)
+		if combined != bestDecision {
+			bestDecision = combined
+			bestReason = "security-sensitive environment variable assignment (via env or bare prefix)"
+		}
+	}
+
 	sub.Decision = bestDecision
 	sub.Reason = bestReason
 	sub.RuleID = bestRuleID
 	sub.DryRunMatches = allDryRunMatches
 	sub.TagOverrideEnforced = tagOverrideEnforced
+
+	// Detect fail-closed APPROVAL from file inspection or TOFU verification.
+	// These are "can't analyze" signals where the judge should not downgrade.
+	if bestDecision == DecisionApproval {
+		refFile := DetectReferencedFile(subCmd)
+		if refFile != "" {
+			resolvedPath := resolvePath(refFile, cwd)
+			if inspection, err := InspectFile(resolvedPath, DefaultMaxBytes); err == nil && inspection != nil {
+				if !inspection.Exists || (inspection.Truncated && len(inspection.Signals) == 0) {
+					sub.FailClosed = true
+				}
+			}
+		}
+	}
 
 	// Extract and classify inline script bodies (heredocs, $() contents).
 	inlineResult := classifyInlineBodies(subCmd, evaluator, cwd)
@@ -800,13 +823,6 @@ func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd s
 		}
 	}
 
-	if classified.SensitiveEnvAssignment {
-		return extractedSubCommandResult{
-			decision: DecisionApproval,
-			reason:   "security-sensitive environment variable assignment in inline body",
-		}
-	}
-
 	allCmds := []string{classified.Outer}
 	allCmds = append(allCmds, classified.Inner...)
 
@@ -839,6 +855,15 @@ func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd s
 		if escalated != result.decision {
 			result.decision = escalated
 			result.reason = "references sensitive environment variable"
+		}
+	}
+
+	// Security-sensitive env var assignment (same MaxDecision pattern as classifySubCommand).
+	if classified.SensitiveEnvAssignment {
+		combined := MaxDecision(result.decision, DecisionApproval)
+		if combined != result.decision {
+			result.decision = combined
+			result.reason = "security-sensitive environment variable assignment in inline body"
 		}
 	}
 

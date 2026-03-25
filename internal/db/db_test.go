@@ -409,7 +409,7 @@ func TestLogEvent_ScrubsAllTextFields(t *testing.T) {
 		SessionID:      "test-session",
 		Command:        "some command",
 		Decision:       "BLOCKED",
-		Reason:         "blocked: found api_key=sk-live-abc123def456",
+		Reason:         "blocked: found api_key=TESTVALUE123",
 		Metadata:       `{"token":"secret-value-here"}`,
 		JudgeReasoning: "The command contains Bearer supersecrettoken123 which is risky",
 	}
@@ -425,7 +425,7 @@ func TestLogEvent_ScrubsAllTextFields(t *testing.T) {
 		t.Fatal("expected at least one event")
 	}
 	e := events[0]
-	if strings.Contains(e.Reason, "sk-live-abc123def456") {
+	if strings.Contains(e.Reason, "TESTVALUE123") {
 		t.Error("Reason field should have credential scrubbed")
 	}
 	if strings.Contains(e.Metadata, "secret-value-here") {
