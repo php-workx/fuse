@@ -243,13 +243,35 @@ func MaybeJudge(ctx context.Context, cfg *config.Config, result *core.ClassifyRe
 	}
 
 	if verdict.Applied {
-		// When extraction was incomplete (SEC-009), never downgrade the structural
-		// decision — the judge cannot fully assess partial inline content.
-		if promptCtx.ExtractionIncomplete &&
-			core.DecisionSeverity(verdict.JudgeDecision) < core.DecisionSeverity(result.Decision) {
-			verdict.Applied = false
-			verdict.Reasoning += " (downgrade blocked: extraction incomplete)"
-		} else {
+		judgeSev := core.DecisionSeverity(verdict.JudgeDecision)
+		origSev := core.DecisionSeverity(result.Decision)
+
+		if judgeSev < origSev {
+			// Attempting downgrade — apply guards.
+
+			// Guard 1: Fail-closed results are never downgradeable.
+			// These APPROVALs mean "I can't analyze this" — the judge
+			// shouldn't override them regardless of confidence.
+			if result.FailClosed {
+				verdict.Applied = false
+				verdict.Reasoning += " (downgrade blocked: fail-closed classification)"
+			}
+
+			// Guard 2: ExtractionIncomplete results are never downgradeable (SEC-009).
+			if promptCtx.ExtractionIncomplete {
+				verdict.Applied = false
+				verdict.Reasoning += " (downgrade blocked: extraction incomplete)"
+			}
+
+			// Guard 3: APPROVAL may downgrade to CAUTION but never to SAFE.
+			// Prevents prompt injection from completely removing protection.
+			if verdict.Applied && result.Decision == core.DecisionApproval &&
+				verdict.JudgeDecision == core.DecisionSafe {
+				verdict.JudgeDecision = core.DecisionCaution
+			}
+		}
+
+		if verdict.Applied {
 			result = result.WithDecision(verdict.JudgeDecision,
 				fmt.Sprintf("LLM judge (%s): %s", verdict.ProviderName, verdict.Reasoning))
 		}

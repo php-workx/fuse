@@ -81,7 +81,8 @@ var credentialPatterns = []struct {
 		replacement: "${1}[REDACTED]",
 	},
 	{
-		re:          regexp.MustCompile(`(?i)Authorization:\s*\S+`),
+		// Authorization header — captures scheme + credential value.
+		re:          regexp.MustCompile(`(?i)Authorization:\s*\S+\s+\S+`),
 		replacement: "Authorization: [REDACTED]",
 	},
 	// SEC-010: Expanded patterns for inline body scrubbing.
@@ -105,11 +106,7 @@ var credentialPatterns = []struct {
 		re:          regexp.MustCompile(`(?i)"(password|secret|token|key|credential|auth|apikey|api_key|access_key|private_key)"\s*:\s*"[^"]*"`),
 		replacement: `"${1}":"[REDACTED]"`,
 	},
-	{
-		// Authorization: Basic/Digest (extends existing Bearer pattern)
-		re:          regexp.MustCompile(`(?i)Authorization:\s*(Basic|Digest)\s+\S+`),
-		replacement: "Authorization: ${1} [REDACTED]",
-	},
+	// Authorization: Basic/Digest now covered by the generic Authorization pattern above.
 	{
 		// Cookie header values
 		re:          regexp.MustCompile(`(?i)(Cookie|Set-Cookie):\s*\S+`),

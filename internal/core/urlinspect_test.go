@@ -392,3 +392,46 @@ func TestInspectURLs_IPv4MappedIPv6Loopback(t *testing.T) {
 		t.Errorf("got %s, want BLOCKED for IPv4-mapped IPv6 loopback", d)
 	}
 }
+
+// --- Variable URL detection tests ---
+
+func TestInspectURLs_VariableURLOnly(t *testing.T) {
+	d, _ := InspectCommandURLs("curl $URL")
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for curl with variable-only URL", d)
+	}
+}
+
+func TestInspectURLs_VariableURLQuoted(t *testing.T) {
+	d, _ := InspectCommandURLs(`curl "$API_ENDPOINT"`)
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for curl with quoted variable URL", d)
+	}
+}
+
+func TestInspectURLs_VariableURLBraces(t *testing.T) {
+	d, _ := InspectCommandURLs("wget ${HOST}/file.tar.gz")
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for wget with braced variable URL", d)
+	}
+}
+
+func TestInspectURLs_LiteralURLWithVariableHeader(t *testing.T) {
+	// Has literal :// — should NOT trigger variable URL detection
+	d, _ := InspectCommandURLs(`curl -H "Authorization: Bearer $TOKEN" https://api.github.com/repos`)
+	// Should NOT be flagged as variable destination (literal URL is present)
+	if d == DecisionCaution {
+		// Check it's not the variable-destination reason
+		_, r := InspectCommandURLs(`curl -H "Authorization: Bearer $TOKEN" https://api.github.com/repos`)
+		if r == "network command with variable/unresolvable destination" {
+			t.Error("should not flag variable destination when literal URL is present")
+		}
+	}
+}
+
+func TestInspectURLs_NonNetworkWithVariable(t *testing.T) {
+	d, _ := InspectCommandURLs("echo $VAR")
+	if d == DecisionCaution {
+		t.Errorf("got CAUTION, want empty for non-network command with variable")
+	}
+}

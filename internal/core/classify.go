@@ -21,6 +21,7 @@ type ClassifyResult struct {
 	TagOverrideEnforced  bool           // true when the decision was enforced by a tag_override (should block even in dryrun)
 	InlineBody           string         // extracted inline script content for judge
 	ExtractionIncomplete bool           // true when body truncated or depth exhausted
+	FailClosed           bool           // true when APPROVAL is due to incomplete analysis (not risk assessment)
 }
 
 // WithDecision returns a deep copy of the result with a new decision and reason.
@@ -145,6 +146,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 		displayNorm := DisplayNormalize(req.RawCommand)
 		result.Decision = DecisionApproval
 		result.Reason = fmt.Sprintf("command exceeds maximum size of %d bytes", maxInputSize)
+		result.FailClosed = true
 		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
 		return result, nil
 	}
@@ -174,6 +176,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 		// Fail-closed: treat as APPROVAL.
 		result.Decision = DecisionApproval
 		result.Reason = fmt.Sprintf("compound split error (fail-closed): %v", err)
+		result.FailClosed = true
 		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
 		return result, nil
 	}
@@ -183,6 +186,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	if len(subCmds) > 1 && ContainsCwdChange(subCmds) {
 		result.Decision = DecisionApproval
 		result.Reason = "compound command contains cwd-changing builtin (cd/pushd/popd)"
+		result.FailClosed = true
 		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
 		return result, nil
 	}

@@ -156,63 +156,50 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 	bestDecision := Decision("")
 	bestReason := ""
 
+	escalate := func(d Decision, reason string) {
+		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
+			bestDecision = d
+			bestReason = reason
+		}
+	}
+
 	// Check insecure/redirect flags BEFORE URL extraction so they fire even when
 	// URLs are variable-substituted (e.g., curl -k "$URL"). Only for network commands.
 	basename := extractCmdBasename(cmd)
 	isNetCmd := networkCommandBasenames[basename]
 
-	if isNetCmd && hasInsecureCertFlag(cmd) {
-		d := DecisionCaution
-		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
-			bestDecision = d
-			bestReason = "insecure TLS flag detected"
+	if isNetCmd {
+		if hasInsecureCertFlag(cmd) {
+			escalate(DecisionCaution, "insecure TLS flag detected")
 		}
-	}
-
-	// L7: Destructive HTTP methods → APPROVAL (DELETE, PUT, PATCH on remote resources).
-	if isNetCmd && reDestructiveHTTPMethod.MatchString(cmd) {
-		d := DecisionApproval
-		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
-			bestDecision = d
-			bestReason = "destructive HTTP method detected"
+		if reDestructiveHTTPMethod.MatchString(cmd) {
+			escalate(DecisionApproval, "destructive HTTP method detected")
 		}
-	}
-
-	// L7: Data/file upload flags → CAUTION (exfiltration risk).
-	if isNetCmd && hasDataUploadFlag(cmd) {
-		d := DecisionCaution
-		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
-			bestDecision = d
-			bestReason = "data upload/exfiltration flag detected"
+		if hasDataUploadFlag(cmd) {
+			escalate(DecisionCaution, "data upload/exfiltration flag detected")
 		}
-	}
-
-	// L7: File upload specifically (@file) → APPROVAL (direct file exfiltration).
-	if isNetCmd && reFileUploadFlag.MatchString(cmd) {
-		d := DecisionApproval
-		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
-			bestDecision = d
-			bestReason = "file upload flag detected (exfiltration risk)"
+		if reFileUploadFlag.MatchString(cmd) {
+			escalate(DecisionApproval, "file upload flag detected (exfiltration risk)")
 		}
-	}
-
-	// Check redirect flags (SEC-003).
-	if isNetCmd && hasRedirectFlags(cmd) {
-		d := DecisionCaution
-		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
-			bestDecision = d
-			bestReason = "HTTP redirect following enabled"
+		if hasRedirectFlags(cmd) {
+			escalate(DecisionCaution, "HTTP redirect following enabled")
 		}
 	}
 
 	// Extract and inspect literal URLs.
 	urls := reURLPattern.FindAllString(cmd, -1)
 	for _, rawURL := range urls {
-		d, reason := inspectSingleURL(rawURL, cmd, false)
-		if d != "" && (bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision)) {
-			bestDecision = d
-			bestReason = reason
+		if d, reason := inspectSingleURL(rawURL, cmd, false); d != "" {
+			escalate(d, reason)
 		}
+	}
+
+	// Variable destination detection: network command with no literal URLs
+	// but shell variables in arguments suggests an unresolvable destination.
+	// Only flag when there are ZERO literal :// strings in the entire command
+	// to avoid false positives on header variables (e.g., curl -H "Bearer $TOKEN" https://...).
+	if isNetCmd && len(urls) == 0 && !strings.Contains(cmd, "://") && containsShellVariable(cmd) {
+		escalate(DecisionCaution, "network command with variable/unresolvable destination")
 	}
 
 	return bestDecision, bestReason
@@ -335,6 +322,26 @@ func InspectURLsInArgs(args map[string]interface{}) (Decision, string) {
 // isShellExpansion returns true if a string contains shell variable syntax.
 func isShellExpansion(s string) bool {
 	return strings.ContainsAny(s, "$`")
+}
+
+// containsShellVariable checks for shell variable references ($VAR, ${VAR}, $())
+// in the argument portion of a command (skips the command name itself).
+// Does not match shell specials like $?, $!, $$.
+func containsShellVariable(cmd string) bool {
+	fields := strings.Fields(cmd)
+	for _, f := range fields[1:] { // skip command basename
+		if strings.Contains(f, "${") || strings.Contains(f, "$(") || strings.Contains(f, "`") {
+			return true
+		}
+		idx := strings.Index(f, "$")
+		if idx >= 0 && idx+1 < len(f) {
+			next := f[idx+1]
+			if (next >= 'A' && next <= 'Z') || (next >= 'a' && next <= 'z') || next == '_' {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isNonCanonicalNumericHost detects hex/octal/decimal/short-form IP encodings (SEC-002).
