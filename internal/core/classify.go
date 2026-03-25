@@ -312,20 +312,24 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	sub.TagOverrideEnforced = tagOverrideEnforced
 
 	// Extract and classify inline script bodies (heredocs, $() contents).
-	inlineD, inlineR, inlineBody, inlineComplete := classifyInlineBodies(subCmd, evaluator, cwd)
-	sub.InlineBody = inlineBody
-	sub.ExtractionIncomplete = !inlineComplete
-	if inlineD != "" {
-		combined := MaxDecision(sub.Decision, inlineD)
+	inlineResult := classifyInlineBodies(subCmd, evaluator, cwd)
+	sub.InlineBody = inlineResult.body
+	sub.ExtractionIncomplete = !inlineResult.complete
+	sub.DryRunMatches = append(sub.DryRunMatches, inlineResult.dryRunMatches...)
+	if inlineResult.tagOverrideEnforced {
+		sub.TagOverrideEnforced = true
+	}
+	if inlineResult.decision != "" {
+		combined := MaxDecision(sub.Decision, inlineResult.decision)
 		if combined != sub.Decision {
 			sub.Decision = combined
-			sub.Reason = inlineR
+			sub.Reason = inlineResult.reason
 			sub.RuleID = "" // inline analysis wins — clear stale RuleID
 		}
 	}
 
 	// URL inspection: scan command and extracted inline bodies for URLs (SEC-006).
-	applyURLInspection(&sub, subCmd, inlineBody)
+	applyURLInspection(&sub, subCmd, inlineResult.body)
 
 	return sub
 }
@@ -637,24 +641,32 @@ func isDigit(r rune) bool {
 	return r >= '0' && r <= '9'
 }
 
+// inlineBodiesResult holds the full result from inline body classification.
+type inlineBodiesResult struct {
+	decision            Decision
+	reason              string
+	body                string
+	complete            bool
+	dryRunMatches       []BuiltinMatch
+	tagOverrideEnforced bool
+}
+
 // classifyInlineBodies extracts inline script content (heredocs, command substitutions)
 // and classifies each extracted body through the classification pipeline.
-// Returns (decision, reason, combinedBody, complete).
-func classifyInlineBodies(cmd string, evaluator PolicyEvaluator, cwd string) (Decision, string, string, bool) {
+func classifyInlineBodies(cmd string, evaluator PolicyEvaluator, cwd string) inlineBodiesResult {
 	return classifyInlineBodiesRecursive(cmd, evaluator, cwd, 0)
 }
 
-func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd string, depth int) (Decision, string, string, bool) {
+func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd string, depth int) inlineBodiesResult {
 	if depth >= maxRecursionDepth {
-		return "", "", "", false // depth exhausted → incomplete
+		return inlineBodiesResult{complete: false} // depth exhausted → incomplete
 	}
 
 	heredocBody, heredocComplete := extractHeredocBody(cmd)
 	cmdSubsts, cmdSubstComplete := extractCommandSubstitutions(cmd)
 
 	if heredocBody == "" && len(cmdSubsts) == 0 {
-		// If both extractions returned nothing but either failed, mark incomplete.
-		return "", "", "", heredocComplete && cmdSubstComplete
+		return inlineBodiesResult{complete: heredocComplete && cmdSubstComplete}
 	}
 
 	acc := &inlineAccumulator{complete: heredocComplete && cmdSubstComplete}
@@ -673,15 +685,24 @@ func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd st
 	allBodies = append(allBodies, cmdSubsts...)
 	allBodies = append(allBodies, acc.nestedBodies...)
 
-	return acc.bestDecision, acc.bestReason, strings.Join(allBodies, "\n---\n"), acc.complete
+	return inlineBodiesResult{
+		decision:            acc.bestDecision,
+		reason:              acc.bestReason,
+		body:                strings.Join(allBodies, "\n---\n"),
+		complete:            acc.complete,
+		dryRunMatches:       acc.dryRunMatches,
+		tagOverrideEnforced: acc.tagOverrideEnforced,
+	}
 }
 
 // inlineAccumulator tracks the most restrictive decision across inline body classifications.
 type inlineAccumulator struct {
-	bestDecision Decision
-	bestReason   string
-	complete     bool
-	nestedBodies []string // bodies from nested extraction (depth > 0)
+	bestDecision        Decision
+	bestReason          string
+	complete            bool
+	nestedBodies        []string       // bodies from nested extraction (depth > 0)
+	dryRunMatches       []BuiltinMatch // collected from inline rule evaluations
+	tagOverrideEnforced bool           // OR across all inline evaluations
 }
 
 func (a *inlineAccumulator) update(d Decision, reason string) {
@@ -691,12 +712,20 @@ func (a *inlineAccumulator) update(d Decision, reason string) {
 	}
 }
 
+func (a *inlineAccumulator) applyResult(r extractedSubCommandResult, label string) {
+	a.update(r.decision, label+": "+r.reason)
+	a.dryRunMatches = append(a.dryRunMatches, r.dryRunMatches...)
+	if r.tagOverrideEnforced {
+		a.tagOverrideEnforced = true
+	}
+}
+
 func (a *inlineAccumulator) classifyHeredocBody(body string, evaluator PolicyEvaluator, cwd string, depth int) {
 	subCmds, err := SplitCompoundCommand(body)
 	if err != nil {
 		a.complete = false // parse failure → incomplete extraction (SEC-009 fail-closed)
-		d, reason := classifyExtractedSubCommand(body, evaluator, cwd)
-		a.update(d, "inline heredoc: "+reason)
+		r := classifyExtractedSubCommand(body, evaluator, cwd)
+		a.applyResult(r, "inline heredoc")
 		return
 	}
 	for _, sub := range subCmds {
@@ -705,16 +734,20 @@ func (a *inlineAccumulator) classifyHeredocBody(body string, evaluator PolicyEva
 }
 
 func (a *inlineAccumulator) classifyExtractedCmd(cmd, label string, evaluator PolicyEvaluator, cwd string, depth int) {
-	d, reason := classifyExtractedSubCommand(cmd, evaluator, cwd)
-	a.update(d, label+": "+reason)
+	r := classifyExtractedSubCommand(cmd, evaluator, cwd)
+	a.applyResult(r, label)
 
-	nd, nr, nestedBody, nc := classifyInlineBodiesRecursive(cmd, evaluator, cwd, depth+1)
-	if !nc {
+	nested := classifyInlineBodiesRecursive(cmd, evaluator, cwd, depth+1)
+	if !nested.complete {
 		a.complete = false
 	}
-	a.update(nd, nr)
-	if nestedBody != "" {
-		a.nestedBodies = append(a.nestedBodies, nestedBody)
+	a.update(nested.decision, nested.reason)
+	a.dryRunMatches = append(a.dryRunMatches, nested.dryRunMatches...)
+	if nested.tagOverrideEnforced {
+		a.tagOverrideEnforced = true
+	}
+	if nested.body != "" {
+		a.nestedBodies = append(a.nestedBodies, nested.body)
 	}
 }
 
@@ -724,46 +757,60 @@ func (a *inlineAccumulator) classifyExtractedCmd(cmd, label string, evaluator Po
 // sudo/doas escalation) and checks sensitive env vars — matching the full
 // classifySubCommand pipeline. Does NOT recurse into inline extraction (that's
 // handled by the caller via classifyInlineBodiesRecursive).
-func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) (Decision, string) {
+// extractedSubCommandResult holds the full result from classifying an extracted inline command.
+type extractedSubCommandResult struct {
+	decision            Decision
+	reason              string
+	dryRunMatches       []BuiltinMatch
+	tagOverrideEnforced bool
+}
+
+func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) extractedSubCommandResult {
 	classified := ClassificationNormalize(subCmd)
 
 	if classified.ExtractionFailed {
-		return DecisionApproval, "inline bash -c extraction failed (fail-closed)"
+		return extractedSubCommandResult{
+			decision: DecisionApproval,
+			reason:   "inline bash -c extraction failed (fail-closed)",
+		}
 	}
 
 	allCmds := []string{classified.Outer}
 	allCmds = append(allCmds, classified.Inner...)
 
-	bestDecision := DecisionSafe
-	bestReason := "default safe"
+	result := extractedSubCommandResult{decision: DecisionSafe, reason: "default safe"}
 
 	for _, cmd := range allCmds {
 		if cmd == "" {
 			continue
 		}
-		d, reason, _, _, _ := classifySingleCommand(cmd, evaluator, cwd)
-		combined := MaxDecision(bestDecision, d)
-		if combined != bestDecision {
-			bestDecision = combined
-			bestReason = reason
+		d, reason, _, dryMatches, override := classifySingleCommand(cmd, evaluator, cwd)
+		combined := MaxDecision(result.decision, d)
+		if combined != result.decision {
+			result.decision = combined
+			result.reason = reason
+		}
+		result.dryRunMatches = append(result.dryRunMatches, dryMatches...)
+		if override {
+			result.tagOverrideEnforced = true
 		}
 	}
 
 	// Apply sudo/doas escalation.
 	if classified.EscalateClassification {
-		bestDecision, bestReason = escalateDecision(bestDecision, bestReason)
+		result.decision, result.reason = escalateDecision(result.decision, result.reason)
 	}
 
 	// Sensitive env var detection.
 	if reSensitiveEnvVar.MatchString(subCmd) {
-		escalated := MaxDecision(bestDecision, DecisionCaution)
-		if escalated != bestDecision {
-			bestDecision = escalated
-			bestReason = "references sensitive environment variable"
+		escalated := MaxDecision(result.decision, DecisionCaution)
+		if escalated != result.decision {
+			result.decision = escalated
+			result.reason = "references sensitive environment variable"
 		}
 	}
 
-	return bestDecision, bestReason
+	return result
 }
 
 func isInspectTriggerRule(ruleID string) bool {

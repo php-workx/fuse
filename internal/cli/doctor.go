@@ -357,7 +357,7 @@ func computePolicyHash(path string) string {
 		return "unknown"
 	}
 	h := sha256.Sum256(data)
-	return fmt.Sprintf("%.8x", h)
+	return fmt.Sprintf("%x", h[:4]) // 4 bytes = 8 hex chars
 }
 
 // checkClaudeSettings checks that Claude Code's settings.json has the fuse hook.
