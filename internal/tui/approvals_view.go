@@ -41,6 +41,9 @@ type ApprovalsModel struct {
 	showDetail  bool           // detail panel open for history item
 	detailView  viewport.Model // scrollable detail panel
 
+	// Policy recommendations from approval history.
+	recommendations []db.PolicyRecommendation
+
 	// Dependencies.
 	database *db.DB
 	secret   []byte
@@ -62,6 +65,13 @@ func NewApprovalsModel(database *db.DB, secret []byte) ApprovalsModel {
 // SetData updates the approval history.
 func (m *ApprovalsModel) SetData(approvals []db.Approval) {
 	m.approvals = approvals
+	// Load policy recommendations (best-effort).
+	if m.database != nil {
+		recs, err := m.database.FrequentApprovals(3)
+		if err == nil {
+			m.recommendations = recs
+		}
+	}
 }
 
 // SetPending updates the pending requests list.
@@ -372,6 +382,17 @@ func (m ApprovalsModel) View() string {
 				b.WriteString(shorten(row, m.width) + "\n")
 			}
 		}
+	}
+
+	// Policy recommendations section.
+	if len(m.recommendations) > 0 {
+		b.WriteString("\n  " + strings.Repeat("─", max(m.width-4, 0)) + "\n")
+		fmt.Fprintf(&b, "  Policy Recommendations (%d)\n\n", len(m.recommendations))
+		for _, r := range m.recommendations {
+			cmd := shorten(sanitize(r.Command), m.width-20)
+			fmt.Fprintf(&b, "  %s  (%dx)\n", styleDim.Render(cmd), r.Count)
+		}
+		b.WriteString(styleDim.Render("\n  Run 'fuse doctor' for suggested policy.yaml rules") + "\n")
 	}
 
 	// Detail panel (rendered via viewport for scrolling).

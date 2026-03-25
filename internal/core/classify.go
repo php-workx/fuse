@@ -367,6 +367,12 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 
 	// Step 6: Context sanitization.
 	basename := extractBasename(cmd)
+
+	// Step 6.5: Binary identity TOFU — verify interpreter binaries haven't changed mid-session.
+	if tofuD, tofuR := VerifyBinaryIdentity(basename); tofuD != "" {
+		return tofuD, tofuR, "", nil, false
+	}
+
 	knownSafe := KnownSafeVerbs[basename]
 	sanitized := SanitizeForClassification(cmd, knownSafe)
 

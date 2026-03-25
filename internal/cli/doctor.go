@@ -142,10 +142,57 @@ func runDoctor(live, security bool) error {
 	}
 	fmt.Println(summary)
 
+	// Policy recommendations from approval history.
+	printPolicyRecommendations()
+
 	if fails > 0 {
 		return fmt.Errorf("%d check(s) failed", fails)
 	}
 	return nil
+}
+
+// printPolicyRecommendations queries the event database for frequently-approved
+// commands and suggests policy rules.
+func printPolicyRecommendations() {
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		return // best-effort
+	}
+	defer func() { _ = database.Close() }()
+
+	recs, err := database.FrequentApprovals(3)
+	if err != nil || len(recs) == 0 {
+		return
+	}
+
+	fmt.Println()
+	fmt.Println("Policy Recommendations")
+	fmt.Println("----------------------")
+	fmt.Printf("Based on your approval history, consider adding these rules to policy.yaml:\n\n")
+	for _, r := range recs {
+		fmt.Printf("  # Approved %d times: %s\n", r.Count, truncateCmd(r.Command, 60))
+		fmt.Printf("  - pattern: \"^%s$\"\n", escapePattern(r.Command))
+		fmt.Printf("    action: \"allow\"\n")
+		fmt.Printf("    reason: \"approved %d times\"\n\n", r.Count)
+	}
+}
+
+func truncateCmd(cmd string, maxLen int) string {
+	if len(cmd) <= maxLen {
+		return cmd
+	}
+	return cmd[:maxLen-3] + "..."
+}
+
+func escapePattern(cmd string) string {
+	// Escape regex metacharacters for use in a pattern.
+	replacer := strings.NewReplacer(
+		`\`, `\\`, `.`, `\.`, `*`, `\*`, `+`, `\+`,
+		`?`, `\?`, `(`, `\(`, `)`, `\)`, `[`, `\[`,
+		`]`, `\]`, `{`, `\{`, `}`, `\}`, `^`, `\^`,
+		`$`, `\$`, `|`, `\|`,
+	)
+	return replacer.Replace(cmd)
 }
 
 // checkGoVersion checks that Go is available and reports the version.

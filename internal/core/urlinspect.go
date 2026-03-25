@@ -120,6 +120,21 @@ var reInsecureCertFlag = regexp.MustCompile(`(^|\s)-[a-zA-Z]*k`)
 // insecureCertLongFlags are long-form flags that disable TLS verification.
 var insecureCertLongFlags = []string{"--insecure", "--no-check-certificate", "--no-verify-ssl"}
 
+// --- L7 progressive enforcement ---
+
+// reDestructiveHTTPMethod detects HTTP methods that modify/delete resources.
+// Matches: -X DELETE, -X PUT, -X PATCH, --request DELETE, etc.
+var reDestructiveHTTPMethod = regexp.MustCompile(`(?i)(^|\s)(-X|--request)\s+(DELETE|PUT|PATCH)\b`)
+
+// reDataUploadFlags detects flags that send data payloads (exfiltration risk).
+var reDataUploadFlags = []string{
+	" -d ", " -d@", "--data ", "--data=", "--data-raw ", "--data-binary ",
+	"--upload-file ", "-T ", "--json ",
+}
+
+// reFileUploadFlag detects -d @file or --data @file patterns (file exfiltration).
+var reFileUploadFlag = regexp.MustCompile(`(^|\s)(-d\s*@|--data[= ]\s*@|--upload-file\s+|-T\s+)\S`)
+
 // InspectCommandURLs extracts URLs from a command string and classifies them.
 // Runs on any command text, not gated by basename (SEC-006).
 // Returns the most restrictive (decision, reason) from all URLs found.
@@ -137,6 +152,33 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
 			bestDecision = d
 			bestReason = "insecure TLS flag detected"
+		}
+	}
+
+	// L7: Destructive HTTP methods → APPROVAL (DELETE, PUT, PATCH on remote resources).
+	if isNetCmd && reDestructiveHTTPMethod.MatchString(cmd) {
+		d := DecisionApproval
+		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
+			bestDecision = d
+			bestReason = "destructive HTTP method detected"
+		}
+	}
+
+	// L7: Data/file upload flags → CAUTION (exfiltration risk).
+	if isNetCmd && hasDataUploadFlag(cmd) {
+		d := DecisionCaution
+		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
+			bestDecision = d
+			bestReason = "data upload/exfiltration flag detected"
+		}
+	}
+
+	// L7: File upload specifically (@file) → APPROVAL (direct file exfiltration).
+	if isNetCmd && reFileUploadFlag.MatchString(cmd) {
+		d := DecisionApproval
+		if bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision) {
+			bestDecision = d
+			bestReason = "file upload flag detected (exfiltration risk)"
 		}
 	}
 
@@ -303,6 +345,17 @@ func hasInsecureCertFlag(cmd string) bool {
 	}
 	for _, flag := range insecureCertLongFlags {
 		if strings.Contains(cmd, flag) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasDataUploadFlag checks if the command contains data upload flags.
+func hasDataUploadFlag(cmd string) bool {
+	padded := " " + cmd + " "
+	for _, flag := range reDataUploadFlags {
+		if strings.Contains(padded, flag) {
 			return true
 		}
 	}

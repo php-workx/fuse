@@ -359,6 +359,50 @@ func (d *DB) PruneEvents(maxRows int) (int64, error) {
 	return result.RowsAffected()
 }
 
+// PolicyRecommendation represents a frequently-approved command pattern.
+type PolicyRecommendation struct {
+	Command   string `json:"command"`
+	Count     int    `json:"count"`
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason"`
+	Suggested string `json:"suggested"` // suggested policy.yaml rule
+}
+
+// FrequentApprovals returns commands that were classified as APPROVAL and approved
+// by the user multiple times. These are candidates for policy rules.
+func (d *DB) FrequentApprovals(minCount int) ([]PolicyRecommendation, error) {
+	if minCount <= 0 {
+		minCount = 3
+	}
+	rows, err := d.db.Query(`
+		SELECT command, COUNT(*) as cnt, decision, reason
+		FROM events
+		WHERE decision = 'APPROVAL'
+		GROUP BY command
+		HAVING cnt >= ?
+		ORDER BY cnt DESC
+		LIMIT 20
+	`, minCount)
+	if err != nil {
+		return nil, fmt.Errorf("query frequent approvals: %w", err)
+	}
+	defer rows.Close()
+
+	var recs []PolicyRecommendation
+	for rows.Next() {
+		var r PolicyRecommendation
+		if err := rows.Scan(&r.Command, &r.Count, &r.Decision, &r.Reason); err != nil {
+			continue
+		}
+		// Generate suggested policy rule
+		escaped := strings.ReplaceAll(r.Command, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		r.Suggested = fmt.Sprintf(`- pattern: "^%s$"\n  action: "allow"\n  reason: "approved %d times"`, escaped, r.Count)
+		recs = append(recs, r)
+	}
+	return recs, rows.Err()
+}
+
 func boolToInt(v bool) int {
 	if v {
 		return 1
