@@ -3,24 +3,33 @@ package core
 import (
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
+
+// binaryEntry caches hash and stat metadata for a verified binary.
+type binaryEntry struct {
+	hash  string
+	mtime time.Time
+	size  int64
+}
 
 // BinaryTOFU implements Trust-on-First-Use verification for interpreter binaries.
 // On first invocation, the resolved binary path is hashed and cached. On subsequent
 // invocations, the hash is verified. If the hash changes mid-session, the command
 // is BLOCKED (binary substitution attack).
 type BinaryTOFU struct {
-	mu     sync.RWMutex
-	hashes map[string]string // resolved path → SHA-256 hash
+	mu      sync.Mutex
+	entries map[string]binaryEntry // resolved path → cached entry
 }
 
 // NewBinaryTOFU creates a new session-scoped TOFU verifier.
 func NewBinaryTOFU() *BinaryTOFU {
 	return &BinaryTOFU{
-		hashes: make(map[string]string),
+		entries: make(map[string]binaryEntry),
 	}
 }
 
@@ -40,6 +49,7 @@ func IsInterpreter(basename string) bool {
 
 // Verify checks the binary identity for an interpreter command.
 // Returns (decision, reason). Empty decision means TOFU passed or not applicable.
+// Uses stat-based caching: only re-hashes when mtime or size changes.
 func (t *BinaryTOFU) Verify(basename string) (Decision, string) {
 	if !IsInterpreter(basename) {
 		return "", ""
@@ -47,43 +57,57 @@ func (t *BinaryTOFU) Verify(basename string) (Decision, string) {
 
 	resolvedPath, err := exec.LookPath(basename)
 	if err != nil {
-		// Can't resolve — not a TOFU concern, let classification proceed.
-		return "", ""
+		return "", "" // can't resolve — not a TOFU concern
 	}
 
-	currentHash, err := hashFile(resolvedPath)
+	info, err := os.Stat(resolvedPath)
 	if err != nil {
-		// Can't hash (permission denied, etc.) — fail-closed.
-		return DecisionApproval, fmt.Sprintf("cannot verify binary identity for %s: %v", basename, err)
+		return DecisionApproval, fmt.Sprintf("cannot stat binary %s: %v", basename, err)
 	}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	storedHash, exists := t.hashes[resolvedPath]
+	entry, exists := t.entries[resolvedPath]
+	if exists && entry.mtime.Equal(info.ModTime()) && entry.size == info.Size() {
+		return "", "" // stat unchanged — skip re-hash
+	}
+
+	currentHash, err := hashFile(resolvedPath)
+	if err != nil {
+		return DecisionApproval, fmt.Sprintf("cannot verify binary identity for %s: %v", basename, err)
+	}
+
 	if !exists {
 		// First use — trust and store.
-		t.hashes[resolvedPath] = currentHash
+		t.entries[resolvedPath] = binaryEntry{hash: currentHash, mtime: info.ModTime(), size: info.Size()}
 		return "", ""
 	}
 
-	if storedHash != currentHash {
+	if entry.hash != currentHash {
 		return DecisionBlocked, fmt.Sprintf(
 			"binary identity changed for %s (%s): expected %s, got %s",
-			basename, resolvedPath, storedHash[:12], currentHash[:12])
+			basename, resolvedPath, entry.hash[:12], currentHash[:12])
 	}
 
+	// Hash unchanged but stat changed (e.g., touch). Update stat cache.
+	t.entries[resolvedPath] = binaryEntry{hash: currentHash, mtime: info.ModTime(), size: info.Size()}
 	return "", ""
 }
 
-// hashFile returns the hex-encoded SHA-256 hash of a file.
+// hashFile returns the hex-encoded SHA-256 hash of a file using streaming I/O.
+// Avoids reading the entire file into memory (prevents OOM on large binaries).
 func hashFile(path string) (string, error) {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
 	}
-	h := sha256.Sum256(data)
-	return fmt.Sprintf("%x", h), nil
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 // defaultTOFU is the session-scoped singleton used by the classification pipeline.
