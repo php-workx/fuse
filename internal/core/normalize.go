@@ -134,6 +134,27 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 		return result
 	}
 
+	// Skip leading bare env var assignments (VAR=value before the command).
+	// Must happen before filepath.Base to avoid mangling VAR=/path/value into a basename.
+	for i < len(tokens) {
+		tok := tokens[i]
+		if !isEnvAssignment(tok) || strings.HasPrefix(tok, "-") {
+			break
+		}
+		// Check if this is a security-sensitive env var assignment.
+		for _, prefix := range sensitiveEnvPrefixes {
+			if strings.HasPrefix(tok, prefix) {
+				result.SensitiveEnvAssignment = true
+				break
+			}
+		}
+		i++
+	}
+	if i >= len(tokens) {
+		result.Outer = ""
+		return result
+	}
+
 	// Extract basename from first token if it contains '/'.
 	firstToken := tokens[i]
 	if strings.Contains(firstToken, "/") {
@@ -267,7 +288,7 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 		case "doas":
 			i = skipDoasArgs(tokens, i)
 		case "env":
-			i = skipEnvArgs(tokens, i)
+			i = skipEnvArgs(tokens, i, result)
 		case "nice":
 			i = skipNiceArgs(tokens, i)
 		case "ionice":
@@ -361,7 +382,8 @@ func skipDoasArgs(tokens []string, i int) int {
 }
 
 // skipEnvArgs skips env flags and VAR=val assignments.
-func skipEnvArgs(tokens []string, i int) int {
+// Sets result.SensitiveEnvAssignment if any skipped assignment is security-sensitive.
+func skipEnvArgs(tokens []string, i int, result *ClassifiedCommand) int {
 	for i < len(tokens) {
 		t := tokens[i]
 		if t == "--" {
@@ -378,6 +400,13 @@ func skipEnvArgs(tokens []string, i int) int {
 		}
 		// Skip VAR=val assignments (before the command)
 		if strings.Contains(t, "=") && !strings.HasPrefix(t, "-") && isEnvAssignment(t) {
+			// Check if this is a security-sensitive env var assignment.
+			for _, prefix := range sensitiveEnvPrefixes {
+				if strings.HasPrefix(t, prefix) {
+					result.SensitiveEnvAssignment = true
+					break
+				}
+			}
 			i++
 			continue
 		}

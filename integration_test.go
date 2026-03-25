@@ -892,3 +892,63 @@ func TestIntegration_V2_HeredocVariableAssembly(t *testing.T) {
 	t.Logf("variable assembly result: %s (reason: %s) — known limitation of line-by-line classification",
 		result.Decision, result.Reason)
 }
+
+// ---------------------------------------------------------------------------
+// Env Var Injection Tests
+// ---------------------------------------------------------------------------
+
+func TestIntegration_EnvWrapperSensitiveVarDetected(t *testing.T) {
+	skipIfShort(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"env LD_PRELOAD", "env LD_PRELOAD=/evil/lib.so ls"},
+		{"env DYLD_INSERT", "env DYLD_INSERT_LIBRARIES=/evil.dylib python"},
+		{"env PATH override", "env PATH=/evil:$PATH command_here"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{RawCommand: tt.cmd, Cwd: "/tmp", Source: "test", SessionID: "integ-env"}
+			result, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision == core.DecisionSafe {
+				t.Errorf("%s should not be SAFE, got %s (reason: %s)", tt.cmd, result.Decision, result.Reason)
+			}
+		})
+	}
+}
+
+func TestIntegration_BareEnvVarPathBypass(t *testing.T) {
+	skipIfShort(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"LD_PRELOAD with path", "LD_PRELOAD=/tmp/evil.so ls"},
+		{"DYLD with path", "DYLD_INSERT_LIBRARIES=/evil/lib.dylib python script.py"},
+		{"LD_PRELOAD no path", "LD_PRELOAD=evil.so ls"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{RawCommand: tt.cmd, Cwd: "/tmp", Source: "test", SessionID: "integ-env"}
+			result, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision == core.DecisionSafe {
+				t.Errorf("%s should not be SAFE, got %s (reason: %s)", tt.cmd, result.Decision, result.Reason)
+			}
+		})
+	}
+}

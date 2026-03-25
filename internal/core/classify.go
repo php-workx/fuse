@@ -279,6 +279,13 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 		return sub
 	}
 
+	// Security-sensitive env var assignment detected during normalization.
+	if classified.SensitiveEnvAssignment {
+		sub.Decision = DecisionApproval
+		sub.Reason = "security-sensitive environment variable assignment (via env or bare prefix)"
+		return sub
+	}
+
 	// Classify all commands (outer + inner), take most restrictive.
 	allCmds := []string{outerCmd}
 	allCmds = append(allCmds, classified.Inner...)
@@ -786,6 +793,13 @@ func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd s
 		return extractedSubCommandResult{
 			decision: DecisionApproval,
 			reason:   "inline bash -c extraction failed (fail-closed)",
+		}
+	}
+
+	if classified.SensitiveEnvAssignment {
+		return extractedSubCommandResult{
+			decision: DecisionApproval,
+			reason:   "security-sensitive environment variable assignment in inline body",
 		}
 	}
 

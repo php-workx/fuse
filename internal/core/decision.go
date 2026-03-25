@@ -66,6 +66,7 @@ type ClassifiedCommand struct {
 	Inner                  []string
 	EscalateClassification bool
 	ExtractionFailed       bool
+	SensitiveEnvAssignment bool // true when a security-sensitive env var assignment was detected and stripped
 }
 
 // ComputeDecisionKey produces a SHA-256 hash used for approval record lookup.

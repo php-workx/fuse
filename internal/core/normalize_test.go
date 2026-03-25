@@ -869,3 +869,39 @@ func stringSliceEqual(a, b []string) bool {
 	}
 	return true
 }
+
+func TestClassificationNormalize_SensitiveEnvAssignment(t *testing.T) {
+	tests := []struct {
+		name     string
+		sub      string
+		wantFlag bool
+		wantCmd  string // expected outer command (post-stripping)
+	}{
+		{"env LD_PRELOAD", "env LD_PRELOAD=/evil/lib.so ls", true, "ls"},
+		{"env DYLD_INSERT", "env DYLD_INSERT_LIBRARIES=/evil.dylib python", true, "python"},
+		{"env PATH override", "env PATH=/evil:$PATH command_here", true, "command_here"},
+		{"env PYTHONPATH", "env PYTHONPATH=/evil python script.py", true, "python script.py"},
+		{"env benign", "env FOO=bar ls", false, "ls"},
+		{"env -i with PATH", "env -i PATH=/usr/bin ls", true, "ls"},
+		{"bare LD_PRELOAD with path", "LD_PRELOAD=/tmp/evil.so ls -la", true, "ls -la"},
+		{"bare DYLD with path", "DYLD_INSERT_LIBRARIES=/evil/lib.dylib python script.py", true, "python script.py"},
+		{"bare PATH", "PATH=/evil curl http://example.com", true, "curl http://example.com"},
+		{"bare benign with path", "FOO=/bar/baz ls", false, "ls"},
+		{"bare benign no path", "EDITOR=vim git commit", false, "git commit"},
+		{"bare LD_PRELOAD no path", "LD_PRELOAD=evil.so ls", true, "ls"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassificationNormalize(tt.sub)
+			if got.SensitiveEnvAssignment != tt.wantFlag {
+				t.Errorf("ClassificationNormalize(%q).SensitiveEnvAssignment = %v, want %v",
+					tt.sub, got.SensitiveEnvAssignment, tt.wantFlag)
+			}
+			if tt.wantCmd != "" && got.Outer != tt.wantCmd {
+				t.Errorf("ClassificationNormalize(%q).Outer = %q, want %q",
+					tt.sub, got.Outer, tt.wantCmd)
+			}
+		})
+	}
+}

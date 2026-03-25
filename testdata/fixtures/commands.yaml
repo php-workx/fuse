@@ -358,11 +358,11 @@ fixtures:
   # Sensitive env var prefix tests
   # =======================================================================
   - command: "PATH=/evil:$PATH terraform plan"
-    expected: "SAFE"
-    description: "PATH= prefix (shell parser strips env assignments before classification)"
+    expected: "APPROVAL"
+    description: "PATH= prefix is a security-sensitive env var assignment"
   - command: "LD_PRELOAD=/evil.so ls"
-    expected: "SAFE"
-    description: "LD_PRELOAD= prefix (shell parser strips env assignments before classification)"
+    expected: "APPROVAL"
+    description: "LD_PRELOAD= prefix is a security-sensitive env var assignment"
 
   # =======================================================================
   # Sudo escalation tests
