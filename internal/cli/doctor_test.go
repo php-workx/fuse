@@ -883,7 +883,7 @@ func TestRunDoctor_VerboseShowsFullDetail(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(policyPath), 0o755); err != nil {
 		t.Fatalf("mkdir policy dir: %v", err)
 	}
-	policyYAML := "version: \"1\"\ntag_overrides:\n  a: enabled\n  b: enabled\n  c: dryrun\n  d: disabled\n  e: enabled\n  f: dryrun\n"
+	policyYAML := "version: \"1\"\ntag_overrides:\n  git: enabled\n  aws: enabled\n  gcp: dryrun\n  azure: disabled\n  terraform: enabled\n  kubernetes: dryrun\n"
 	if err := os.WriteFile(policyPath, []byte(policyYAML), 0o644); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
@@ -899,7 +899,7 @@ func TestRunDoctor_VerboseShowsFullDetail(t *testing.T) {
 	_ = err // don't care about pass/fail, just checking output
 
 	// With verbose, all overrides should be visible.
-	for _, tag := range []string{"a=enabled", "b=enabled", "c=dryrun", "d=disabled"} {
+	for _, tag := range []string{"git=enabled", "aws=enabled", "gcp=dryrun", "azure=disabled"} {
 		if !strings.Contains(stdout, tag) {
 			t.Fatalf("expected verbose output to contain %q, got:\n%s", tag, stdout)
 		}

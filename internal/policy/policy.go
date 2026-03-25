@@ -108,13 +108,16 @@ func EvaluateUserRules(classNorm string, policy *PolicyConfig) (core.Decision, s
 }
 
 // ParseTagOverrides converts string override values to FuseMode.
-// Returns an error if any value is invalid.
+// Returns an error if any key is not a known builtin tag or any value is invalid.
 func ParseTagOverrides(policy *PolicyConfig) (map[string]TagOverrideMode, error) {
 	if policy == nil || len(policy.TagOverrides) == 0 {
 		return nil, nil
 	}
 	m := make(map[string]TagOverrideMode, len(policy.TagOverrides))
 	for tag, mode := range policy.TagOverrides {
+		if !IsKnownTag(tag) {
+			return nil, fmt.Errorf("unknown tag %q in tag_overrides (not used by any builtin rule)", tag)
+		}
 		switch mode {
 		case "enabled":
 			m[tag] = TagOverrideEnabled

@@ -307,3 +307,21 @@ func applyRuleMetadata(meta map[string]ruleMetadata) {
 		}
 	}
 }
+
+// knownTags is the set of all valid tag names used by builtin rules.
+// Built once at init from builtinRuleTags. Used to validate tag_overrides keys.
+var knownTags map[string]bool
+
+func init() {
+	knownTags = make(map[string]bool)
+	for _, m := range builtinRuleTags() {
+		for _, tag := range m.tags {
+			knownTags[tag] = true
+		}
+	}
+}
+
+// IsKnownTag returns true if the tag is used by any builtin rule.
+func IsKnownTag(tag string) bool {
+	return knownTags[tag]
+}
