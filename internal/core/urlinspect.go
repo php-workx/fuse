@@ -291,7 +291,7 @@ func InspectURLsInArgs(args map[string]interface{}) (Decision, string) {
 	if args == nil {
 		return "", ""
 	}
-	values := flattenStringValues(args)
+	values, _ := flattenStringValues(args)
 	bestDecision := Decision("")
 	bestReason := ""
 

@@ -40,12 +40,16 @@ func ClassifyMCPTool(toolName string, args map[string]interface{}) Decision {
 	// Layer 2: Argument content scanning.
 	argsDecision := DecisionSafe
 	if args != nil {
-		values := flattenStringValues(args)
+		values, complete := flattenStringValues(args)
 		for _, v := range values {
 			if matchesDestructivePattern(v) {
 				argsDecision = DecisionApproval
 				break
 			}
+		}
+		// Depth exhaustion: incomplete extraction gets at least CAUTION.
+		if !complete && argsDecision == DecisionSafe {
+			argsDecision = DecisionCaution
 		}
 	}
 
@@ -65,6 +69,16 @@ func ClassifyMCPTool(toolName string, args map[string]interface{}) Decision {
 // Falls back to CAUTION for unmatched tool names.
 func classifyMCPByName(toolName string) Decision {
 	lower := strings.ToLower(toolName)
+
+	// Defense-in-depth: strip mcp__<server>__ prefix if present.
+	// The hook adapter already strips this via extractMCPAction(),
+	// and the proxy receives raw MCP names. This protects future callers.
+	if strings.HasPrefix(lower, "mcp__") {
+		parts := strings.SplitN(lower, "__", 3)
+		if len(parts) == 3 {
+			lower = parts[2]
+		}
+	}
 
 	// Check all prefix sets and take the most restrictive match.
 	bestDecision := Decision("")
@@ -109,49 +123,62 @@ func classifyMCPByName(toolName string) Decision {
 }
 
 // flattenStringValues recursively extracts all string values from a map,
-// including values nested in maps and slices.
-func flattenStringValues(m map[string]interface{}) []string {
+// including values nested in maps and slices. Returns (values, complete).
+// complete is false when maxExtractDepth was reached and content was skipped.
+func flattenStringValues(m map[string]interface{}) ([]string, bool) {
 	var result []string
+	complete := true
 	for _, v := range m {
-		result = append(result, extractStrings(v)...)
+		strs, c := extractStringsWithFlag(v, 0)
+		result = append(result, strs...)
+		if !c {
+			complete = false
+		}
 	}
-	return result
+	return result, complete
 }
 
 // maxExtractDepth limits recursion into nested JSON structures.
 const maxExtractDepth = 32
 
-// extractStrings recursively extracts string values from an arbitrary value.
-func extractStrings(v interface{}) []string {
-	return extractStringsDepth(v, 0)
-}
-
-func extractStringsDepth(v interface{}, depth int) []string {
-	if v == nil || depth > maxExtractDepth {
-		return nil
+func extractStringsWithFlag(v interface{}, depth int) ([]string, bool) {
+	if v == nil {
+		return nil, true
+	}
+	if depth > maxExtractDepth {
+		return nil, false // depth exhausted, extraction incomplete
 	}
 
+	complete := true
 	switch val := v.(type) {
 	case string:
-		return []string{val}
+		return []string{val}, true
 	case map[string]interface{}:
 		var result []string
 		for _, mv := range val {
-			result = append(result, extractStringsDepth(mv, depth+1)...)
+			strs, c := extractStringsWithFlag(mv, depth+1)
+			result = append(result, strs...)
+			if !c {
+				complete = false
+			}
 		}
-		return result
+		return result, complete
 	case []interface{}:
 		var result []string
 		for _, av := range val {
-			result = append(result, extractStringsDepth(av, depth+1)...)
+			strs, c := extractStringsWithFlag(av, depth+1)
+			result = append(result, strs...)
+			if !c {
+				complete = false
+			}
 		}
-		return result
+		return result, complete
 	default:
 		s := fmt.Sprintf("%v", val)
 		if s != "" {
-			return []string{s}
+			return []string{s}, true
 		}
-		return nil
+		return nil, true
 	}
 }
 

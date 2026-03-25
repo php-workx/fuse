@@ -569,3 +569,38 @@ func TestClassify_MultiLineInlineBodyURLDetection(t *testing.T) {
 			result.Decision, result.Reason)
 	}
 }
+
+func TestInlineScript_NewInterpreterPatterns(t *testing.T) {
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name    string
+		cmd     string
+		wantMin core.Decision
+	}{
+		{"php -r inline", `php -r 'phpinfo();'`, core.DecisionApproval},
+		{"php -a interactive", `php -a 'code'`, core.DecisionApproval},
+		{"lua -e inline", `lua -e 'os.execute("id")'`, core.DecisionApproval},
+		{"osascript -e", `osascript -e 'do shell script "whoami"'`, core.DecisionApproval},
+		{"groovy -e", `groovy -e 'println "hello"'`, core.DecisionApproval},
+		{"pipe to php", `echo '<?php system("id"); ?>' | php`, core.DecisionApproval},
+		{"pipe to lua", `echo 'print("hello")' | lua`, core.DecisionApproval},
+		{"pipe to osascript", `echo 'display dialog "hi"' | osascript`, core.DecisionApproval},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{RawCommand: tt.cmd, Cwd: "/tmp", Source: "test", SessionID: "test"}
+			result, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if core.DecisionSeverity(result.Decision) < core.DecisionSeverity(tt.wantMin) {
+				t.Errorf("got %s, want at least %s for %q (reason: %s)",
+					result.Decision, tt.wantMin, tt.cmd, result.Reason)
+			}
+		})
+	}
+}

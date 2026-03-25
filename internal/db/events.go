@@ -126,8 +126,10 @@ var credentialPatterns = []struct {
 		replacement: "[REDACTED]",
 	},
 	{
-		// High-entropy base64 blobs (40+ chars, likely keys/secrets)
-		re:          regexp.MustCompile(`\b[A-Za-z0-9+/]{40,}={0,3}\b`),
+		// High-entropy base64 blobs (64+ chars, likely keys/secrets).
+		// Raised from 40 to 64 to avoid redacting SHA-256 hashes, long paths,
+		// and Go module names. Vendor-specific patterns above catch shorter secrets.
+		re:          regexp.MustCompile(`\b[A-Za-z0-9+/]{64,}={0,3}\b`),
 		replacement: "[REDACTED BASE64]",
 	},
 }
@@ -143,6 +145,9 @@ func ScrubCredentials(command string) string {
 // LogEvent inserts an event record with credential scrubbing and normalized path metadata.
 func (d *DB) LogEvent(record *EventRecord) error {
 	record.Command = ScrubCredentials(record.Command)
+	record.Reason = ScrubCredentials(record.Reason)
+	record.Metadata = ScrubCredentials(record.Metadata)
+	record.JudgeReasoning = ScrubCredentials(record.JudgeReasoning)
 	record.Cwd = normalizeEventPath(record.Cwd)
 	if record.WorkspaceRoot == "" {
 		record.WorkspaceRoot = detectWorkspaceRoot(record.Cwd)
