@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -19,6 +20,7 @@ var BlockedHostnames = map[string]bool{
 	"168.63.129.16":            true, // Azure WireServer / IMDS
 	"localhost":                true, // loopback
 	"0.0.0.0":                  true, // all interfaces
+	"0":                        true, // all interfaces (short form)
 }
 
 // BlockedIPRanges are always-blocked IP ranges → BLOCKED.
@@ -113,8 +115,17 @@ func isTrustedDomain(host string) bool {
 // reURLPattern matches http/https/ftp/file URLs in command text.
 var reURLPattern = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'"` + "`" + `]+`)
 
-// reNonCanonicalNumeric detects hex (0x), octal (0-prefixed), or decimal IPs.
-var reNonCanonicalNumeric = regexp.MustCompile(`^(0x[0-9a-fA-F]+|0[0-7]+\d|[0-9]{10,})$`)
+// reNonCanonicalNumeric detects hex (0x), octal (0-prefixed), decimal integer, or
+// short-form IPs that Go's net.ParseIP won't handle but curl/wget resolve natively.
+var reNonCanonicalNumeric = regexp.MustCompile(
+	`^(0x[0-9a-fA-F]+|0[0-7]+\d|[0-9]{10,})$`,
+)
+
+// reNonCanonicalDotted detects dotted IPs with any non-standard octet encoding:
+// leading-zero octets (octal), 0x-prefix octets (hex), or fewer than 4 octets (short-form).
+var reNonCanonicalDotted = regexp.MustCompile(
+	`^[0-9a-fA-Fx.]+$`,
+)
 
 // reInsecureCertFlag detects flags that disable TLS verification.
 // Uses regex to catch combined short flags (e.g., -kL, -kvs).
@@ -233,8 +244,20 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 		return DecisionBlocked, "blocked URL scheme: " + scheme
 	}
 
-	// Non-canonical numeric host → CAUTION (SEC-002).
+	// Non-canonical numeric host: decode and check against blocked ranges (SEC-002).
 	if isNonCanonicalNumericHost(host) {
+		if decoded := decodeNonCanonicalIP(host); decoded != nil {
+			// Check decoded IP against blocked/caution ranges.
+			if d, reason := matchIPRanges(decoded, host); d != "" {
+				return d, reason + " (decoded from non-canonical form)"
+			}
+			// Also check the decoded canonical form against BlockedHostnames.
+			canonical := decoded.String()
+			if BlockedHostnames[canonical] {
+				return DecisionBlocked, "blocked hostname: " + canonical + " (decoded from " + host + ")"
+			}
+		}
+		// Decoding failed or IP not in any range — still suspicious.
 		return DecisionCaution, "non-canonical numeric IP in URL"
 	}
 
@@ -314,9 +337,130 @@ func isShellExpansion(s string) bool {
 	return strings.ContainsAny(s, "$`")
 }
 
-// isNonCanonicalNumericHost detects hex/octal/decimal IP encodings (SEC-002).
+// isNonCanonicalNumericHost detects hex/octal/decimal/short-form IP encodings (SEC-002).
 func isNonCanonicalNumericHost(host string) bool {
-	return reNonCanonicalNumeric.MatchString(host)
+	if reNonCanonicalNumeric.MatchString(host) {
+		return true
+	}
+	// Detect dotted non-canonical forms: octal octets (leading zero), hex octets (0x),
+	// or short-form (fewer than 4 octets). Only trigger if the host looks fully numeric.
+	if !reNonCanonicalDotted.MatchString(host) || !strings.Contains(host, ".") {
+		return false
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 || len(parts) > 4 {
+		return false
+	}
+	// Short-form: fewer than 4 octets (e.g., 127.1)
+	if len(parts) < 4 {
+		return true
+	}
+	// Check each octet for non-decimal encoding
+	for _, p := range parts {
+		if strings.HasPrefix(p, "0x") || strings.HasPrefix(p, "0X") {
+			return true // hex octet
+		}
+		if len(p) > 1 && p[0] == '0' {
+			return true // octal octet (leading zero)
+		}
+	}
+	return false
+}
+
+// decodeNonCanonicalIP attempts to decode a non-canonical IP host string
+// (hex, octal, decimal integer, dotted-octal, short-form, mixed) into a
+// canonical net.IP. Returns nil if decoding fails.
+//
+// Follows BSD inet_aton rules used by curl:
+// - Single number: entire 32-bit address
+// - Two parts: a.b → a.0.0.b (last part fills remaining bytes)
+// - Three parts: a.b.c → a.b.0.c
+// - Four parts: standard dotted notation
+// - Each part: 0x = hex, leading 0 = octal, else decimal
+func decodeNonCanonicalIP(host string) net.IP {
+	host = strings.TrimRight(host, ".")
+
+	// Single number (no dots): hex, octal, or decimal integer for full 32-bit addr.
+	if !strings.Contains(host, ".") {
+		val, ok := parseOctet(host, 0xFFFFFFFF)
+		if !ok {
+			return nil
+		}
+		return net.IPv4(byte(val>>24), byte(val>>16), byte(val>>8), byte(val))
+	}
+
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 || len(parts) > 4 {
+		return nil
+	}
+
+	// Parse each part, last part gets a wider range per inet_aton rules.
+	var octets [4]byte
+	switch len(parts) {
+	case 4:
+		for i, p := range parts {
+			val, ok := parseOctet(p, 0xFF)
+			if !ok {
+				return nil
+			}
+			octets[i] = byte(val)
+		}
+	case 3:
+		// a.b.c → a.b.0.c (c fills last 2 bytes if > 255)
+		for i := 0; i < 2; i++ {
+			val, ok := parseOctet(parts[i], 0xFF)
+			if !ok {
+				return nil
+			}
+			octets[i] = byte(val)
+		}
+		val, ok := parseOctet(parts[2], 0xFFFF)
+		if !ok {
+			return nil
+		}
+		octets[2] = byte(val >> 8)
+		octets[3] = byte(val)
+	case 2:
+		// a.b → a.0.0.b (b fills last 3 bytes if > 255)
+		val0, ok := parseOctet(parts[0], 0xFF)
+		if !ok {
+			return nil
+		}
+		octets[0] = byte(val0)
+		val1, ok := parseOctet(parts[1], 0xFFFFFF)
+		if !ok {
+			return nil
+		}
+		octets[1] = byte(val1 >> 16)
+		octets[2] = byte(val1 >> 8)
+		octets[3] = byte(val1)
+	}
+	return net.IPv4(octets[0], octets[1], octets[2], octets[3])
+}
+
+// parseOctet parses a single numeric part: 0x = hex, leading 0 = octal, else decimal.
+// Returns the value and true if valid and within maxVal.
+func parseOctet(s string, maxVal uint64) (uint64, bool) {
+	if s == "" {
+		return 0, false
+	}
+	var val uint64
+	var err error
+	switch {
+	case strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X"):
+		if len(s) <= 2 {
+			return 0, false
+		}
+		val, err = strconv.ParseUint(s[2:], 16, 64)
+	case len(s) > 1 && s[0] == '0':
+		val, err = strconv.ParseUint(s, 8, 64)
+	default:
+		val, err = strconv.ParseUint(s, 10, 64)
+	}
+	if err != nil || val > maxVal {
+		return 0, false
+	}
+	return val, true
 }
 
 // reRedirectFlag detects curl -L (standalone or in combined short flags like -kL, -Lv).

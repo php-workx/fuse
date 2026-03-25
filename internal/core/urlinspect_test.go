@@ -170,9 +170,10 @@ func TestInspectURLs_ShellSubstitutionInHost(t *testing.T) {
 }
 
 func TestInspectURLs_NonCanonicalIPHex(t *testing.T) {
+	// 0x7f000001 = 127.0.0.1 (loopback) — should be BLOCKED after decoding.
 	d, _ := InspectCommandURLs("curl http://0x7f000001/")
-	if d != DecisionCaution {
-		t.Errorf("got %s, want CAUTION for hex-encoded IP (SEC-002)", d)
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for hex-encoded loopback IP", d)
 	}
 }
 
@@ -291,5 +292,103 @@ func TestInspectURLs_WgetAlwaysFollowsRedirects(t *testing.T) {
 	d, _ := InspectCommandURLs("wget https://untrusted.com/file.tar.gz")
 	if DecisionSeverity(d) < DecisionSeverity(DecisionCaution) {
 		t.Errorf("got %s, want at least CAUTION for wget (implicit redirects)", d)
+	}
+}
+
+// --- Non-canonical IP decoder tests ---
+
+func TestInspectURLs_DottedOctalMetadata(t *testing.T) {
+	// 0251.0376.0251.0376 = 169.254.169.254
+	d, _ := InspectCommandURLs("curl http://0251.0376.0251.0376/latest/meta-data/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for dotted-octal metadata IP", d)
+	}
+}
+
+func TestInspectURLs_DottedOctalLoopback(t *testing.T) {
+	// 0177.0.0.01 = 127.0.0.1
+	d, _ := InspectCommandURLs("curl http://0177.0.0.01/admin")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for dotted-octal loopback", d)
+	}
+}
+
+func TestInspectURLs_DottedOctalPrivate(t *testing.T) {
+	// 0300.0250.01.01 = 192.168.1.1
+	d, _ := InspectCommandURLs("curl http://0300.0250.01.01/admin")
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for dotted-octal private IP", d)
+	}
+}
+
+func TestInspectURLs_ShortFormLoopback(t *testing.T) {
+	// 127.1 = 127.0.0.1 (BSD inet_aton)
+	d, _ := InspectCommandURLs("curl http://127.1/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for short-form loopback", d)
+	}
+}
+
+func TestInspectURLs_ShortFormZero(t *testing.T) {
+	// 0 = 0.0.0.0
+	d, _ := InspectCommandURLs("curl http://0/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for 0 (0.0.0.0)", d)
+	}
+}
+
+func TestInspectURLs_MixedHexDottedLoopback(t *testing.T) {
+	// 0x7f.0.0.1 = 127.0.0.1
+	d, _ := InspectCommandURLs("curl http://0x7f.0.0.1/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for mixed hex-dotted loopback", d)
+	}
+}
+
+func TestInspectURLs_HexIPMetadataBlocked(t *testing.T) {
+	// 0xa9fea9fe = 169.254.169.254
+	d, _ := InspectCommandURLs("curl http://0xa9fea9fe/latest/meta-data/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for hex-encoded metadata IP", d)
+	}
+}
+
+func TestInspectURLs_DecimalIntegerMetadataBlocked(t *testing.T) {
+	// 2852039166 = 169.254.169.254
+	d, _ := InspectCommandURLs("curl http://2852039166/latest/meta-data/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for decimal-integer metadata IP", d)
+	}
+}
+
+func TestInspectURLs_HexIPPrivateCaution(t *testing.T) {
+	// 0xc0a80101 = 192.168.1.1 (RFC1918)
+	d, _ := InspectCommandURLs("curl http://0xc0a80101/")
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for hex-encoded private IP", d)
+	}
+}
+
+func TestInspectURLs_NormalDecimalNotAffected(t *testing.T) {
+	// Standard dotted-decimal — no leading zeros, not non-canonical
+	d, _ := InspectCommandURLs("curl http://192.168.1.1/admin")
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for normal RFC1918 IP", d)
+	}
+}
+
+// --- IPv4-mapped IPv6 tests ---
+
+func TestInspectURLs_IPv4MappedIPv6Metadata(t *testing.T) {
+	d, _ := InspectCommandURLs("curl http://[::ffff:169.254.169.254]/latest/meta-data/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for IPv4-mapped IPv6 metadata", d)
+	}
+}
+
+func TestInspectURLs_IPv4MappedIPv6Loopback(t *testing.T) {
+	d, _ := InspectCommandURLs("curl http://[::ffff:127.0.0.1]:8080/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for IPv4-mapped IPv6 loopback", d)
 	}
 }
