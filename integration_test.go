@@ -796,3 +796,99 @@ func TestIntegration_V2_DestructiveHTTPMethodApproval(t *testing.T) {
 			result.Decision, result.Reason)
 	}
 }
+
+func TestIntegration_V2_HeredocContainingBashC(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\nbash -c 'rm -rf /'\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	// Nested bash -c inside heredoc hits extraction failure and fail-closes to APPROVAL.
+	// This still gates execution (user must approve), just doesn't hard-block.
+	if result.Decision != core.DecisionApproval && result.Decision != core.DecisionBlocked {
+		t.Errorf("expected APPROVAL or BLOCKED for heredoc with bash -c rm -rf /, got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestIntegration_V2_MultipleHeredocs(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "cat <<A\nhello\nA\nbash <<B\ncurl http://169.254.169.254/\nB",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Errorf("expected BLOCKED for multi-heredoc with metadata URL, got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestIntegration_V2_HeredocWithCommandSubstitution(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\nresult=$(curl http://169.254.169.254/latest/meta-data/)\necho $result\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Errorf("expected BLOCKED for heredoc with metadata $(), got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestIntegration_V2_HeredocVariableAssembly(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	// Known limitation: variable assembly evades line-by-line detection.
+	// This test documents the current behavior.
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\nCMD=rm\nARGS='-rf /'\n$CMD $ARGS\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	// Document current behavior — variable assembly evades line-by-line detection.
+	// This is a known limitation. The test logs the result.
+	t.Logf("variable assembly result: %s (reason: %s) — known limitation of line-by-line classification",
+		result.Decision, result.Reason)
+}

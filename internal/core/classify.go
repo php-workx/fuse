@@ -66,21 +66,28 @@ type PolicyEvaluator interface {
 
 // Compiled regexes for inline script detection (§5.4).
 var (
-	reInlineShC         = regexp.MustCompile(`\b(ba)?sh\s+-c\s+`)
-	reInlinePythonC     = regexp.MustCompile(`\bpython[23]?\s+-c\s+`)
-	reInlineNodeE       = regexp.MustCompile(`\bnode\s+-e\s+`)
-	reInlinePerlE       = regexp.MustCompile(`\bperl\s+-e\s+`)
-	reInlineRubyE       = regexp.MustCompile(`\bruby\s+-e\s+`)
-	reInlineEval        = regexp.MustCompile(`\beval\s+`)
-	reInlineHeredoc     = regexp.MustCompile(`<<[-]?\s*['"]?\w+['"]?`)
-	reInlinePipeSh      = regexp.MustCompile(`\|\s*(ba)?sh\b`)
-	reInlinePipePy      = regexp.MustCompile(`\|\s*python[23]?\b`)
-	reInlinePipeNode    = regexp.MustCompile(`\|\s*node\b`)
-	reInlinePipeRuby    = regexp.MustCompile(`\|\s*(ruby|perl)\b`)
-	reInlineBase64Sh    = regexp.MustCompile(`base64\s+(-d|--decode).*\|\s*(ba)?sh`)
-	reInlineCmdSubst    = regexp.MustCompile(`\$\(`)
-	reInlineExportPATH  = regexp.MustCompile(`\bexport\s+PATH=`)
-	reInlineShellConfig = regexp.MustCompile(`(>|>>)\s*.*\.(bashrc|zshrc|profile|bash_profile)\b`)
+	reInlineShC           = regexp.MustCompile(`\b(ba)?sh\s+-c\s+`)
+	reInlinePythonC       = regexp.MustCompile(`\bpython[23]?\s+-c\s+`)
+	reInlineNodeE         = regexp.MustCompile(`\bnode\s+-e\s+`)
+	reInlinePerlE         = regexp.MustCompile(`\bperl\s+-e\s+`)
+	reInlineRubyE         = regexp.MustCompile(`\bruby\s+-e\s+`)
+	reInlineEval          = regexp.MustCompile(`\beval\s+`)
+	reInlineHeredoc       = regexp.MustCompile(`<<[-]?\s*['"]?\w+['"]?`)
+	reInlinePipeSh        = regexp.MustCompile(`\|\s*(ba)?sh\b`)
+	reInlinePipePy        = regexp.MustCompile(`\|\s*python[23]?\b`)
+	reInlinePipeNode      = regexp.MustCompile(`\|\s*node\b`)
+	reInlinePipeRuby      = regexp.MustCompile(`\|\s*(ruby|perl)\b`)
+	reInlineBase64Sh      = regexp.MustCompile(`base64\s+(-d|--decode).*\|\s*(ba)?sh`)
+	reInlinePHPR          = regexp.MustCompile(`\bphp\s+-[ra]\s+`)
+	reInlineLuaE          = regexp.MustCompile(`\blua\s+-e\s+`)
+	reInlineGroovyE       = regexp.MustCompile(`\bgroovy\s+-e\s+`)
+	reInlineOsascriptE    = regexp.MustCompile(`\bosascript\s+-e\s+`)
+	reInlinePipePHP       = regexp.MustCompile(`\|\s*php\b`)
+	reInlinePipeLua       = regexp.MustCompile(`\|\s*lua\b`)
+	reInlinePipeOsascript = regexp.MustCompile(`\|\s*osascript\b`)
+	reInlineCmdSubst      = regexp.MustCompile(`\$\(`)
+	reInlineExportPATH    = regexp.MustCompile(`\bexport\s+PATH=`)
+	reInlineShellConfig   = regexp.MustCompile(`(>|>>)\s*.*\.(bashrc|zshrc|profile|bash_profile)\b`)
 )
 
 // inlineScriptPatterns maps compiled regexes to whether they trigger APPROVAL (true) or CAUTION (false).
@@ -100,9 +107,16 @@ var inlineScriptPatterns = []struct {
 	{reInlinePipeNode, true},
 	{reInlinePipeRuby, true},
 	{reInlineBase64Sh, true},
-	{reInlineCmdSubst, false},    // CAUTION only
-	{reInlineExportPATH, false},  // CAUTION only
-	{reInlineShellConfig, false}, // CAUTION only
+	{reInlinePHPR, true},          // php -r / php -a
+	{reInlineLuaE, true},          // lua -e
+	{reInlineGroovyE, true},       // groovy -e
+	{reInlineOsascriptE, true},    // osascript -e
+	{reInlinePipePHP, true},       // pipe to php
+	{reInlinePipeLua, true},       // pipe to lua
+	{reInlinePipeOsascript, true}, // pipe to osascript
+	{reInlineCmdSubst, false},     // CAUTION only
+	{reInlineExportPATH, false},   // CAUTION only
+	{reInlineShellConfig, false},  // CAUTION only
 }
 
 // Sensitive env var detection (§5.3 from the issue description).

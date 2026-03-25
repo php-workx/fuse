@@ -261,3 +261,35 @@ func TestInspectURLs_192168Private(t *testing.T) {
 		t.Errorf("got %s, want CAUTION for 192.168.x.x (RFC1918)", d)
 	}
 }
+
+func TestInspectURLs_RedirectWithUntrustedURL(t *testing.T) {
+	// curl -L to untrusted domain — should be at least CAUTION
+	d, _ := InspectCommandURLs("curl -L https://untrusted.com/api")
+	if DecisionSeverity(d) < DecisionSeverity(DecisionCaution) {
+		t.Errorf("got %s, want at least CAUTION for -L with untrusted URL", d)
+	}
+}
+
+func TestInspectURLs_RedirectWithMetadataURL(t *testing.T) {
+	// curl -L to metadata — should be BLOCKED (the literal URL is blocked)
+	d, _ := InspectCommandURLs("curl -L http://169.254.169.254/")
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for -L with literal metadata URL", d)
+	}
+}
+
+func TestInspectURLs_CombinedInsecureRedirect(t *testing.T) {
+	// curl -kL — both insecure TLS and redirect following
+	d, _ := InspectCommandURLs("curl -kL https://untrusted.com/endpoint")
+	if DecisionSeverity(d) < DecisionSeverity(DecisionCaution) {
+		t.Errorf("got %s, want at least CAUTION for -kL with untrusted URL", d)
+	}
+}
+
+func TestInspectURLs_WgetAlwaysFollowsRedirects(t *testing.T) {
+	// wget follows redirects by default — verify detection
+	d, _ := InspectCommandURLs("wget https://untrusted.com/file.tar.gz")
+	if DecisionSeverity(d) < DecisionSeverity(DecisionCaution) {
+		t.Errorf("got %s, want at least CAUTION for wget (implicit redirects)", d)
+	}
+}

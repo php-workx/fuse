@@ -74,6 +74,9 @@ func init() {
 var networkCommandBasenames = map[string]bool{
 	"curl": true, "wget": true, "http": true, "httpie": true,
 	"fetch": true, "aria2c": true,
+	"httpx": true, "xh": true, "curlie": true, "grpcurl": true,
+	"nc": true, "ncat": true, "netcat": true, "socat": true,
+	"lynx": true, "links": true, "w3m": true,
 }
 
 // trustedDomains is the set of user-configured trusted domains that are exempt

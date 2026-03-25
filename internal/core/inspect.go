@@ -189,7 +189,7 @@ func DetectReferencedFile(subCommand string) string {
 		return ""
 	}
 
-	parts := strings.Fields(subCommand)
+	parts, _ := tokenizeQuoteAware(subCommand)
 	if len(parts) == 0 {
 		return ""
 	}

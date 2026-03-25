@@ -101,6 +101,31 @@ var credentialPatterns = []struct {
 		replacement: "://[REDACTED]@",
 	},
 	{
+		// JSON key-value secrets (quoted keys with secret-related names)
+		re:          regexp.MustCompile(`(?i)"(password|secret|token|key|credential|auth|apikey|api_key|access_key|private_key)"\s*:\s*"[^"]*"`),
+		replacement: `"${1}":"[REDACTED]"`,
+	},
+	{
+		// Authorization: Basic/Digest (extends existing Bearer pattern)
+		re:          regexp.MustCompile(`(?i)Authorization:\s*(Basic|Digest)\s+\S+`),
+		replacement: "Authorization: ${1} [REDACTED]",
+	},
+	{
+		// Cookie header values
+		re:          regexp.MustCompile(`(?i)(Cookie|Set-Cookie):\s*\S+`),
+		replacement: "${1}: [REDACTED]",
+	},
+	{
+		// JWT tokens (three base64url-encoded segments)
+		re:          regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`),
+		replacement: "[REDACTED JWT]",
+	},
+	{
+		// AWS temporary credentials (STS) — extends existing AKIA pattern
+		re:          regexp.MustCompile(`ASIA[0-9A-Z]{16}`),
+		replacement: "[REDACTED]",
+	},
+	{
 		// High-entropy base64 blobs (40+ chars, likely keys/secrets)
 		re:          regexp.MustCompile(`\b[A-Za-z0-9+/]{40,}={0,3}\b`),
 		replacement: "[REDACTED BASE64]",

@@ -650,7 +650,7 @@ func extractHeredocBody(cmd string) (body string, complete bool) {
 		}
 	}()
 
-	parser := syntax.NewParser(syntax.Variant(syntax.LangPOSIX))
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	prog, err := parser.Parse(strings.NewReader(cmd), "")
 	if err != nil {
 		return "", false
@@ -712,7 +712,7 @@ func extractCommandSubstitutions(cmd string) (results []string, complete bool) {
 		}
 	}()
 
-	parser := syntax.NewParser(syntax.Variant(syntax.LangPOSIX))
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	prog, err := parser.Parse(strings.NewReader(cmd), "")
 	if err != nil {
 		return nil, false
