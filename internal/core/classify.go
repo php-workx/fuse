@@ -694,6 +694,7 @@ func (a *inlineAccumulator) update(d Decision, reason string) {
 func (a *inlineAccumulator) classifyHeredocBody(body string, evaluator PolicyEvaluator, cwd string, depth int) {
 	subCmds, err := SplitCompoundCommand(body)
 	if err != nil {
+		a.complete = false // parse failure → incomplete extraction (SEC-009 fail-closed)
 		d, reason := classifyExtractedSubCommand(body, evaluator, cwd)
 		a.update(d, "inline heredoc: "+reason)
 		return

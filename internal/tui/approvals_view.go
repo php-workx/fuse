@@ -41,8 +41,9 @@ type ApprovalsModel struct {
 	showDetail  bool           // detail panel open for history item
 	detailView  viewport.Model // scrollable detail panel
 
-	// Policy recommendations from approval history.
-	recommendations []db.PolicyRecommendation
+	// Policy recommendations from approval history (cached with TTL).
+	recommendations   []db.PolicyRecommendation
+	recommendationsAt time.Time // when recommendations were last queried
 
 	// Dependencies.
 	database *db.DB
@@ -65,11 +66,12 @@ func NewApprovalsModel(database *db.DB, secret []byte) ApprovalsModel {
 // SetData updates the approval history.
 func (m *ApprovalsModel) SetData(approvals []db.Approval) {
 	m.approvals = approvals
-	// Load policy recommendations (best-effort).
-	if m.database != nil {
+	// Load policy recommendations (best-effort, cached 30s to avoid per-tick queries).
+	if m.database != nil && time.Since(m.recommendationsAt) > 30*time.Second {
 		recs, err := m.database.FrequentApprovals(3)
 		if err == nil {
 			m.recommendations = recs
+			m.recommendationsAt = time.Now()
 		}
 	}
 }

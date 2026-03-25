@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -315,6 +316,22 @@ func checkPolicyYAML() checkResult {
 
 	// Primary failed — try loading LKG to verify it's actually usable.
 	lkgPath := policyPath + ".lkg"
+	lkgInfo, lkgStatErr := os.Stat(lkgPath)
+	if lkgStatErr != nil {
+		return checkResult{
+			name:   "Policy (policy.yaml)",
+			status: "FAIL",
+			detail: fmt.Sprintf("error loading policy: %v (no LKG fallback available)", err),
+		}
+	}
+	// Check freshness — must match runtime behavior (default 7 days).
+	if time.Since(lkgInfo.ModTime()) > 7*24*time.Hour {
+		return checkResult{
+			name:   "Policy (policy.yaml)",
+			status: "FAIL",
+			detail: fmt.Sprintf("error loading policy: %v (LKG fallback is stale: %s)", err, lkgInfo.ModTime().Format("2006-01-02")),
+		}
+	}
 	lkgCfg, lkgErr := policy.LoadPolicy(lkgPath)
 	if lkgErr != nil {
 		return checkResult{
