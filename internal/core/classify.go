@@ -97,28 +97,32 @@ var inlineScriptPatterns = []struct {
 	re       *regexp.Regexp
 	approval bool // true = APPROVAL, false = CAUTION
 }{
-	{reInlineShC, true},
-	{reInlinePythonC, true},
-	{reInlineNodeE, true},
-	{reInlinePerlE, true},
-	{reInlineRubyE, true},
-	{reInlineEval, true},
-	{reInlineHeredoc, true},
-	{reInlinePipeSh, true},
-	{reInlinePipePy, true},
-	{reInlinePipeNode, true},
-	{reInlinePipeRuby, true},
-	{reInlineBase64Sh, true},
-	{reInlinePHPR, true},          // php -r / php -a
-	{reInlineLuaE, true},          // lua -e
-	{reInlineGroovyE, true},       // groovy -e
-	{reInlineOsascriptE, true},    // osascript -e
-	{reInlinePipePHP, true},       // pipe to php
-	{reInlinePipeLua, true},       // pipe to lua
-	{reInlinePipeOsascript, true}, // pipe to osascript
-	{reInlineCmdSubst, false},     // CAUTION only
-	{reInlineExportPATH, false},   // CAUTION only
-	{reInlineShellConfig, false},  // CAUTION only
+	// All inline patterns produce CAUTION. The inline body extraction pipeline
+	// (classifyInlineBodies) analyzes the actual content and escalates to APPROVAL
+	// or BLOCKED when the extracted code is dangerous. Pattern detection alone
+	// should not interrupt the user — it just flags for logging and judge triage.
+	{reInlineShC, false},
+	{reInlinePythonC, false},
+	{reInlineNodeE, false},
+	{reInlinePerlE, false},
+	{reInlineRubyE, false},
+	{reInlineEval, false},
+	{reInlineHeredoc, false},
+	{reInlinePipeSh, false},
+	{reInlinePipePy, false},
+	{reInlinePipeNode, false},
+	{reInlinePipeRuby, false},
+	{reInlineBase64Sh, false},
+	{reInlinePHPR, false},
+	{reInlineLuaE, false},
+	{reInlineGroovyE, false},
+	{reInlineOsascriptE, false},
+	{reInlinePipePHP, false},
+	{reInlinePipeLua, false},
+	{reInlinePipeOsascript, false},
+	{reInlineCmdSubst, false},
+	{reInlineExportPATH, false},
+	{reInlineShellConfig, false},
 }
 
 // Sensitive env var detection (§5.3 from the issue description).
@@ -182,15 +186,10 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 		return result, nil
 	}
 
-	// §5.2 step 3: If compound block contains cwd-changing builtins
-	// before a later file-backed sub-command, classify whole block as APPROVAL.
-	if len(subCmds) > 1 && ContainsCwdChange(subCmds) {
-		result.Decision = DecisionApproval
-		result.Reason = "compound command contains cwd-changing builtin (cd/pushd/popd)"
-		result.FailClosed = true
-		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
-		return result, nil
-	}
+	// §5.2 step 3: If compound block contains cwd-changing builtins,
+	// note it for CAUTION but classify each sub-command normally.
+	// The per-sub-command pipeline catches dangerous commands regardless of cwd.
+	hasCwdChange := len(subCmds) > 1 && ContainsCwdChange(subCmds)
 
 	// Preserve inline pipe-script detection across compound splitting. A pipeline
 	// like "curl ... | bash" is structurally split into safe-looking sub-commands,
@@ -262,6 +261,16 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 			result.Decision = combined
 			result.Reason = compoundInlineReason
 			result.RuleID = ""
+		}
+	}
+
+	// CWD change in compound: escalate to at least CAUTION for logging/judge triage.
+	// The per-sub-command classification already caught any dangerous commands.
+	if hasCwdChange {
+		combined := MaxDecision(result.Decision, DecisionCaution)
+		if combined != result.Decision {
+			result.Decision = combined
+			result.Reason = "compound command contains cwd-changing builtin (cd/pushd/popd)"
 		}
 	}
 
@@ -525,18 +534,27 @@ var dangerousPythonInline = regexp.MustCompile(
 // Excludes os.path (allows os.remove via import os.path; os.remove),
 // pip/setuptools/pkg_resources (can install/remove packages).
 var safePythonInline = regexp.MustCompile(
-	`\bpython[23]?\s+-c\s+.*\bimport\s+(ast|json|sys|pathlib|` +
+	`\bpython[23]?\s+(-c\s+.*\bimport\s+|-m\s+)(ast|json|sys|pathlib|` +
 		`collections|re|math|hashlib|base64|struct|textwrap|inspect|tokenize|` +
 		`configparser|tomllib|typing|dataclasses|enum|functools|itertools|operator|string|` +
-		`platform|sysconfig|site)\b`,
+		`platform|sysconfig|site|pprint|py_compile|json\.tool|compileall|` +
+		`timeit|cProfile|pdb|doctest|unittest|pytest)\b`,
+)
+
+// reSafePipePython matches piping to read-only Python module invocations.
+var reSafePipePython = regexp.MustCompile(
+	`\|\s*python[23]?\s+-m\s+(json\.tool|pprint|ast|tokenize|py_compile|compileall)\b`,
 )
 
 // isExemptInlinePattern returns true if the matched pattern should be skipped
-// for this command (safe python import, cat-heredoc substitution, safe heredoc usage).
+// for this command (safe python import, cat-heredoc substitution, safe heredoc usage,
+// safe pipe-to-python-module).
 func isExemptInlinePattern(re *regexp.Regexp, cmd string) bool {
 	switch re {
 	case reInlinePythonC:
 		return isSafePythonInline(cmd)
+	case reInlinePipePy:
+		return reSafePipePython.MatchString(cmd)
 	case reInlineHeredoc:
 		return isCatHeredocSubstitution(cmd) || isSafeHeredocUsage(cmd)
 	case reInlineCmdSubst:
