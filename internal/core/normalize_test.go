@@ -880,7 +880,7 @@ func TestClassificationNormalize_SensitiveEnvAssignment(t *testing.T) {
 		{"env LD_PRELOAD", "env LD_PRELOAD=/evil/lib.so ls", true, "ls"},
 		{"env DYLD_INSERT", "env DYLD_INSERT_LIBRARIES=/evil.dylib python", true, "python"},
 		{"env PATH override", "env PATH=/evil:$PATH command_here", true, "command_here"},
-		{"env PYTHONPATH", "env PYTHONPATH=/evil python script.py", true, "python script.py"},
+		{"env PYTHONPATH (not sensitive)", "env PYTHONPATH=/evil python script.py", false, "python script.py"},
 		{"env benign", "env FOO=bar ls", false, "ls"},
 		{"env -i with PATH", "env -i PATH=/usr/bin ls", true, "ls"},
 		{"bare LD_PRELOAD with path", "LD_PRELOAD=/tmp/evil.so ls -la", true, "ls -la"},

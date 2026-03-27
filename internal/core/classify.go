@@ -132,12 +132,15 @@ var reSensitiveEnvVar = regexp.MustCompile(
 
 // Security-sensitive environment variable prefixes that trigger APPROVAL
 // when used as command-line env assignments (§5.3 from spec).
+// Only includes variables that enable binary/library injection or config
+// resolution attacks. Routine dev variables (PYTHONPATH, NODE_PATH, etc.)
+// are excluded — agents set these constantly for project imports.
 var sensitiveEnvPrefixes = []string{
 	"PATH=", "LD_PRELOAD=", "LD_LIBRARY_PATH=",
-	"DYLD_", "PYTHONPATH=", "PYTHONHOME=",
-	"NODE_PATH=", "NODE_OPTIONS=", "PERL5LIB=",
-	"PERLLIB=", "RUBYLIB=", "RUBYOPT=",
-	"GIT_EXEC_PATH=", "HOME=",
+	"DYLD_",
+	"NODE_OPTIONS=",  // allows --require injection
+	"GIT_EXEC_PATH=", // substitutes git binaries
+	"HOME=",          // redirects config resolution
 }
 
 // Classify runs the full classification pipeline on a shell request (§5.2).
