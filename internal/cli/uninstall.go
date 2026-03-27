@@ -75,12 +75,7 @@ func removeFuseHook(settings map[string]interface{}) bool {
 		return false
 	}
 
-	preToolUseRaw, ok := hooksObj["PreToolUse"]
-	if !ok {
-		return false
-	}
-
-	preToolUse, ok := preToolUseRaw.([]interface{})
+	preToolUse, ok := extractPreToolUse(hooksObj)
 	if !ok {
 		return false
 	}
@@ -89,47 +84,12 @@ func removeFuseHook(settings map[string]interface{}) bool {
 	var cleaned []interface{}
 
 	for _, entry := range preToolUse {
-		entryMap, ok := entry.(map[string]interface{})
-		if !ok {
-			cleaned = append(cleaned, entry)
-			continue
-		}
-
-		hooksRaw, ok := entryMap["hooks"]
-		if !ok {
-			cleaned = append(cleaned, entry)
-			continue
-		}
-
-		hooks, ok := hooksRaw.([]interface{})
-		if !ok {
-			cleaned = append(cleaned, entry)
-			continue
-		}
-
-		// Filter out fuse hook commands.
-		var remainingHooks []interface{}
-		for _, h := range hooks {
-			hMap, ok := h.(map[string]interface{})
-			if !ok {
-				remainingHooks = append(remainingHooks, h)
-				continue
-			}
-			cmd, _ := hMap["command"].(string)
-			if cmd == "fuse hook evaluate" {
-				modified = true
-				continue // Skip fuse hook.
-			}
-			remainingHooks = append(remainingHooks, h)
-		}
-
-		// If hooks remain, keep the matcher entry; otherwise drop it.
-		if len(remainingHooks) > 0 {
-			entryMap["hooks"] = remainingHooks
-			cleaned = append(cleaned, entryMap)
-		} else {
+		kept, wasModified := cleanMatcherEntry(entry)
+		if wasModified {
 			modified = true
-			// Drop the entire matcher entry since it has no hooks left.
+		}
+		if kept != nil {
+			cleaned = append(cleaned, kept)
 		}
 	}
 
@@ -142,6 +102,70 @@ func removeFuseHook(settings map[string]interface{}) bool {
 	}
 
 	return modified
+}
+
+// extractPreToolUse retrieves the PreToolUse array from the hooks object.
+func extractPreToolUse(hooksObj map[string]interface{}) ([]interface{}, bool) {
+	preToolUseRaw, ok := hooksObj["PreToolUse"]
+	if !ok {
+		return nil, false
+	}
+	preToolUse, ok := preToolUseRaw.([]interface{})
+	return preToolUse, ok
+}
+
+// cleanMatcherEntry processes a single PreToolUse matcher entry, removing
+// fuse hooks. Returns the cleaned entry (nil if dropped) and whether it was modified.
+func cleanMatcherEntry(entry interface{}) (interface{}, bool) {
+	entryMap, ok := entry.(map[string]interface{})
+	if !ok {
+		return entry, false
+	}
+
+	hooks, ok := extractHooksArray(entryMap)
+	if !ok {
+		return entry, false
+	}
+
+	remainingHooks, removed := filterFuseHooks(hooks)
+
+	if len(remainingHooks) > 0 {
+		entryMap["hooks"] = remainingHooks
+		return entryMap, removed
+	}
+	// Drop the entire matcher entry since it has no hooks left.
+	return nil, true
+}
+
+// extractHooksArray retrieves the hooks array from a matcher entry map.
+func extractHooksArray(entryMap map[string]interface{}) ([]interface{}, bool) {
+	hooksRaw, ok := entryMap["hooks"]
+	if !ok {
+		return nil, false
+	}
+	hooks, ok := hooksRaw.([]interface{})
+	return hooks, ok
+}
+
+// filterFuseHooks filters out fuse hook commands from a hooks array.
+// Returns the remaining hooks and whether any were removed.
+func filterFuseHooks(hooks []interface{}) ([]interface{}, bool) {
+	var remaining []interface{}
+	removed := false
+	for _, h := range hooks {
+		hMap, ok := h.(map[string]interface{})
+		if !ok {
+			remaining = append(remaining, h)
+			continue
+		}
+		cmd, _ := hMap["command"].(string)
+		if cmd == "fuse hook evaluate" {
+			removed = true
+			continue
+		}
+		remaining = append(remaining, h)
+	}
+	return remaining, removed
 }
 
 func uninstallCodex() error {

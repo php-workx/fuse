@@ -148,49 +148,58 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.Key()
 
 	// Always handle quit.
-	if key.Matches(k, keys.Quit) {
-		// Don't quit on 'q' while searching.
-		if m.activeView != viewEvents || !m.events.searching || k.Code == tea.KeyLeftCtrl+'c' {
-			m.quitting = true
-			return m, tea.Quit
-		}
+	if m.shouldQuit(k) {
+		m.quitting = true
+		return m, tea.Quit
 	}
 
 	// View switching (suppressed during search mode).
-	// Tab always cycles views. Left/Right toggles panels within approvals.
 	if m.activeView != viewEvents || !m.events.searching {
-		switch {
-		case key.Matches(k, keys.Tab):
-			m.activeView = (m.activeView + 1) % 3
-			m.fetchGen++
-			m.fetching = true
-			return m, m.fetchData()
-		case key.Matches(k, keys.ViewEvents):
-			if m.activeView != viewEvents {
-				m.activeView = viewEvents
-				m.fetchGen++
-				m.fetching = true
-				return m, m.fetchData()
-			}
-		case key.Matches(k, keys.ViewStats):
-			if m.activeView != viewStats {
-				m.activeView = viewStats
-				m.fetchGen++
-				m.fetching = true
-				return m, m.fetchData()
-			}
-		case key.Matches(k, keys.ViewAppr):
-			if m.activeView != viewApprovals {
-				m.activeView = viewApprovals
-				m.fetchGen++
-				m.fetching = true
-				return m, m.fetchData()
-			}
-		default:
+		if switched, cmd := m.handleViewSwitch(k); switched {
+			return m, cmd
 		}
 	}
 
 	// Delegate to active view.
+	return m.delegateToActiveView(msg)
+}
+
+// shouldQuit returns true if the key should trigger a quit.
+func (m Model) shouldQuit(k tea.Key) bool {
+	if !key.Matches(k, keys.Quit) {
+		return false
+	}
+	// Don't quit on 'q' while searching — only Ctrl+C quits.
+	return m.activeView != viewEvents || !m.events.searching || k.Code == tea.KeyLeftCtrl+'c'
+}
+
+// handleViewSwitch processes view-switching keys (Tab, 1/2/3).
+// Returns true and a fetch command if a view switch occurred.
+func (m *Model) handleViewSwitch(k tea.Key) (bool, tea.Cmd) {
+	var target viewMode
+	switch {
+	case key.Matches(k, keys.Tab):
+		target = (m.activeView + 1) % 3
+	case key.Matches(k, keys.ViewEvents):
+		target = viewEvents
+	case key.Matches(k, keys.ViewStats):
+		target = viewStats
+	case key.Matches(k, keys.ViewAppr):
+		target = viewApprovals
+	default:
+		return false, nil
+	}
+	if target == m.activeView && !key.Matches(k, keys.Tab) {
+		return false, nil
+	}
+	m.activeView = target
+	m.fetchGen++
+	m.fetching = true
+	return true, m.fetchData()
+}
+
+// delegateToActiveView forwards a message to the currently active view.
+func (m Model) delegateToActiveView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.activeView {
 	case viewEvents:

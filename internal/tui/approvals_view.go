@@ -21,6 +21,9 @@ const (
 	focusHistory
 )
 
+// timestampFormat is the standard timestamp format used for parsing approval timestamps.
+const timestampFormat = "2006-01-02T15:04:05.000Z"
+
 // ApprovalsModel renders pending approval requests and approval history.
 type ApprovalsModel struct {
 	// Pending requests from hook processes.
@@ -597,7 +600,7 @@ func approvalStatus(a *db.Approval, now time.Time) (string, lipgloss.Style) {
 		return "CONSUMED", styleDim
 	}
 	if a.ExpiresAt != nil {
-		exp, err := time.Parse("2006-01-02T15:04:05.000Z", *a.ExpiresAt)
+		exp, err := time.Parse(timestampFormat, *a.ExpiresAt)
 		if err != nil {
 			exp, err = time.Parse("2006-01-02T15:04:05Z", *a.ExpiresAt)
 		}
@@ -609,7 +612,7 @@ func approvalStatus(a *db.Approval, now time.Time) (string, lipgloss.Style) {
 }
 
 func formatApprovalTime(ts string) string {
-	t, err := time.Parse("2006-01-02T15:04:05.000Z", ts)
+	t, err := time.Parse(timestampFormat, ts)
 	if err != nil {
 		t, err = time.Parse("2006-01-02T15:04:05Z", ts)
 		if err != nil {
@@ -620,7 +623,7 @@ func formatApprovalTime(ts string) string {
 }
 
 func parseTime(ts string) time.Time {
-	t, err := time.Parse("2006-01-02T15:04:05.000Z", ts)
+	t, err := time.Parse(timestampFormat, ts)
 	if err != nil {
 		t, err = time.Parse("2006-01-02T15:04:05Z", ts)
 		if err != nil {

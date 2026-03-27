@@ -159,36 +159,14 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 
 	// Check for bash -c / sh -c pattern.
 	if (firstToken == "bash" || firstToken == "sh") && i+1 < len(tokens) {
-		innerCmd, ok := extractBashCInner(tokens, i)
-		if ok && !unbalancedQuotes {
-			// The outer command is the full remaining tokens joined.
-			result.Outer = strings.Join(tokens[i:], " ")
-			if depth < maxRecursionDepth {
-				innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
-				result.Inner = append(result.Inner, innerCmd)
-				result.Inner = append(result.Inner, innerResult.Inner...)
-				if innerResult.EscalateClassification {
-					result.EscalateClassification = true
-				}
-			} else {
-				result.Inner = append(result.Inner, innerCmd)
-			}
+		if handleBashC(tokens, i, depth, unbalancedQuotes, &result) {
 			return result
-		}
-		// bash/sh with -c detected but extraction failed: either the tokenizer
-		// extracted ok but quotes were unbalanced (ok==true, unbalancedQuotes==true),
-		// or -c was present but had no argument token (ok==false with -c in tokens).
-		if ok || containsDashC(tokens[i+1:]) {
-			result.ExtractionFailed = true
 		}
 	}
 
 	// Check for ssh pattern.
 	if firstToken == "ssh" && i+1 < len(tokens) {
-		remoteCmd, ok := extractSSHRemoteCommand(tokens, i)
-		if ok {
-			result.Outer = strings.Join(tokens[i:], " ")
-			result.Inner = append(result.Inner, remoteCmd)
+		if handleSSH(tokens, i, &result) {
 			return result
 		}
 	}
@@ -200,6 +178,45 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 	result.Outer = strings.Join(remaining, " ")
 
 	return result
+}
+
+// handleBashC processes bash/sh -c inner command extraction. Returns true if
+// the result was fully resolved (caller should return immediately).
+func handleBashC(tokens []string, i, depth int, unbalancedQuotes bool, result *ClassifiedCommand) bool {
+	innerCmd, ok := extractBashCInner(tokens, i)
+	if ok && !unbalancedQuotes {
+		result.Outer = strings.Join(tokens[i:], " ")
+		if depth < maxRecursionDepth {
+			innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
+			result.Inner = append(result.Inner, innerCmd)
+			result.Inner = append(result.Inner, innerResult.Inner...)
+			if innerResult.EscalateClassification {
+				result.EscalateClassification = true
+			}
+		} else {
+			result.Inner = append(result.Inner, innerCmd)
+		}
+		return true
+	}
+	// bash/sh with -c detected but extraction failed: either the tokenizer
+	// extracted ok but quotes were unbalanced (ok==true, unbalancedQuotes==true),
+	// or -c was present but had no argument token (ok==false with -c in tokens).
+	if ok || containsDashC(tokens[i+1:]) {
+		result.ExtractionFailed = true
+	}
+	return false
+}
+
+// handleSSH processes ssh remote command extraction. Returns true if
+// the result was fully resolved (caller should return immediately).
+func handleSSH(tokens []string, i int, result *ClassifiedCommand) bool {
+	remoteCmd, ok := extractSSHRemoteCommand(tokens, i)
+	if !ok {
+		return false
+	}
+	result.Outer = strings.Join(tokens[i:], " ")
+	result.Inner = append(result.Inner, remoteCmd)
+	return true
 }
 
 // tokenizeQuoteAware splits a command string into tokens, respecting single and double quotes. Also
@@ -382,6 +399,16 @@ func skipDoasArgs(tokens []string, i int) int {
 	return i
 }
 
+// envFlagSkipCount maps env flags to how many tokens to skip (flag + arguments).
+var envFlagSkipCount = map[string]int{
+	"-i":                   1,
+	"--ignore-environment": 1,
+	"-0":                   1,
+	"--null":               1,
+	"-u":                   2,
+	"--unset":              2,
+}
+
 // skipEnvArgs skips env flags and VAR=val assignments.
 // Sets result.SensitiveEnvAssignment if any skipped assignment is security-sensitive.
 func skipEnvArgs(tokens []string, i int, result *ClassifiedCommand) int {
@@ -391,19 +418,11 @@ func skipEnvArgs(tokens []string, i int, result *ClassifiedCommand) int {
 			i++
 			break
 		}
-		if t == "-i" || t == "--ignore-environment" || t == "-0" || t == "--null" {
-			i++
+		if skip, ok := envFlagSkipCount[t]; ok {
+			i += skip
 			continue
 		}
-		if t == "-u" || t == "--unset" {
-			i += 2
-			continue
-		}
-		// Skip VAR=val assignments (before the command)
-		if strings.Contains(t, "=") && !strings.HasPrefix(t, "-") && isEnvAssignment(t) {
-			if isSensitiveEnvAssignment(t) {
-				result.SensitiveEnvAssignment = true
-			}
+		if skipEnvVarAssignment(t, result) {
 			i++
 			continue
 		}
@@ -414,6 +433,18 @@ func skipEnvArgs(tokens []string, i int, result *ClassifiedCommand) int {
 		break
 	}
 	return i
+}
+
+// skipEnvVarAssignment checks if a token is a VAR=val assignment and records
+// sensitivity. Returns true if the token was consumed.
+func skipEnvVarAssignment(t string, result *ClassifiedCommand) bool {
+	if !strings.Contains(t, "=") || strings.HasPrefix(t, "-") || !isEnvAssignment(t) {
+		return false
+	}
+	if isSensitiveEnvAssignment(t) {
+		result.SensitiveEnvAssignment = true
+	}
+	return true
 }
 
 // isSensitiveEnvAssignment checks if a VAR=value token sets a security-sensitive variable.
@@ -669,6 +700,50 @@ func extractBashCInner(tokens []string, i int) (string, bool) {
 // maxInlineBodyBytes is the maximum size for extracted inline script bodies (50KB).
 const maxInlineBodyBytes = 50 * 1024
 
+// heredocCollector accumulates heredoc body parts during a syntax.Walk,
+// truncating when the total size exceeds maxInlineBodyBytes.
+type heredocCollector struct {
+	parts     []string
+	totalSize int
+	truncated bool
+}
+
+// visit is the syntax.Walk callback for heredoc extraction.
+func (c *heredocCollector) visit(node syntax.Node) bool {
+	stmt, ok := node.(*syntax.Stmt)
+	if !ok {
+		return true
+	}
+	for _, redir := range stmt.Redirs {
+		c.collectRedir(redir)
+	}
+	return true
+}
+
+// collectRedir processes a single redirect, extracting heredoc content if applicable.
+func (c *heredocCollector) collectRedir(redir *syntax.Redirect) {
+	if redir.Op != syntax.Hdoc && redir.Op != syntax.DashHdoc {
+		return
+	}
+	if redir.Hdoc == nil {
+		return
+	}
+	part := printNode(redir.Hdoc)
+	c.totalSize += len(part)
+	if c.totalSize > maxInlineBodyBytes {
+		excess := c.totalSize - maxInlineBodyBytes
+		if len(part) > excess {
+			part = part[:len(part)-excess]
+		} else {
+			part = ""
+		}
+		c.truncated = true
+	}
+	if part != "" {
+		c.parts = append(c.parts, part)
+	}
+}
+
 // extractHeredocBody uses the mvdan.cc/sh parser to extract heredoc bodies.
 // Returns (body, complete). When body > maxInlineBodyBytes, truncates and returns
 // complete=false. Skips heredocs attached to cat commands (string quoting, not
@@ -692,40 +767,11 @@ func extractHeredocBody(cmd string) (body string, complete bool) {
 		return "", false
 	}
 
-	var parts []string
-	totalSize := 0
+	collector := &heredocCollector{}
+	syntax.Walk(prog, collector.visit)
 
-	syntax.Walk(prog, func(node syntax.Node) bool {
-		stmt, ok := node.(*syntax.Stmt)
-		if !ok {
-			return true
-		}
-		for _, redir := range stmt.Redirs {
-			if redir.Op != syntax.Hdoc && redir.Op != syntax.DashHdoc {
-				continue
-			}
-			if redir.Hdoc == nil {
-				continue
-			}
-			part := printNode(redir.Hdoc)
-			totalSize += len(part)
-			if totalSize > maxInlineBodyBytes {
-				excess := totalSize - maxInlineBodyBytes
-				if len(part) > excess {
-					part = part[:len(part)-excess]
-				} else {
-					part = ""
-				}
-				complete = false
-			}
-			if part != "" {
-				parts = append(parts, part)
-			}
-		}
-		return true
-	})
-
-	body = strings.Join(parts, "\n")
+	body = strings.Join(collector.parts, "\n")
+	complete = !collector.truncated
 	return body, complete
 }
 
