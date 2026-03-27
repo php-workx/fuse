@@ -28,6 +28,9 @@ var unconditionalSafe = map[string]bool{
 	"id": true, "groups": true, "uptime": true, "free": true, "top": true,
 	"htop": true, "ps": true, "pgrep": true, "lsof": true, "lsblk": true,
 	"mount": true,
+	// Network diagnostics (read-only)
+	"ping": true, "traceroute": true, "tracepath": true, "mtr": true,
+	"host": true, "nslookup": true, "dig": true, "whois": true,
 	// Read-only help/docs
 	"man": true, "info": true, "tldr": true, "help": true,
 	// Linters / formatters / test runners (single-word basenames)
@@ -118,6 +121,12 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 		return isGcloudSafe(fields)
 	case "az":
 		return isAzSafe(fields)
+	case "sqlite3":
+		return isSqliteSafe(fields)
+	case "nc", "ncat", "netcat":
+		return isNcSafe(fields)
+	case "pip", "pip3":
+		return isPipSafe(fields)
 	default:
 		return false
 	}
@@ -166,6 +175,7 @@ var conditionalGitCheckers = map[string]func([]string) bool{
 	"checkout": gitCheckoutSafe,
 	"config":   gitConfigSafe,
 	"tag":      gitTagSafe,
+	"restore":  gitRestoreSafe,
 }
 
 // isGitSafe: git is safe with read-only subcommands.
@@ -578,4 +588,53 @@ func IsSafeBuildCleanup(cmd string) bool {
 		}
 	}
 	return true
+}
+
+// gitRestoreSafe: git restore is safe with --staged (unstages without discarding).
+// Without --staged, git restore discards working tree changes.
+func gitRestoreSafe(args []string) bool {
+	for _, a := range args {
+		if a == "--staged" || a == "-S" {
+			return true
+		}
+	}
+	return false
+}
+
+// isSqliteSafe: sqlite3 is safe with read-only queries (SELECT, PRAGMA, EXPLAIN).
+func isSqliteSafe(fields []string) bool {
+	cmd := strings.ToUpper(strings.Join(fields, " "))
+	destructive := []string{"DELETE", "DROP", "INSERT", "UPDATE", "ALTER", "ATTACH", "DETACH", "CREATE"}
+	for _, kw := range destructive {
+		if strings.Contains(cmd, kw) {
+			return false
+		}
+	}
+	return true
+}
+
+// isNcSafe: nc/ncat/netcat is safe in scan mode (-z).
+func isNcSafe(fields []string) bool {
+	for _, f := range fields {
+		if f == "-z" {
+			return true
+		}
+		if len(f) > 1 && f[0] == '-' && f[1] != '-' && strings.ContainsRune(f, 'z') {
+			return true
+		}
+	}
+	return false
+}
+
+// isPipSafe: pip is safe for read-only operations.
+func isPipSafe(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	safeSubs := map[string]bool{
+		"list": true, "show": true, "freeze": true, "check": true,
+		"search": true, "config": true, "debug": true, "cache": true,
+		"wheel": true,
+	}
+	return safeSubs[fields[1]]
 }

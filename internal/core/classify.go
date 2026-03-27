@@ -511,8 +511,16 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 		return inlineDecision, inlineReason, "", dryRunMatches, false
 	}
 
-	// Fallback: SAFE (default-SAFE per spec §6.5).
-	return DecisionSafe, "no matching rule (default safe)", "", dryRunMatches, false
+	// Check for explicitly safe inline patterns (e.g., python -c with safe imports).
+	// These were exempted from inline detection but are genuinely safe.
+	if isSafePythonInline(cmd) {
+		return DecisionSafe, "safe Python inline (read-only modules)", "", dryRunMatches, false
+	}
+
+	// Fallback: CAUTION for unknown commands (enables judge triage).
+	// Commands that reach this point matched no rule — safe, builtin, or dangerous.
+	// CAUTION logs the command for audit and allows the judge to review if enabled.
+	return DecisionCaution, "unknown command (no matching rule)", "", dryRunMatches, false
 }
 
 // Patterns that indicate dangerous inline Python code.

