@@ -166,6 +166,53 @@ func init() {
 		},
 
 		// ---------------------------------------------------------------
+		// §6.3.15b Sensitive local files (shell-level path protection)
+		// ---------------------------------------------------------------
+		{
+			ID:      "builtin:cred:cat-env",
+			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail|grep|strings)\s+.*\.env\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Reads .env file (may contain secrets)",
+			Predicate: func(cmd string) bool {
+				// Avoid matching .envrc (direnv), .env.example, or .env.template
+				return !strings.Contains(cmd, ".envrc") &&
+					!strings.Contains(cmd, ".env.example") &&
+					!strings.Contains(cmd, ".env.template") &&
+					!strings.Contains(cmd, ".env.sample")
+			},
+		},
+		{
+			ID:      "builtin:cred:cp-env",
+			Pattern: regexp.MustCompile(`\b(cp|mv|scp)\s+.*\.env\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Copies/moves .env file (may expose secrets)",
+		},
+		{
+			ID:      "builtin:cred:edit-git-hooks",
+			Pattern: regexp.MustCompile(`\b(sed\s+-i|tee|cat\s+.*>)\s*.*\.git/hooks/`),
+			Action:  core.DecisionCaution,
+			Reason:  "Edits git hooks (potential persistence mechanism)",
+		},
+		{
+			ID:      "builtin:cred:chmod-git-hooks",
+			Pattern: regexp.MustCompile(`\bchmod\s+.*\.git/hooks/`),
+			Action:  core.DecisionCaution,
+			Reason:  "Changes git hook permissions",
+		},
+		{
+			ID:      "builtin:cred:cat-gpg-key",
+			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*\.gnupg/`),
+			Action:  core.DecisionCaution,
+			Reason:  "Reads GPG key material",
+		},
+		{
+			ID:      "builtin:cred:cat-pypirc",
+			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*\.pypirc\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Reads PyPI credentials",
+		},
+
+		// ---------------------------------------------------------------
 		// §6.3.16 Data exfiltration & staging
 		// ---------------------------------------------------------------
 		{

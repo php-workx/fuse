@@ -21,6 +21,7 @@ internal/
   policy/              Built-in preset rules (git, aws, gcp, k8s, security) + user YAML policy evaluation
   adapters/            Runtime adapters:
     hook.go              Claude Code PreToolUse hook (classify-only)
+    native_file_policy.go  Claude native file tool (Read/Write/Edit/MultiEdit) path protection
     codexshell.go        Codex shell MCP server (concurrent JSON-RPC)
     mcpproxy.go          Generic MCP proxy with tool interception
     runner.go            Shell execution wrapper (run mode)
@@ -81,10 +82,14 @@ just run -- <args>  # Build and run with arguments
 ### Adapter Pattern
 
 Three runtime modes, all feeding the same classification core:
-- **Hook mode** (`fuse hook`) — Claude Code `PreToolUse` hook. Classify-only, no execution.
+- **Hook mode** (`fuse hook`) — Claude Code `PreToolUse` hook. Classifies Bash commands, MCP tool calls, and native file tools (Read/Write/Edit/MultiEdit when installed with `--secure`).
 - **Codex shell** (`fuse codex-shell`) — MCP server for Codex CLI. Concurrent goroutine-per-request.
 - **MCP proxy** (`fuse proxy`) — Generic MCP proxy managing downstream server lifecycle.
 - **Run mode** (`fuse run`) — Direct shell execution with TOCTOU checks and sanitization.
+
+### Secure Install
+
+`fuse install claude --secure` configures the hook plus recommended Claude safety settings and adds native file tool hook matchers. Run `fuse doctor --security` to validate the posture. See `docs/release/2026-03-12-security-posture.md` for the full protection model.
 
 ### Approval System
 

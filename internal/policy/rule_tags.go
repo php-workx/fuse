@@ -223,6 +223,14 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag
 		"builtin:cred:copy-creds":      {tags: []string{"credential"}, keywords: []string{"cp", "scp"}},
 		"builtin:cred:base64-key":      {tags: []string{"credential"}, keywords: []string{"base64"}},
 
+		// === Sensitive local files ===
+		"builtin:cred:cat-env":         {tags: []string{"credential"}, keywords: []string{".env", "cat"}},
+		"builtin:cred:cp-env":          {tags: []string{"credential"}, keywords: []string{".env", "cp", "mv", "scp"}},
+		"builtin:cred:edit-git-hooks":  {tags: []string{"persistence", "git"}, keywords: []string{".git/hooks"}},
+		"builtin:cred:chmod-git-hooks": {tags: []string{"persistence", "git"}, keywords: []string{".git/hooks", "chmod"}},
+		"builtin:cred:cat-gpg-key":     {tags: []string{"credential"}, keywords: []string{".gnupg", "cat"}},
+		"builtin:cred:cat-pypirc":      {tags: []string{"credential"}, keywords: []string{".pypirc", "cat"}},
+
 		// === Exfiltration ===
 		"builtin:exfil:curl-post":    {tags: []string{"exfiltration"}, keywords: []string{"curl"}},
 		"builtin:exfil:curl-upload":  {tags: []string{"exfiltration"}, keywords: []string{"curl"}},
