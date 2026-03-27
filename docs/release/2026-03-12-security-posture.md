@@ -23,16 +23,17 @@ Fuse is a local command firewall for AI coding agents. It classifies shell comma
 - DNS exfiltration via command substitution in DNS queries
 - Fail-closed states: oversized commands, unparseable shell syntax, missing referenced files
 - Sensitive environment variable injection (`LD_PRELOAD`, `PATH`, `DYLD_*`)
+- Sensitive credential reads such as GPG key material and `.pypirc`
 
 ### Logged and monitored (CAUTION) — auto-approved with audit trail
 
 - Inline script execution (`bash -c`, `python -c`, heredocs, pipe-to-interpreter)
 - Network commands with non-allowlisted hostnames
-- Credential file reads (`.pem`, `.key`, cloud configs, SSH keys, `.env` files)
+- Many credential-related file reads (`.pem`, `.key`, cloud configs, SSH keys, `.env` files)
 - Data upload flags on network commands
 - Git hook modifications, shell history reads
 - Package installations (`pip`, `npm -g`, `cargo install`)
-- Commands with shell variable destinations (`curl $URL`)
+- Commands with shell variable destinations that cannot be resolved safely
 - Non-canonical IP encodings in URLs
 
 ### Native file tool protections (Claude Read/Write/Edit/MultiEdit)
@@ -46,7 +47,7 @@ When installed with `--secure`, fuse hooks Claude's native file tools and blocks
 ### SSRF prevention
 
 - Cloud metadata endpoints blocked across all IP encodings: canonical, hex, octal, dotted-octal, short-form, mixed, decimal integer, IPv4-mapped IPv6
-- Blocked schemes: `file://`, `gopher://`, `ftp://`, `ldap://`, `smb://`
+- Blocked schemes include `file://`, `gopher://`, `dict://`, `ftp://`, `ftps://`, `scp://`, `ldap://`, and `smb://`
 - Private/internal IP ranges flagged (RFC1918, link-local, carrier-grade NAT)
 
 ### MCP tool classification
@@ -119,3 +120,4 @@ Event logs and LLM judge prompts are scrubbed for:
 - High-entropy base64 blobs (64+ characters)
 
 Scrubbing is applied to all persisted text fields (Command, Reason, Metadata, JudgeReasoning).
+Judge errors are scrubbed too before storage.
