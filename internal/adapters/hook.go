@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/php-workx/fuse/internal/approve"
@@ -526,66 +525,25 @@ func extractCommandFromResult(result *core.ClassifyResult) string {
 	return "(unknown command)"
 }
 
-// lastPolicyState tracks the last-seen policy state for change detection.
-// Only logs an event when the state changes (avoids flooding on every hook call).
-var lastPolicyState struct {
-	mu     sync.Mutex
-	hash   string // "none", "loaded:<hash>", "lkg:<hash>", "failed"
-	inited bool
-}
-
 // loadPolicyEvaluator loads user policy and returns a PolicyEvaluator.
 // Uses LKG fallback when policy.yaml has errors (loud warning via slog.Warn).
 // Returns a default evaluator if no policy file and no LKG exists.
-// Logs a policy lifecycle event to the DB when the policy state changes.
 func loadPolicyEvaluator() core.PolicyEvaluator {
 	policyPath := config.PolicyPath()
 	policyCfg, err := policy.LoadPolicyWithLKG(policyPath, 0)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			slog.Warn("policy load failed, using default (no user rules)", "path", policyPath, "error", err)
-			logPolicyChange("failed", policyPath, err.Error())
 		}
 		return policy.NewEvaluator(nil)
 	}
-	// Compute hash for change detection.
-	hash := fmt.Sprintf("loaded:%d-rules", len(policyCfg.Rules))
-	logPolicyChange(hash, policyPath, "")
 	return policy.NewEvaluator(policyCfg)
 }
 
-// logPolicyChange logs a policy lifecycle event if the state changed.
-func logPolicyChange(newState, path, errMsg string) {
-	lastPolicyState.mu.Lock()
-	changed := !lastPolicyState.inited || lastPolicyState.hash != newState
-	lastPolicyState.hash = newState
-	lastPolicyState.inited = true
-	lastPolicyState.mu.Unlock()
-
-	if !changed {
-		return
-	}
-
-	// Best-effort: log to DB if available.
-	database, dbErr := db.OpenDB(config.DBPath())
-	if dbErr != nil {
-		return
-	}
-	defer func() { _ = database.Close() }()
-
-	decision := "POLICY_LOADED"
-	reason := newState
-	if errMsg != "" {
-		decision = "POLICY_LOAD_FAILED"
-		reason = errMsg
-	}
-	_ = database.LogEvent(&db.EventRecord{
-		Command:  path,
-		Decision: decision,
-		Reason:   reason,
-		Source:   "policy",
-	})
-}
+// Policy lifecycle events (POLICY_LOADED/POLICY_LOAD_FAILED) are logged by
+// long-running adapters (codex-shell, proxy) via their own mechanisms.
+// Hook mode is short-lived (one process per invocation), so logging policy
+// state on every call just produces noise in the event log.
 
 // openDBAndSecret opens the SQLite database and reads the HMAC secret.
 func openDBAndSecret() (*db.DB, []byte, error) {
