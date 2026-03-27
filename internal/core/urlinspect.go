@@ -392,7 +392,7 @@ func decodeNonCanonicalIP(host string) net.IP {
 	case 4:
 		for i, p := range parts {
 			val, ok := parseOctet(p, 0xFF)
-			if !ok {
+			if !ok || val > 0xFF {
 				return nil
 			}
 			octets[i] = byte(val)
@@ -401,13 +401,13 @@ func decodeNonCanonicalIP(host string) net.IP {
 		// a.b.c → a.b.0.c (c fills last 2 bytes if > 255)
 		for i := 0; i < 2; i++ {
 			val, ok := parseOctet(parts[i], 0xFF)
-			if !ok {
+			if !ok || val > 0xFF {
 				return nil
 			}
 			octets[i] = byte(val)
 		}
 		val, ok := parseOctet(parts[2], 0xFFFF)
-		if !ok {
+		if !ok || val > 0xFFFF {
 			return nil
 		}
 		octets[2] = byte(val >> 8)
@@ -415,12 +415,12 @@ func decodeNonCanonicalIP(host string) net.IP {
 	case 2:
 		// a.b → a.0.0.b (b fills last 3 bytes if > 255)
 		val0, ok := parseOctet(parts[0], 0xFF)
-		if !ok {
+		if !ok || val0 > 0xFF {
 			return nil
 		}
 		octets[0] = byte(val0)
 		val1, ok := parseOctet(parts[1], 0xFFFFFF)
-		if !ok {
+		if !ok || val1 > 0xFFFFFF {
 			return nil
 		}
 		octets[1] = byte(val1 >> 16)
