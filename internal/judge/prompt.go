@@ -71,15 +71,15 @@ type PromptContext struct {
 func BuildUserPrompt(ctx PromptContext) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Command: %s\n", db.ScrubCredentials(ctx.Command))
-	fmt.Fprintf(&b, "Working directory: %s\n", ctx.Cwd)
+	fmt.Fprintf(&b, "Working directory: %s\n", db.ScrubCredentials(ctx.Cwd))
 	if ctx.WorkspaceRoot != "" {
-		fmt.Fprintf(&b, "Workspace: %s\n", ctx.WorkspaceRoot)
+		fmt.Fprintf(&b, "Workspace: %s\n", db.ScrubCredentials(ctx.WorkspaceRoot))
 	}
 	fmt.Fprintf(&b, "Current classification: %s\n", ctx.CurrentDecision)
-	fmt.Fprintf(&b, "Rule: %s\n", ctx.RuleID)
-	fmt.Fprintf(&b, "Reason: %s\n", ctx.Reason)
+	fmt.Fprintf(&b, "Rule: %s\n", db.ScrubCredentials(ctx.RuleID))
+	fmt.Fprintf(&b, "Reason: %s\n", db.ScrubCredentials(ctx.Reason))
 	if ctx.ToolName != "" && ctx.ToolName != "Bash" {
-		fmt.Fprintf(&b, "Tool: %s\n", ctx.ToolName)
+		fmt.Fprintf(&b, "Tool: %s\n", db.ScrubCredentials(ctx.ToolName))
 	}
 	if ctx.ScriptContents != "" {
 		scrubbed := db.ScrubCredentials(ctx.ScriptContents)

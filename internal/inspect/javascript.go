@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+type jsScanState struct {
+	inBlock           bool
+	inSingle          bool
+	inDouble          bool
+	inTemplate        bool
+	templateExprDepth int
+	escaped           bool
+}
+
 // jsPattern pairs a compiled regex with its signal category and raw pattern string.
 type jsPattern struct {
 	re       *regexp.Regexp
@@ -60,101 +69,115 @@ func init() {
 func stripBlockComment(line string, inBlock bool) (string, bool) {
 	var out strings.Builder
 	out.Grow(len(line))
-
-	inSingle := false
-	inDouble := false
-	inTemplate := false
-	templateExprDepth := 0
-	escaped := false
+	state := jsScanState{inBlock: inBlock}
 
 	for i := 0; i < len(line); i++ {
 		ch := line[i]
 
-		if inBlock {
+		if state.inBlock {
 			if ch == '*' && i+1 < len(line) && line[i+1] == '/' {
-				inBlock = false
+				state.inBlock = false
 				i++
 			}
 			continue
 		}
 
-		if inSingle || inDouble {
-			out.WriteByte(ch)
-			if escaped {
-				escaped = false
-				continue
-			}
-			if ch == '\\' {
-				escaped = true
-				continue
-			}
-			if inSingle && ch == '\'' {
-				inSingle = false
-			}
-			if inDouble && ch == '"' {
-				inDouble = false
-			}
+		if scanQuotedLiteral(&state, &out, ch) {
 			continue
 		}
 
-		if inTemplate {
-			out.WriteByte(ch)
-			if escaped {
-				escaped = false
-				continue
-			}
-			if ch == '\\' {
-				escaped = true
-				continue
-			}
-			if templateExprDepth == 0 {
-				if ch == '`' {
-					inTemplate = false
-					continue
-				}
-				if ch == '$' && i+1 < len(line) && line[i+1] == '{' {
-					templateExprDepth = 1
-					out.WriteByte(line[i+1])
-					i++
-				}
-				continue
-			}
-			switch ch {
-			case '{':
-				templateExprDepth++
-			case '}':
-				templateExprDepth--
-			case '\'':
-				inSingle = true
-			case '"':
-				inDouble = true
-			}
+		if scanTemplateLiteral(&state, &out, ch, line, &i) {
 			continue
 		}
 
-		switch ch {
-		case '\'':
-			inSingle = true
-			out.WriteByte(ch)
-		case '"':
-			inDouble = true
-			out.WriteByte(ch)
-		case '`':
-			inTemplate = true
-			out.WriteByte(ch)
-		case '/':
-			if i+1 < len(line) && line[i+1] == '*' {
-				inBlock = true
-				i++
-				continue
-			}
-			out.WriteByte(ch)
-		default:
-			out.WriteByte(ch)
+		if beginBlockComment(&state, ch, line, &i) {
+			continue
 		}
+		beginLiteral(&state, ch)
+		out.WriteByte(ch)
 	}
 
-	return out.String(), inBlock
+	return out.String(), state.inBlock
+}
+
+func scanQuotedLiteral(state *jsScanState, out *strings.Builder, ch byte) bool {
+	if !state.inSingle && !state.inDouble {
+		return false
+	}
+	out.WriteByte(ch)
+	if state.escaped {
+		state.escaped = false
+		return true
+	}
+	if ch == '\\' {
+		state.escaped = true
+		return true
+	}
+	if state.inSingle && ch == '\'' {
+		state.inSingle = false
+	}
+	if state.inDouble && ch == '"' {
+		state.inDouble = false
+	}
+	return true
+}
+
+func scanTemplateLiteral(state *jsScanState, out *strings.Builder, ch byte, line string, i *int) bool {
+	if !state.inTemplate {
+		return false
+	}
+	out.WriteByte(ch)
+	if state.escaped {
+		state.escaped = false
+		return true
+	}
+	if ch == '\\' {
+		state.escaped = true
+		return true
+	}
+	if state.templateExprDepth == 0 {
+		if ch == '`' {
+			state.inTemplate = false
+			return true
+		}
+		if ch == '$' && *i+1 < len(line) && line[*i+1] == '{' {
+			state.templateExprDepth = 1
+			out.WriteByte(line[*i+1])
+			*i++
+		}
+		return true
+	}
+	switch ch {
+	case '{':
+		state.templateExprDepth++
+	case '}':
+		state.templateExprDepth--
+	case '\'':
+		state.inSingle = true
+	case '"':
+		state.inDouble = true
+	}
+	return true
+}
+
+func beginBlockComment(state *jsScanState, ch byte, line string, i *int) bool {
+	if ch == '/' && *i+1 < len(line) && line[*i+1] == '*' {
+		state.inBlock = true
+		*i++
+		return true
+	}
+	return false
+}
+
+func beginLiteral(state *jsScanState, ch byte) {
+	switch ch {
+	case '\'':
+		state.inSingle = true
+	case '"':
+		state.inDouble = true
+	case '`':
+		state.inTemplate = true
+	}
 }
 
 // ScanJavaScript scans JavaScript/TypeScript source content for dangerous patterns.

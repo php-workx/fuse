@@ -114,8 +114,12 @@ not a bug.
   timestamp, agent, workspace. Pruned to 10,000 rows by default (configurable
   via `max_event_log_rows` in config.yaml).
 - **Approval records**: stored in the same database, scoped by lifetime.
-- **No PII collection**: fuse stores command and decision history locally for
-  visibility and approvals. Use `fuse events` to inspect what was recorded.
+- **Local storage only**: fuse keeps recorded commands and decisions only on
+  your machine for visibility and approvals. It does not transmit them
+  externally. Command contents may still include PII such as filenames, email
+  addresses, or other user-supplied text. Use `fuse events` to inspect what was
+  recorded, and avoid putting sensitive PII directly into commands if that
+  matters for your workflow.
 - **Credential scrubbing**: a broad set of credential patterns is redacted
   before storage and before sending content to the LLM judge, including common
   API keys, auth headers, cookies, PEM blocks, URL userinfo, and similar secret

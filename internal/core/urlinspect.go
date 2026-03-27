@@ -93,6 +93,8 @@ var (
 // markers survive extraction and the URL is classified conservatively.
 var reURLPatternExpanded = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'"]+`)
 
+var _ = reURLPattern
+
 // SetTrustedDomains configures the set of trusted domains for URL inspection.
 // Domains are matched after lowercasing and trailing-dot trimming.
 // Safe for concurrent use.
