@@ -169,7 +169,7 @@ func LoadPolicyWithLKG(path string, maxAge time.Duration) (*PolicyConfig, error)
 		// File exists but unreadable — try LKG.
 		slog.Warn("policy file unreadable, attempting LKG fallback",
 			"path", path, "error", readErr)
-		lkgCfg, lkgErr := loadLKG(lkgPath, maxAge)
+		lkgCfg, lkgErr := LoadLKG(lkgPath, maxAge)
 		if lkgErr != nil {
 			return nil, fmt.Errorf("policy unreadable (%w) and no valid LKG fallback (%w)", readErr, lkgErr)
 		}
@@ -191,7 +191,7 @@ func LoadPolicyWithLKG(path string, maxAge time.Duration) (*PolicyConfig, error)
 	slog.Warn("policy.yaml load failed, attempting LKG fallback",
 		"path", path, "error", err)
 
-	lkgCfg, lkgErr := loadLKG(lkgPath, maxAge)
+	lkgCfg, lkgErr := LoadLKG(lkgPath, maxAge)
 	if lkgErr != nil {
 		return nil, fmt.Errorf("policy load failed (%w) and no valid LKG fallback (%w)", err, lkgErr)
 	}
@@ -243,8 +243,8 @@ func saveLKGBytes(data []byte, sourcePath, lkgPath string) error {
 	return os.Rename(tmpPath, lkgPath)
 }
 
-// loadLKG loads and validates an LKG policy file.
-func loadLKG(lkgPath string, maxAge time.Duration) (*PolicyConfig, error) {
+// LoadLKG loads and validates an LKG policy file, including freshness checks.
+func LoadLKG(lkgPath string, maxAge time.Duration) (*PolicyConfig, error) {
 	// Check freshness first to fail fast before reading content.
 	info, err := os.Stat(lkgPath)
 	if err != nil {

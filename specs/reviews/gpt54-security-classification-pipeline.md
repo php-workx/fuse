@@ -62,7 +62,7 @@ ID: IMPL-001
   mcpclassify.go:36, internal/core/mcpclassify.go:117
   Why this is a problem: MCP tool names are normalized in one adapter and not in another. The
   proxy path feeds full mcp__server__action names into prefix matching, so destructive actions
-  miss delete_/remove_/destroy_ and drop to fallback CAUTION. Separately, nested args deeper than
+  miss `delete_`/`remove_`/`destroy_` and `drop` to fallback CAUTION. Separately, nested args deeper than
   32 levels are silently ignored.
   Exploit or failure scenario: I verified ClassifyMCPTool("mcp__server__delete_items", {"id":"1"})
   => CAUTION, while delete_items => APPROVAL. I also verified a nested arg blob with rm -rf / at

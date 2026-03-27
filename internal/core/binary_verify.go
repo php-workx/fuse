@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -50,27 +50,23 @@ var interpreterBasenames = map[string]bool{
 	"ruby": true, "perl": true,
 }
 
-// IsInterpreter returns true if the basename is a tracked interpreter.
-func IsInterpreter(basename string) bool {
-	return interpreterBasenames[basename]
+// IsInterpreter returns true if the basename or path resolves to a tracked interpreter.
+func IsInterpreter(command string) bool {
+	return interpreterBasenames[filepath.Base(command)]
 }
 
-// Verify checks the binary identity for an interpreter command.
+// Verify checks the binary identity for a resolved interpreter path.
 // Returns (decision, reason). Empty decision means TOFU passed or not applicable.
 // Uses stat-based caching: only re-hashes when mtime or size changes.
-func (t *BinaryTOFU) Verify(basename string) (Decision, string) {
+func (t *BinaryTOFU) Verify(resolvedPath string) (Decision, string) {
 	isInterpreter := t.isInterpreter
 	if isInterpreter == nil {
 		isInterpreter = IsInterpreter
 	}
-	if !isInterpreter(basename) {
+	if !isInterpreter(resolvedPath) {
 		return "", ""
 	}
-
-	resolvedPath, err := exec.LookPath(basename)
-	if err != nil {
-		return "", "" // can't resolve — not a TOFU concern
-	}
+	basename := filepath.Base(resolvedPath)
 
 	for {
 		info, err := os.Stat(resolvedPath)
@@ -146,11 +142,11 @@ var (
 )
 
 // VerifyBinaryIdentity checks the interpreter binary using the session-scoped TOFU.
-func VerifyBinaryIdentity(basename string) (Decision, string) {
+func VerifyBinaryIdentity(resolvedPath string) (Decision, string) {
 	defaultTOFUMu.Lock()
 	t := defaultTOFU
 	defaultTOFUMu.Unlock()
-	return t.Verify(basename)
+	return t.Verify(resolvedPath)
 }
 
 // ResetBinaryTOFU clears the session cache. Safe for concurrent use.

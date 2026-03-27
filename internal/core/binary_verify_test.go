@@ -2,14 +2,20 @@ package core
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestBinaryTOFU_FirstUseAllowed(t *testing.T) {
 	tofu := NewBinaryTOFU()
 	// "sh" should exist on all Unix systems
-	d, _ := tofu.Verify("sh")
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("LookPath(sh): %v", err)
+	}
+	d, _ := tofu.Verify(shPath)
 	if d != "" {
 		t.Errorf("first use should be allowed, got %s", d)
 	}
@@ -17,18 +23,22 @@ func TestBinaryTOFU_FirstUseAllowed(t *testing.T) {
 
 func TestBinaryTOFU_SecondUseSameHash(t *testing.T) {
 	tofu := NewBinaryTOFU()
-	d1, _ := tofu.Verify("sh")
+	shPath, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("LookPath(sh): %v", err)
+	}
+	d1, _ := tofu.Verify(shPath)
 	if d1 != "" {
 		t.Fatalf("first use failed: %s", d1)
 	}
-	d2, _ := tofu.Verify("sh")
+	d2, _ := tofu.Verify(shPath)
 	if d2 != "" {
 		t.Errorf("second use with same binary should pass, got %s", d2)
 	}
 }
 
 func TestBinaryTOFU_HashChangeBlocked(t *testing.T) {
-	tofu := NewBinaryTOFUWithInterpreter(func(name string) bool { return name == "fakeinterp" })
+	tofu := NewBinaryTOFUWithInterpreter(func(name string) bool { return filepath.Base(name) == "fakeinterp" })
 
 	// Create a fake "interpreter" in a temp dir
 	dir := t.TempDir()
@@ -37,22 +47,25 @@ func TestBinaryTOFU_HashChangeBlocked(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Add to PATH so LookPath finds it
-	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-
 	// First use — trusted
-	d1, _ := tofu.Verify("fakeinterp")
+	d1, _ := tofu.Verify(fakeBin)
 	if d1 != "" {
 		t.Fatalf("first use should pass, got %s", d1)
 	}
+
+	time.Sleep(1100 * time.Millisecond)
 
 	// Modify the binary
 	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\necho EVIL"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	newTime := time.Now().Add(time.Second)
+	if err := os.Chtimes(fakeBin, newTime, newTime); err != nil {
+		t.Fatalf("Chtimes(fakeinterp): %v", err)
+	}
 
 	// Second use — should be BLOCKED
-	d2, reason := tofu.Verify("fakeinterp")
+	d2, reason := tofu.Verify(fakeBin)
 	if d2 != DecisionBlocked {
 		t.Errorf("expected BLOCKED after binary change, got %s (reason: %s)", d2, reason)
 	}
@@ -60,7 +73,11 @@ func TestBinaryTOFU_HashChangeBlocked(t *testing.T) {
 
 func TestBinaryTOFU_NonInterpreterSkipped(t *testing.T) {
 	tofu := NewBinaryTOFU()
-	d, _ := tofu.Verify("ls")
+	lsPath, err := exec.LookPath("ls")
+	if err != nil {
+		t.Fatalf("LookPath(ls): %v", err)
+	}
+	d, _ := tofu.Verify(lsPath)
 	if d != "" {
 		t.Errorf("non-interpreter should be skipped, got %s", d)
 	}

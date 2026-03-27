@@ -271,12 +271,14 @@ func applyDowngradeGuards(verdict *Verdict, result *core.ClassifyResult, promptC
 	if result.FailClosed {
 		verdict.Applied = false
 		verdict.Reasoning += " (downgrade blocked: fail-closed classification)"
+		return
 	}
 
 	// Guard 2: ExtractionIncomplete results are never downgradeable (SEC-009).
 	if promptCtx.ExtractionIncomplete {
 		verdict.Applied = false
 		verdict.Reasoning += " (downgrade blocked: extraction incomplete)"
+		return
 	}
 
 	// Guard 3: APPROVAL may downgrade to CAUTION but never to SAFE.

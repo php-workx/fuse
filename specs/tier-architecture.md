@@ -82,7 +82,7 @@ Add to `config.yaml`:
 # Profile: relaxed | balanced | strict | custom
 # Sets defaults for judge and caution behavior.
 # Individual settings below override the profile defaults.
-profile: balanced
+profile: relaxed
 
 # Judge configuration (defaults set by profile)
 llm_judge:
@@ -121,7 +121,7 @@ Note on Strict: the judge does NOT review APPROVAL in strict mode. APPROVAL alwa
 3. Override with any explicitly set values in config
 4. Explicit settings always win over profile defaults
 
-This means a user can start with `profile: balanced` and override just `caution_fallback: approve` for belt-and-suspenders behavior.
+This means a user can start with `profile: relaxed` and override just `caution_fallback: approve` for belt-and-suspenders behavior.
 
 ### 4.4 Config Struct Changes
 
@@ -433,7 +433,7 @@ func EffectiveDecision(
 
 Add profile selection to `fuse install`:
 
-```
+```text
 $ fuse install claude
 
 How should fuse handle suspicious commands?
@@ -462,7 +462,7 @@ After profile selection, write `~/.fuse/config/config.yaml`:
 # Fuse configuration
 # Profile sets defaults. Override individual settings below.
 # See: https://github.com/php-workx/fuse/docs/profiles.md
-profile: balanced
+profile: relaxed
 
 # LLM Judge settings (set by profile, customize as needed)
 # llm_judge:

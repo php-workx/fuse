@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -480,8 +481,10 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	basename := extractBasename(cmd)
 
 	// Step 6.5: Binary identity TOFU — verify interpreter binaries haven't changed mid-session.
-	if tofuD, tofuR := VerifyBinaryIdentity(basename); tofuD != "" {
-		return tofuD, tofuR, "", nil, false
+	if resolvedPath, ok := resolveCommandPath(cmd); ok {
+		if tofuD, tofuR := VerifyBinaryIdentity(resolvedPath); tofuD != "" {
+			return tofuD, tofuR, "", nil, false
+		}
 	}
 
 	knownSafe := KnownSafeVerbs[basename]
@@ -506,6 +509,23 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 
 	// Layer 4-6 and inline fallbacks.
 	return classifyFallbackLayers(cmd, basename, fileInspection, inlineDecision, inlineReason, dryRunMatches)
+}
+
+func resolveCommandPath(cmd string) (string, bool) {
+	classified := ClassificationNormalize(cmd)
+	fields := strings.Fields(classified.Outer)
+	if len(fields) == 0 {
+		return "", false
+	}
+	command := fields[0]
+	if strings.Contains(command, "/") {
+		return command, true
+	}
+	resolvedPath, err := exec.LookPath(command)
+	if err != nil {
+		return "", false
+	}
+	return resolvedPath, true
 }
 
 // inspectReferencedFile detects and inspects a file referenced in the command.

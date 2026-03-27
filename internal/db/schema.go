@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// currentSchemaVersion is the latest schema version applied by migrate.
-const currentSchemaVersion = "6"
-
 // migrationStep maps a schema version to its migration function.
 type migrationStep struct {
 	fromVersion string // version that triggers this migration ("" for initial)
@@ -26,35 +23,42 @@ var migrationSteps = []migrationStep{
 	{"5", applyV6, "6"},
 }
 
+func currentSchemaVersion() string {
+	if len(migrationSteps) == 0 {
+		return ""
+	}
+	return migrationSteps[len(migrationSteps)-1].toVersion
+}
+
 // migrate creates or updates the database schema.
 func migrate(db *sql.DB) error {
 	if err := ensureSchemaMeta(db); err != nil {
-		return err
+		return fmt.Errorf("bootstrap schema_meta: %w", err)
 	}
 
 	version, err := readSchemaVersion(db)
 	if err != nil {
-		return err
+		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version == currentSchemaVersion {
+	if version == currentSchemaVersion() {
 		return nil
 	}
 
-	for version != currentSchemaVersion {
+	for version != currentSchemaVersion() {
 		applied := false
 		for _, step := range migrationSteps {
 			if version != step.fromVersion {
 				continue
 			}
 			if err := step.apply(db); err != nil {
-				return err
+				return fmt.Errorf("migrate schema %s->%s: %w", step.fromVersion, step.toVersion, err)
 			}
 			version = step.toVersion
 			applied = true
 			break
 		}
 		if !applied {
-			return fmt.Errorf("unknown schema version %q: no migration path to %s", version, currentSchemaVersion)
+			return fmt.Errorf("unknown schema version %q: no migration path to %s", version, currentSchemaVersion())
 		}
 	}
 	return nil

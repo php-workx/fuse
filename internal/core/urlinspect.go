@@ -89,6 +89,10 @@ var (
 	trustedDomainsMu sync.RWMutex
 )
 
+// reURLPatternExpanded keeps backticks in the matched URL so shell expansion
+// markers survive extraction and the URL is classified conservatively.
+var reURLPatternExpanded = regexp.MustCompile(`[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'"]+`)
+
 // SetTrustedDomains configures the set of trusted domains for URL inspection.
 // Domains are matched after lowercasing and trailing-dot trimming.
 // Safe for concurrent use.
@@ -173,7 +177,7 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 	}
 
 	// Extract and inspect literal URLs.
-	urls := reURLPattern.FindAllString(cmd, -1)
+	urls := reURLPatternExpanded.FindAllString(cmd, -1)
 	for _, rawURL := range urls {
 		if d, reason := inspectSingleURL(rawURL, cmd, false); d != "" {
 			escalate(d, reason)
@@ -320,7 +324,7 @@ func InspectURLsInArgs(args map[string]interface{}) (Decision, string) {
 	bestReason := ""
 
 	for _, v := range values {
-		urls := reURLPattern.FindAllString(v, -1)
+		urls := reURLPatternExpanded.FindAllString(v, -1)
 		for _, rawURL := range urls {
 			d, reason := inspectSingleURL(rawURL, v, true) // MCP args are always network context
 			if d != "" && (bestDecision == "" || DecisionSeverity(d) > DecisionSeverity(bestDecision)) {
@@ -545,7 +549,8 @@ func hasDataUploadFlag(cmd string) bool {
 
 // extractCmdBasename extracts the basename of the first token in a command.
 func extractCmdBasename(cmd string) string {
-	fields := strings.Fields(cmd)
+	classified := ClassificationNormalize(cmd)
+	fields := strings.Fields(classified.Outer)
 	if len(fields) == 0 {
 		return ""
 	}

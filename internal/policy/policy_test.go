@@ -9,7 +9,7 @@ import (
 	"github.com/php-workx/fuse/internal/core"
 )
 
-// TestHardcoded_AllCompile verifies that all 22 hardcoded patterns are valid
+// TestHardcoded_AllCompile verifies that all 21 hardcoded patterns are valid
 // compiled regexes (they use MustCompile, so this also confirms the count).
 func TestHardcoded_AllCompile(t *testing.T) {
 	if len(HardcodedBlocked) != 21 {

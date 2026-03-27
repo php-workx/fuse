@@ -58,31 +58,103 @@ func init() {
 // It returns the effective line content after stripping commented portions,
 // and whether we are still inside a block comment.
 func stripBlockComment(line string, inBlock bool) (string, bool) {
-	if inBlock {
-		idx := strings.Index(line, "*/")
-		if idx < 0 {
-			return "", true
+	var out strings.Builder
+	out.Grow(len(line))
+
+	inSingle := false
+	inDouble := false
+	inTemplate := false
+	templateExprDepth := 0
+	escaped := false
+
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+
+		if inBlock {
+			if ch == '*' && i+1 < len(line) && line[i+1] == '/' {
+				inBlock = false
+				i++
+			}
+			continue
 		}
-		// Found closing — process the remainder for further comment markers.
-		return stripBlockComment(line[idx+2:], false)
+
+		if inSingle || inDouble {
+			out.WriteByte(ch)
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if inSingle && ch == '\'' {
+				inSingle = false
+			}
+			if inDouble && ch == '"' {
+				inDouble = false
+			}
+			continue
+		}
+
+		if inTemplate {
+			out.WriteByte(ch)
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if templateExprDepth == 0 {
+				if ch == '`' {
+					inTemplate = false
+					continue
+				}
+				if ch == '$' && i+1 < len(line) && line[i+1] == '{' {
+					templateExprDepth = 1
+					out.WriteByte(line[i+1])
+					i++
+				}
+				continue
+			}
+			switch ch {
+			case '{':
+				templateExprDepth++
+			case '}':
+				templateExprDepth--
+			case '\'':
+				inSingle = true
+			case '"':
+				inDouble = true
+			}
+			continue
+		}
+
+		switch ch {
+		case '\'':
+			inSingle = true
+			out.WriteByte(ch)
+		case '"':
+			inDouble = true
+			out.WriteByte(ch)
+		case '`':
+			inTemplate = true
+			out.WriteByte(ch)
+		case '/':
+			if i+1 < len(line) && line[i+1] == '*' {
+				inBlock = true
+				i++
+				continue
+			}
+			out.WriteByte(ch)
+		default:
+			out.WriteByte(ch)
+		}
 	}
 
-	start := strings.Index(line, "/*")
-	if start < 0 {
-		return line, false
-	}
-
-	// Check for closing on the same line (inline block comment).
-	rest := line[start+2:]
-	end := strings.Index(rest, "*/")
-	if end >= 0 {
-		// Strip the inline comment and process the remainder for more comments.
-		stripped := line[:start] + rest[end+2:]
-		return stripBlockComment(stripped, false)
-	}
-
-	// Multi-line block comment starts here; keep only content before it.
-	return line[:start], true
+	return out.String(), inBlock
 }
 
 // ScanJavaScript scans JavaScript/TypeScript source content for dangerous patterns.

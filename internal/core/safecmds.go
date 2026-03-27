@@ -593,25 +593,48 @@ func IsSafeBuildCleanup(cmd string) bool {
 // gitRestoreSafe: git restore is safe with --staged (unstages without discarding).
 // Without --staged, git restore discards working tree changes.
 func gitRestoreSafe(args []string) bool {
+	sawStaged := false
 	for _, a := range args {
-		if a == "--staged" || a == "-S" {
-			return true
+		if a == "--worktree" {
+			return false
+		}
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a[1:], 'W') {
+			return false
+		}
+		if a == "--staged" {
+			sawStaged = true
+			continue
+		}
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a[1:], 'S') {
+			sawStaged = true
 		}
 	}
-	return false
+	return sawStaged
 }
 
 // isSqliteSafe: sqlite3 is safe with read-only queries (SELECT, PRAGMA, EXPLAIN).
 // Blocks destructive SQL keywords and sqlite3 dot-commands that execute code.
 func isSqliteSafe(fields []string) bool {
 	destructive := []string{"DELETE", "DROP", "INSERT", "UPDATE", "ALTER", "ATTACH", "DETACH", "CREATE"}
-	for _, f := range fields {
-		upper := strings.ToUpper(f)
-		for _, kw := range destructive {
-			if strings.Contains(upper, kw) {
-				return false
-			}
+	normalized := strings.NewReplacer(
+		`""`, "",
+		`''`, "",
+		"``", "",
+		`"`, "",
+		`'`, "",
+		"`", "",
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"\r", "",
+	).Replace(strings.Join(fields, " "))
+	normalized = strings.ToUpper(normalized)
+	for _, kw := range destructive {
+		if strings.Contains(normalized, kw) {
+			return false
 		}
+	}
+	for _, f := range fields {
 		lower := strings.ToLower(f)
 		if strings.ContainsAny(f, ";`") {
 			return false
@@ -632,6 +655,19 @@ func isSqliteSafe(fields []string) bool {
 
 // isNcSafe: nc/ncat/netcat is safe in scan mode (-z).
 func isNcSafe(fields []string) bool {
+	for _, f := range fields {
+		lower := strings.ToLower(f)
+		if lower == "--exec" || lower == "--sh-exec" || lower == "--lua-exec" ||
+			strings.HasPrefix(lower, "--exec=") || strings.HasPrefix(lower, "--sh-exec=") || strings.HasPrefix(lower, "--lua-exec=") {
+			return false
+		}
+		if len(f) > 1 && f[0] == '-' && f[1] != '-' {
+			flags := f[1:]
+			if strings.ContainsRune(flags, 'e') || strings.ContainsRune(flags, 'c') {
+				return false
+			}
+		}
+	}
 	for _, f := range fields {
 		if f == "-z" {
 			return true

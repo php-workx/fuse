@@ -227,7 +227,7 @@ func processDownstreamMessage(payload []byte, requests *inFlightRequests) (bool,
 		return true, nil // forward raw payload
 	}
 	if !isJSONRPCResponseEnvelope(msg) {
-		slog.Warn("forwarding malformed downstream JSON-RPC envelope", "message", msg)
+		slog.Warn("received malformed downstream JSON-RPC envelope", "message", msg)
 	}
 
 	_, hasID := msg["id"]

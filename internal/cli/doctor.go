@@ -209,7 +209,8 @@ func printPolicyRecommendations() {
 	fmt.Printf("Based on your approval history, consider adding these rules to policy.yaml:\n\n")
 	for _, r := range recs {
 		regexVal := "^" + escapePattern(r.Command) + "$"
-		fmt.Printf("  # Approved %d times: %s\n", r.Count, truncateCmd(r.Command, 60))
+		comment := strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace(r.Command)
+		fmt.Printf("  # Approved %d times: %s\n", r.Count, truncateCmd(comment, 60))
 		fmt.Printf("  - pattern: %s\n", strconv.Quote(regexVal))
 		fmt.Printf("    action: %s\n", strconv.Quote("allow"))
 		fmt.Printf("    reason: %s\n\n", strconv.Quote(fmt.Sprintf("approved %d times", r.Count)))
@@ -352,35 +353,18 @@ func checkPolicyYAML() checkResult {
 		}
 	}
 
-	// Primary failed — try loading LKG to verify it's actually usable.
-	lkgPath := policyPath + ".lkg"
-	lkgInfo, lkgStatErr := os.Stat(lkgPath)
-	if lkgStatErr != nil {
-		return checkResult{
-			name:   checkNamePolicyYAML,
-			status: "FAIL",
-			detail: fmt.Sprintf("error loading policy: %v (no LKG fallback available)", err),
-		}
-	}
-	// Check freshness — must match runtime behavior (default 7 days).
-	if time.Since(lkgInfo.ModTime()) > 7*24*time.Hour {
-		return checkResult{
-			name:   checkNamePolicyYAML,
-			status: "FAIL",
-			detail: fmt.Sprintf("error loading policy: %v (LKG fallback is stale: %s)", err, lkgInfo.ModTime().Format("2006-01-02")),
-		}
-	}
-	lkgCfg, lkgErr := policy.LoadPolicy(lkgPath)
+	// Primary failed — try loading LKG with the same validation used at runtime.
+	lkgCfg, lkgErr := policy.LoadLKG(policyPath+".lkg", 7*24*time.Hour)
 	if lkgErr != nil {
 		return checkResult{
 			name:   checkNamePolicyYAML,
 			status: "FAIL",
-			detail: fmt.Sprintf("error loading policy: %v (LKG fallback also unusable)", err),
+			detail: fmt.Sprintf("error loading policy: %v (LKG fallback unavailable: %v)", err, lkgErr),
 		}
 	}
 
 	// LKG is valid and loadable — report warning with active policy hash.
-	lkgHash := computePolicyHash(lkgPath)
+	lkgHash := computePolicyHash(policyPath + ".lkg")
 	return checkResult{
 		name:   checkNamePolicyYAML,
 		status: "WARN",

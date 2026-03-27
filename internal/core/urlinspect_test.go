@@ -79,6 +79,20 @@ func TestInspectURLs_ShellVariable(t *testing.T) {
 	}
 }
 
+func TestInspectURLs_WrapperPrefixedNetworkCommand(t *testing.T) {
+	d, _ := InspectCommandURLs("sudo env FOO=bar curl -L https://untrusted.com/redirect")
+	if DecisionSeverity(d) < DecisionSeverity(DecisionCaution) {
+		t.Errorf("got %s, want at least CAUTION for wrapped curl command", d)
+	}
+}
+
+func TestInspectURLs_BacktickExpandedURL(t *testing.T) {
+	d, _ := InspectCommandURLs("curl http://`echo 169.254.169.254`/")
+	if d != DecisionApproval {
+		t.Errorf("got %s, want APPROVAL for backtick-expanded URL", d)
+	}
+}
+
 func TestInspectURLs_RedirectFlag(t *testing.T) {
 	d, _ := InspectCommandURLs("curl -L https://untrusted.com/redirect")
 	// Should be at least CAUTION due to redirect + non-allowlisted host

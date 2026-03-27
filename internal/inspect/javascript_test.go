@@ -87,6 +87,18 @@ console.log(x);
 	}
 }
 
+func TestScanJavaScript_IgnoresCommentMarkersInStrings(t *testing.T) {
+	content := []byte(`const s = "/* not a comment */";
+const t = '/* still not a comment */';
+const u = ` + "`/* template literal */`" + `;
+console.log(s, t, u);
+`)
+	signals := ScanJavaScript(content)
+	if len(signals) != 0 {
+		t.Fatalf("expected 0 signals when /* appears only inside literals, got %v", signals)
+	}
+}
+
 func TestScanJavaScript_SpecificPatterns(t *testing.T) {
 	tests := []struct {
 		name     string

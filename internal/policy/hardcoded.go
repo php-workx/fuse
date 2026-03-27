@@ -40,8 +40,8 @@ var catastrophicPaths = map[string]bool{
 // Matches: /*, ~, ~/, $VAR, or a top-level system directory.
 // Does NOT match specific subdirectories like /tmp/mydir or /var/folders/xxx.
 func isCatastrophicRmTarget(cmd string) bool {
-	// Always block: /*, ~, ~/*, $VAR
-	if strings.Contains(cmd, " /*") || strings.Contains(cmd, " ~") || strings.Contains(cmd, " $") {
+	// Always block: /* and variable-expanded targets.
+	if strings.Contains(cmd, " /*") || strings.Contains(cmd, " $") {
 		return true
 	}
 	// Check each argument after flags for catastrophic paths.
@@ -52,6 +52,10 @@ func isCatastrophicRmTarget(cmd string) bool {
 		}
 		if f == "rm" {
 			continue
+		}
+		// Treat tilde expansion as targeting the user's home directory.
+		if f == "~" || strings.HasPrefix(f, "~/") {
+			return true
 		}
 		// Clean the path and check against catastrophic list.
 		clean := strings.TrimRight(f, "/")

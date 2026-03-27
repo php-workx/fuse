@@ -233,7 +233,7 @@ func hasRedirectFlags(cmd string) bool
 3. Strip `userinfo@` (SEC-010: also scrub before logging)
 4. Check scheme against `BlockedSchemes` → BLOCKED
 5. If host contains shell expansion tokens (`$`, `` ` ``) → APPROVAL (SEC-001)
-6. If host is non-canonical numeric (hex/octal/decimal) → CAUTION (SEC-002)
+6. If host is non-canonical numeric (hex/octal/decimal/short-form), decode it to a canonical IP first
 7. Resolve host against `BlockedHostnames` → BLOCKED
 8. Parse IP with `net.ParseIP`, check `BlockedIPRanges` → BLOCKED
 9. Check `CautionIPRanges` (RFC1918, carrier-grade NAT) → CAUTION
@@ -249,8 +249,6 @@ func hasRedirectFlags(cmd string) bool
   nested JSON to find URL strings.
 
 **Known v2 limitations (documented, deferred to v3):**
-- Full numeric IP canonicalization (hex `0xA9FEA9FE`, decimal `2852039166`, octal).
-  Non-canonical numeric hosts are flagged as CAUTION in v2, fully normalized in v3.
 - DNS-based bypasses (`attacker.com` → `169.254.169.254`). Unknown hostnames in network
   commands get CAUTION (not SAFE), which limits blast radius. Bounded DNS resolution in v3.
 - HTTP redirect chain following. Redirect flags are flagged as CAUTION. Runtime redirect
@@ -369,7 +367,7 @@ type PolicyLKGConfig struct {
 - `TestInspectURLs_RedirectFlag`: `curl -L https://untrusted.com` → CAUTION (SEC-003)
 - `TestInspectURLs_WgetFollowsRedirects`: `wget https://untrusted.com` → CAUTION (SEC-003)
 - `TestInspectURLs_UnknownHostname`: `curl https://random-host.tld/` → CAUTION (SEC-004)
-- `TestInspectURLs_NonCanonicalIP`: `curl http://0x7f000001/` → CAUTION (SEC-002)
+- `TestInspectURLs_NonCanonicalIP`: `curl http://0x7f000001/` → BLOCKED (loopback via decoded IP)
 - `TestInspectURLs_BlockedScheme_File`: `curl file:///etc/passwd` → BLOCKED (SEC-011)
 - `TestInspectURLs_BlockedScheme_Gopher`: `curl gopher://127.0.0.1:25/` → BLOCKED (SEC-011)
 - `TestInspectURLs_TrailingDotHostname`: `curl http://metadata.google.internal./` → BLOCKED

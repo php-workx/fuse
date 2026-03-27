@@ -175,6 +175,36 @@ func TestConditionallySafe_Git(t *testing.T) {
 	}
 }
 
+func TestGitRestoreSafe_WorktreeWins(t *testing.T) {
+	if gitRestoreSafe([]string{"--staged", "--worktree"}) {
+		t.Fatal("expected git restore --staged --worktree to be unsafe")
+	}
+	if gitRestoreSafe([]string{"-SW"}) {
+		t.Fatal("expected bundled -SW flags to be unsafe")
+	}
+	if !gitRestoreSafe([]string{"--staged"}) {
+		t.Fatal("expected git restore --staged to be safe")
+	}
+}
+
+func TestIsSqliteSafe_NormalizesQuotedKeywords(t *testing.T) {
+	if isSqliteSafe([]string{"sqlite3", "db.sqlite", `"DR""OP"`, `"TABLE"`, `"users"`}) {
+		t.Fatal("expected quoted DROP fragments to be unsafe")
+	}
+}
+
+func TestIsNcSafe_RejectsExecFlags(t *testing.T) {
+	if isNcSafe([]string{"nc", "-ze", "example.com", "80"}) {
+		t.Fatal("expected combined exec flags to make nc unsafe")
+	}
+	if isNcSafe([]string{"nc", "--exec=/bin/sh", "-z", "example.com", "80"}) {
+		t.Fatal("expected long exec flags to make nc unsafe")
+	}
+	if !isNcSafe([]string{"nc", "-zv", "example.com", "80"}) {
+		t.Fatal("expected scan-only nc flags to remain safe")
+	}
+}
+
 func TestConditionallySafe_Terraform(t *testing.T) {
 	tests := []struct {
 		name     string
