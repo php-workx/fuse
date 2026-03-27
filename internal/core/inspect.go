@@ -68,6 +68,11 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 		Exists: true,
 		Size:   info.Size(),
 	}
+	if !info.Mode().IsRegular() {
+		result.Decision = DecisionApproval
+		result.Reason = "non-regular file requires approval"
+		return result, nil
+	}
 
 	// 3. Check size and determine if truncation is needed.
 	truncated := info.Size() > maxBytes
@@ -197,8 +202,8 @@ func DetectReferencedFile(subCommand string) string {
 		return ""
 	}
 
-	parts, _ := tokenizeQuoteAware(subCommand)
-	if len(parts) == 0 {
+	parts, unbalancedQuotes := tokenizeQuoteAware(subCommand)
+	if unbalancedQuotes || len(parts) == 0 {
 		return ""
 	}
 

@@ -9,7 +9,7 @@ import (
 )
 
 // SplitCompoundCommand splits a display-normalized command string into
-// individual sub-commands by parsing it with a POSIX shell parser and
+// individual sub-commands by parsing it with a Bash-compatible shell parser and
 // walking the AST. It splits on ;, &&, ||, |, and newline-separated
 // commands (respecting quoting).
 //

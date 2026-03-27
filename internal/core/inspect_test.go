@@ -149,6 +149,25 @@ func TestInspectFile_MissingFile(t *testing.T) {
 	}
 }
 
+func TestInspectFile_NonRegularFileRequiresApproval(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	result, err := InspectFile(path, DefaultMaxBytes)
+	if err != nil {
+		t.Fatalf("InspectFile returned error for directory: %v", err)
+	}
+	if result.Decision != DecisionApproval {
+		t.Fatalf("InspectFile decision = %s, want %s", result.Decision, DecisionApproval)
+	}
+	if result.Reason != "non-regular file requires approval" {
+		t.Fatalf("InspectFile reason = %q, want non-regular approval reason", result.Reason)
+	}
+}
+
 func TestInspectFile_UnsupportedType(t *testing.T) {
 	// Create a temporary .rb file.
 	tmpDir := t.TempDir()

@@ -767,7 +767,7 @@ func TestExtractHeredocBody_Empty(t *testing.T) {
 
 func TestExtractHeredocBody_CatPipedToBash(t *testing.T) {
 	// cat <<EOF | bash — NOT string quoting, body should be extracted for analysis
-	body, complete := extractHeredocBody("cat <<EOF\nrm -rf /\nEOF")
+	body, complete := extractHeredocBody("cat <<EOF | bash\nrm -rf /\nEOF")
 	if !complete {
 		t.Error("expected complete=true")
 	}

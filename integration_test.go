@@ -887,10 +887,7 @@ func TestIntegration_V2_HeredocVariableAssembly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("classify error: %v", err)
 	}
-	// Document current behavior — variable assembly evades line-by-line detection.
-	// This is a known limitation. The test logs the result.
-	t.Logf("variable assembly result: %s (reason: %s) — known limitation of line-by-line classification",
-		result.Decision, result.Reason)
+	t.Skipf("known limitation: variable assembly still evades line-by-line classification; observed %s (%s)", result.Decision, result.Reason)
 }
 
 // ---------------------------------------------------------------------------

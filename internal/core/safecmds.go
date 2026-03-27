@@ -604,20 +604,26 @@ func gitRestoreSafe(args []string) bool {
 // isSqliteSafe: sqlite3 is safe with read-only queries (SELECT, PRAGMA, EXPLAIN).
 // Blocks destructive SQL keywords and sqlite3 dot-commands that execute code.
 func isSqliteSafe(fields []string) bool {
-	cmd := strings.ToUpper(strings.Join(fields, " "))
 	destructive := []string{"DELETE", "DROP", "INSERT", "UPDATE", "ALTER", "ATTACH", "DETACH", "CREATE"}
-	for _, kw := range destructive {
-		if strings.Contains(cmd, kw) {
+	for _, f := range fields {
+		upper := strings.ToUpper(f)
+		for _, kw := range destructive {
+			if strings.Contains(upper, kw) {
+				return false
+			}
+		}
+		lower := strings.ToLower(f)
+		if strings.ContainsAny(f, ";`") {
 			return false
 		}
-	}
-	// Block sqlite3 dot-commands that can execute arbitrary code or modify files.
-	for _, f := range fields {
-		lower := strings.ToLower(f)
-		if strings.HasPrefix(lower, ".shell") || strings.HasPrefix(lower, ".system") ||
-			strings.HasPrefix(lower, ".output") || strings.HasPrefix(lower, ".import") ||
-			strings.HasPrefix(lower, ".load") || strings.HasPrefix(lower, ".save") ||
-			strings.HasPrefix(lower, ".restore") || strings.HasPrefix(lower, ".clone") {
+		if strings.HasPrefix(lower, ".") {
+			return false
+		}
+		if strings.Contains(lower, ".shell") || strings.Contains(lower, ".system") ||
+			strings.Contains(lower, ".output") || strings.Contains(lower, ".import") ||
+			strings.Contains(lower, ".load") || strings.Contains(lower, ".read") ||
+			strings.Contains(lower, ".save") || strings.Contains(lower, ".restore") ||
+			strings.Contains(lower, ".clone") {
 			return false
 		}
 	}

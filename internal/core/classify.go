@@ -433,6 +433,12 @@ func applyInlineClassification(sub *SubCommandResult, subCmd string, evaluator P
 			sub.RuleID = "" // inline analysis wins — clear stale RuleID
 		}
 	}
+	if !inlineResult.complete && DecisionSeverity(sub.Decision) < DecisionSeverity(DecisionApproval) {
+		sub.Decision = DecisionApproval
+		sub.Reason = "inline script extraction incomplete (fail-closed)"
+		sub.RuleID = ""
+		sub.FailClosed = true
+	}
 }
 
 // applyURLInspection scans the command and inline body for URL-based threats.
