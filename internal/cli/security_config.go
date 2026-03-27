@@ -97,26 +97,7 @@ func claudeSecurityWarnings(settings map[string]interface{}) ([]string, error) {
 	if !sandboxPresent {
 		warnings = append(warnings, "sandbox block is missing")
 	}
-	sandboxEnabled, err := readBool("sandbox.enabled", sandbox["enabled"])
-	if err != nil {
-		warnings = append(warnings, err.Error())
-	} else if !sandboxEnabled {
-		warnings = append(warnings, "sandbox.enabled should be true")
-	}
-
-	autoAllow, err := readBool("sandbox.autoAllowBashIfSandboxed", sandbox["autoAllowBashIfSandboxed"])
-	if err != nil {
-		warnings = append(warnings, err.Error())
-	} else if !autoAllow {
-		warnings = append(warnings, "sandbox.autoAllowBashIfSandboxed should be true")
-	}
-
-	allowUnsandboxed, err := readBool("sandbox.allowUnsandboxedCommands", sandbox["allowUnsandboxedCommands"])
-	if err != nil {
-		warnings = append(warnings, err.Error())
-	} else if !allowUnsandboxed {
-		warnings = append(warnings, "sandbox.allowUnsandboxedCommands should be true")
-	}
+	warnings = appendSandboxBoolWarnings(warnings, sandbox)
 
 	if !filesystemPresent {
 		warnings = append(warnings, "sandbox.filesystem block is missing")
@@ -128,6 +109,28 @@ func claudeSecurityWarnings(settings map[string]interface{}) ([]string, error) {
 	warnings = append(warnings, denyWriteWarnings...)
 
 	return warnings, nil
+}
+
+// appendSandboxBoolWarnings checks sandbox boolean settings and appends any warnings.
+func appendSandboxBoolWarnings(warnings []string, sandbox map[string]interface{}) []string {
+	checks := []struct {
+		path     string
+		key      string
+		expected string
+	}{
+		{"sandbox.enabled", "enabled", "sandbox.enabled should be true"},
+		{"sandbox.autoAllowBashIfSandboxed", "autoAllowBashIfSandboxed", "sandbox.autoAllowBashIfSandboxed should be true"},
+		{"sandbox.allowUnsandboxedCommands", "allowUnsandboxedCommands", "sandbox.allowUnsandboxedCommands should be true"},
+	}
+	for _, c := range checks {
+		val, err := readBool(c.path, sandbox[c.key])
+		if err != nil {
+			warnings = append(warnings, err.Error())
+		} else if !val {
+			warnings = append(warnings, c.expected)
+		}
+	}
+	return warnings
 }
 
 func codexSecurityWarnings(configText string) []string {

@@ -146,7 +146,7 @@ var sensitiveEnvPrefixes = []string{
 // Classify runs the full classification pipeline on a shell request (§5.2).
 // The evaluator parameter provides policy rule evaluation; pass nil to skip
 // all policy/builtin rule checks (only safe-command heuristics will apply).
-func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, error) { //nolint:funlen // classify pipeline
+func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, error) {
 	result := &ClassifyResult{}
 
 	// Step 1: Input validation — oversized commands are fail-closed APPROVAL.
@@ -165,54 +165,59 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	// Step 3: Compound command splitting.
 	subCmds, err := SplitCompoundCommand(displayNorm)
 	if err != nil {
-		if evaluator != nil {
-			classified := ClassificationNormalize(displayNorm)
-			candidates := []string{displayNorm, classified.Outer}
-			candidates = append(candidates, classified.Inner...)
-			for _, candidate := range candidates {
-				if candidate == "" {
-					continue
-				}
-				if d, reason := evaluator.EvaluateHardcoded(candidate); d != "" {
-					result.Decision = d
-					result.Reason = reason
-					result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
-					return result, nil
-				}
+		return classifyCompoundSplitError(result, displayNorm, req.Source, evaluator, err)
+	}
+
+	// Classify all sub-commands and aggregate results.
+	fileHashes := classifyAllSubCommands(result, subCmds, evaluator, req.Cwd)
+
+	// Apply compound-level modifiers.
+	applyCompoundModifiers(result, subCmds, displayNorm)
+
+	// Step 12: Compute decision key.
+	combinedHash := strings.Join(fileHashes, ":")
+	result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, combinedHash)
+
+	return result, nil
+}
+
+// classifyCompoundSplitError handles the case where compound splitting fails.
+// Checks hardcoded rules before falling back to fail-closed APPROVAL.
+func classifyCompoundSplitError(result *ClassifyResult, displayNorm, source string, evaluator PolicyEvaluator, splitErr error) (*ClassifyResult, error) {
+	if evaluator != nil {
+		classified := ClassificationNormalize(displayNorm)
+		candidates := []string{displayNorm, classified.Outer}
+		candidates = append(candidates, classified.Inner...)
+		for _, candidate := range candidates {
+			if candidate == "" {
+				continue
+			}
+			if d, reason := evaluator.EvaluateHardcoded(candidate); d != "" {
+				result.Decision = d
+				result.Reason = reason
+				result.DecisionKey = ComputeDecisionKey(source, displayNorm, "")
+				return result, nil
 			}
 		}
-		// Fail-closed: treat as APPROVAL.
-		result.Decision = DecisionApproval
-		result.Reason = fmt.Sprintf("compound split error (fail-closed): %v", err)
-		result.FailClosed = true
-		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
-		return result, nil
 	}
+	// Fail-closed: treat as APPROVAL.
+	result.Decision = DecisionApproval
+	result.Reason = fmt.Sprintf("compound split error (fail-closed): %v", splitErr)
+	result.FailClosed = true
+	result.DecisionKey = ComputeDecisionKey(source, displayNorm, "")
+	return result, nil
+}
 
-	// §5.2 step 3: If compound block contains cwd-changing builtins,
-	// note it for CAUTION but classify each sub-command normally.
-	// The per-sub-command pipeline catches dangerous commands regardless of cwd.
-	hasCwdChange := len(subCmds) > 1 && ContainsCwdChange(subCmds)
-
-	// Preserve inline pipe-script detection across compound splitting. A pipeline
-	// like "curl ... | bash" is structurally split into safe-looking sub-commands,
-	// so the compound form must still contribute its higher-risk decision.
-	compoundInlineDecision := Decision("")
-	compoundInlineReason := ""
-	if len(subCmds) > 1 && strings.Contains(displayNorm, "|") {
-		compoundInlineDecision, compoundInlineReason = detectInlineScript(displayNorm)
-	}
-
-	// Accumulate file hashes for decision key.
-	var fileHashes []string
-
-	// Step 4-11: Per sub-command classification.
+// classifyAllSubCommands classifies each sub-command and aggregates results into the overall result.
+// Returns collected file hashes for decision key computation.
+func classifyAllSubCommands(result *ClassifyResult, subCmds []string, evaluator PolicyEvaluator, cwd string) []string {
 	overallDecision := DecisionSafe
 	overallReason := "all sub-commands safe"
 	overallRuleID := ""
+	var fileHashes []string
 
 	for _, subCmd := range subCmds {
-		sub := classifySubCommand(subCmd, evaluator, req.Cwd)
+		sub := classifySubCommand(subCmd, evaluator, cwd)
 		result.SubResults = append(result.SubResults, sub)
 		result.DryRunMatches = append(result.DryRunMatches, sub.DryRunMatches...)
 
@@ -222,66 +227,76 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 			overallReason = sub.Reason
 			overallRuleID = sub.RuleID
 		}
-		// OR across all sub-commands: if ANY sub-command was tag-override-enforced,
-		// the overall result should be enforced even in dryrun mode.
-		if sub.TagOverrideEnforced {
-			result.TagOverrideEnforced = true
-		}
 
-		// Aggregate inline bodies from sub-results.
-		if sub.InlineBody != "" {
-			if result.InlineBody == "" {
-				result.InlineBody = sub.InlineBody
-			} else {
-				result.InlineBody += "\n---\n" + sub.InlineBody
-			}
-		}
-		if sub.ExtractionIncomplete {
-			result.ExtractionIncomplete = true
-		}
-		if sub.FailClosed {
-			result.FailClosed = true
-		}
-
-		// Gather file hash if a referenced file was inspected.
-		refFile := DetectReferencedFile(subCmd)
-		if refFile != "" {
-			resolvedPath := resolvePath(refFile, req.Cwd)
-			inspection, inspErr := InspectFile(resolvedPath, DefaultMaxBytes)
-			if inspErr == nil && inspection != nil && inspection.Hash != "" {
-				fileHashes = append(fileHashes, inspection.Hash)
-			}
-		}
+		mergeSubCommandFlags(result, &sub)
+		fileHashes = collectFileHash(fileHashes, subCmd, cwd)
 	}
 
 	result.Decision = overallDecision
 	result.Reason = overallReason
 	result.RuleID = overallRuleID
 
-	if compoundInlineDecision != "" {
-		combined := MaxDecision(result.Decision, compoundInlineDecision)
-		if combined != result.Decision {
-			result.Decision = combined
-			result.Reason = compoundInlineReason
-			result.RuleID = ""
+	return fileHashes
+}
+
+// mergeSubCommandFlags merges boolean flags and inline bodies from a sub-command into the overall result.
+func mergeSubCommandFlags(result *ClassifyResult, sub *SubCommandResult) {
+	if sub.TagOverrideEnforced {
+		result.TagOverrideEnforced = true
+	}
+	if sub.InlineBody != "" {
+		if result.InlineBody == "" {
+			result.InlineBody = sub.InlineBody
+		} else {
+			result.InlineBody += "\n---\n" + sub.InlineBody
+		}
+	}
+	if sub.ExtractionIncomplete {
+		result.ExtractionIncomplete = true
+	}
+	if sub.FailClosed {
+		result.FailClosed = true
+	}
+}
+
+// collectFileHash gathers a file hash if a referenced file was inspected.
+func collectFileHash(fileHashes []string, subCmd, cwd string) []string {
+	refFile := DetectReferencedFile(subCmd)
+	if refFile == "" {
+		return fileHashes
+	}
+	resolvedPath := resolvePath(refFile, cwd)
+	inspection, inspErr := InspectFile(resolvedPath, DefaultMaxBytes)
+	if inspErr == nil && inspection != nil && inspection.Hash != "" {
+		fileHashes = append(fileHashes, inspection.Hash)
+	}
+	return fileHashes
+}
+
+// applyCompoundModifiers applies compound-level modifiers: inline pipe-script
+// detection and CWD change escalation.
+func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string) {
+	// Preserve inline pipe-script detection across compound splitting.
+	if len(subCmds) > 1 && strings.Contains(displayNorm, "|") {
+		compoundInlineDecision, compoundInlineReason := detectInlineScript(displayNorm)
+		if compoundInlineDecision != "" {
+			combined := MaxDecision(result.Decision, compoundInlineDecision)
+			if combined != result.Decision {
+				result.Decision = combined
+				result.Reason = compoundInlineReason
+				result.RuleID = ""
+			}
 		}
 	}
 
 	// CWD change in compound: escalate to at least CAUTION for logging/judge triage.
-	// The per-sub-command classification already caught any dangerous commands.
-	if hasCwdChange {
+	if len(subCmds) > 1 && ContainsCwdChange(subCmds) {
 		combined := MaxDecision(result.Decision, DecisionCaution)
 		if combined != result.Decision {
 			result.Decision = combined
 			result.Reason = "compound command contains cwd-changing builtin (cd/pushd/popd)"
 		}
 	}
-
-	// Step 12: Compute decision key.
-	combinedHash := strings.Join(fileHashes, ":")
-	result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, combinedHash)
-
-	return result, nil
 }
 
 // classifySubCommand runs the per-sub-command pipeline (steps 4-11).
@@ -466,60 +481,104 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	knownSafe := KnownSafeVerbs[basename]
 	sanitized := SanitizeForClassification(cmd, knownSafe)
 
-	// Step 7: Detect referenced files.
-	refFile := DetectReferencedFile(cmd)
-
-	// Step 8: Inspect referenced file if detected.
-	var fileInspection *FileInspection
-	if refFile != "" {
-		resolvedPath := resolvePath(refFile, cwd)
-		inspection, err := InspectFile(resolvedPath, DefaultMaxBytes)
-		if err == nil {
-			fileInspection = inspection
-		}
-	}
+	// Step 7-8: Detect and inspect referenced files.
+	fileInspection := inspectReferencedFile(cmd, cwd)
 
 	// Check for security-sensitive env var assignments at start of command.
 	if hasSensitiveEnvPrefix(cmd) {
 		return DecisionApproval, "security-sensitive environment variable assignment", "", nil, false
 	}
 
-	// Hardcoded rules must see the unsanitized normalized command so inline
-	// self-protection patterns are not masked by quote sanitization.
+	// Evaluate policy rules (hardcoded, user, builtins).
 	if evaluator != nil {
-		if d, reason := evaluator.EvaluateHardcoded(cmd); d != "" {
-			return d, reason, "", nil, false
+		pr := evaluatePolicyRules(cmd, sanitized, evaluator, fileInspection, dryRunMatches)
+		if pr.matched {
+			return pr.decision, pr.reason, pr.ruleID, pr.dryRunMatches, pr.tagOverrideEnforced
 		}
+		dryRunMatches = pr.dryRunMatches
 	}
 
-	// Step 9: Evaluate rules in order (most restrictive wins within each layer).
+	// Layer 4-6 and inline fallbacks.
+	return classifyFallbackLayers(cmd, basename, fileInspection, inlineDecision, inlineReason, dryRunMatches)
+}
 
-	if evaluator != nil {
-		// Layer 2: User policy rules (always evaluated first — user can override anything).
-		if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
-			return d, reason, "", nil, false
-		}
+// inspectReferencedFile detects and inspects a file referenced in the command.
+func inspectReferencedFile(cmd, cwd string) *FileInspection {
+	refFile := DetectReferencedFile(cmd)
+	if refFile == "" {
+		return nil
+	}
+	resolvedPath := resolvePath(refFile, cwd)
+	inspection, err := InspectFile(resolvedPath, DefaultMaxBytes)
+	if err != nil {
+		return nil
+	}
+	return inspection
+}
 
-		// Layer 2.5: Safe build directory cleanup (rm -rf node_modules, dist, etc.)
-		// After user rules so project policies can still block/approve if needed.
-		if IsSafeBuildCleanup(cmd) {
-			return DecisionSafe, "safe build directory cleanup", "", nil, false
-		}
+// evaluatePolicyRules runs hardcoded, user, and builtin rule evaluation.
+// Returns matched=true if a terminal decision was reached and the caller should return.
+// The dryRunMatches slice may be updated with new matches.
+// policyResult holds the outcome of evaluating policy rules against a command.
+type policyResult struct {
+	decision            Decision
+	reason              string
+	ruleID              string
+	dryRunMatches       []BuiltinMatch
+	tagOverrideEnforced bool
+	matched             bool // true if a policy rule matched (caller should stop)
+}
 
-		// Layer 3: Built-in preset rules.
-		if match := evaluator.EvaluateBuiltins(sanitized); match != nil {
-			if match.DryRun {
-				// Per-tag dryrun: collect for logging but don't enforce.
-				dryRunMatches = append(dryRunMatches, *match)
-			} else {
-				if isInspectTriggerRule(match.RuleID) && fileInspection != nil {
-					return fileInspection.Decision, fileInspection.Reason, "", dryRunMatches, match.TagOverrideEnforced
+func evaluatePolicyRules(
+	cmd, sanitized string,
+	evaluator PolicyEvaluator,
+	fileInspection *FileInspection,
+	dryRunMatches []BuiltinMatch,
+) policyResult {
+	// Hardcoded rules must see the unsanitized normalized command.
+	if d, reason := evaluator.EvaluateHardcoded(cmd); d != "" {
+		return policyResult{decision: d, reason: reason, matched: true}
+	}
+
+	// Layer 2: User policy rules.
+	if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
+		return policyResult{decision: d, reason: reason, matched: true}
+	}
+
+	// Layer 2.5: Safe build directory cleanup.
+	if IsSafeBuildCleanup(cmd) {
+		return policyResult{decision: DecisionSafe, reason: "safe build directory cleanup", matched: true}
+	}
+
+	// Layer 3: Built-in preset rules.
+	if match := evaluator.EvaluateBuiltins(sanitized); match != nil {
+		if match.DryRun {
+			dryRunMatches = append(dryRunMatches, *match)
+		} else {
+			if isInspectTriggerRule(match.RuleID) && fileInspection != nil {
+				return policyResult{
+					decision: fileInspection.Decision, reason: fileInspection.Reason,
+					dryRunMatches: dryRunMatches, tagOverrideEnforced: match.TagOverrideEnforced, matched: true,
 				}
-				return match.Decision, match.Reason, match.RuleID, dryRunMatches, match.TagOverrideEnforced
+			}
+			return policyResult{
+				decision: match.Decision, reason: match.Reason, ruleID: match.RuleID,
+				dryRunMatches: dryRunMatches, tagOverrideEnforced: match.TagOverrideEnforced, matched: true,
 			}
 		}
 	}
 
+	return policyResult{dryRunMatches: dryRunMatches}
+}
+
+// classifyFallbackLayers checks safe commands, file inspection, inline scripts,
+// and produces the fallback CAUTION decision.
+func classifyFallbackLayers(
+	cmd, basename string,
+	fileInspection *FileInspection,
+	inlineDecision Decision, inlineReason string,
+	dryRunMatches []BuiltinMatch,
+) (Decision, string, string, []BuiltinMatch, bool) {
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
 		return DecisionSafe, "unconditionally safe command", "", dryRunMatches, false
@@ -541,14 +600,11 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	}
 
 	// Check for explicitly safe inline patterns (e.g., python -c with safe imports).
-	// These were exempted from inline detection but are genuinely safe.
 	if isSafePythonInline(cmd) {
 		return DecisionSafe, "safe Python inline (read-only modules)", "", dryRunMatches, false
 	}
 
 	// Fallback: CAUTION for unknown commands (enables judge triage).
-	// Commands that reach this point matched no rule — safe, builtin, or dangerous.
-	// CAUTION logs the command for audit and allows the judge to review if enabled.
 	return DecisionCaution, "unknown command (no matching rule)", "", dryRunMatches, false
 }
 

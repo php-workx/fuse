@@ -169,21 +169,7 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 	isNetCmd := networkCommandBasenames[basename]
 
 	if isNetCmd {
-		if hasInsecureCertFlag(cmd) {
-			escalate(DecisionCaution, "insecure TLS flag detected")
-		}
-		if reDestructiveHTTPMethod.MatchString(cmd) {
-			escalate(DecisionApproval, "destructive HTTP method detected")
-		}
-		if hasDataUploadFlag(cmd) {
-			escalate(DecisionCaution, "data upload/exfiltration flag detected")
-		}
-		if reFileUploadFlag.MatchString(cmd) {
-			escalate(DecisionApproval, "file upload flag detected (exfiltration risk)")
-		}
-		if hasRedirectFlags(cmd) {
-			escalate(DecisionCaution, "HTTP redirect following enabled")
-		}
+		inspectNetworkCommandFlags(cmd, escalate)
 	}
 
 	// Extract and inspect literal URLs.
@@ -203,6 +189,26 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 	}
 
 	return bestDecision, bestReason
+}
+
+// inspectNetworkCommandFlags checks L7 flags on network commands (TLS bypass,
+// destructive HTTP methods, data upload, redirects) and calls escalate for each match.
+func inspectNetworkCommandFlags(cmd string, escalate func(Decision, string)) {
+	if hasInsecureCertFlag(cmd) {
+		escalate(DecisionCaution, "insecure TLS flag detected")
+	}
+	if reDestructiveHTTPMethod.MatchString(cmd) {
+		escalate(DecisionApproval, "destructive HTTP method detected")
+	}
+	if hasDataUploadFlag(cmd) {
+		escalate(DecisionCaution, "data upload/exfiltration flag detected")
+	}
+	if reFileUploadFlag.MatchString(cmd) {
+		escalate(DecisionApproval, "file upload flag detected (exfiltration risk)")
+	}
+	if hasRedirectFlags(cmd) {
+		escalate(DecisionCaution, "HTTP redirect following enabled")
+	}
 }
 
 // inspectSingleURL classifies a single URL through the inspection pipeline.
@@ -382,11 +388,7 @@ func decodeNonCanonicalIP(host string) net.IP {
 
 	// Single number (no dots): hex, octal, or decimal integer for full 32-bit addr.
 	if !strings.Contains(host, ".") {
-		val, ok := parseOctet(host, 0xFFFFFFFF)
-		if !ok {
-			return nil
-		}
-		return net.IPv4(byte(val>>24), byte(val>>16), byte(val>>8), byte(val))
+		return decodeSingleNumberIP(host)
 	}
 
 	parts := strings.Split(host, ".")
@@ -396,46 +398,78 @@ func decodeNonCanonicalIP(host string) net.IP {
 
 	// Parse each part, last part gets a wider range per inet_aton rules.
 	var octets [4]byte
+	var ok bool
 	switch len(parts) {
 	case 4:
-		for i, p := range parts {
-			val, ok := parseOctet(p, 0xFF)
-			if !ok || val > 0xFF {
-				return nil
-			}
-			octets[i] = byte(val)
-		}
+		octets, ok = decodeFourPartIP(parts)
 	case 3:
-		// a.b.c → a.b.0.c (c fills last 2 bytes if > 255)
-		for i := 0; i < 2; i++ {
-			val, ok := parseOctet(parts[i], 0xFF)
-			if !ok || val > 0xFF {
-				return nil
-			}
-			octets[i] = byte(val)
-		}
-		val, ok := parseOctet(parts[2], 0xFFFF)
-		if !ok || val > 0xFFFF {
-			return nil
-		}
-		octets[2] = byte(val >> 8)
-		octets[3] = byte(val)
+		octets, ok = decodeThreePartIP(parts)
 	case 2:
-		// a.b → a.0.0.b (b fills last 3 bytes if > 255)
-		val0, ok := parseOctet(parts[0], 0xFF)
-		if !ok || val0 > 0xFF {
-			return nil
-		}
-		octets[0] = byte(val0)
-		val1, ok := parseOctet(parts[1], 0xFFFFFF)
-		if !ok || val1 > 0xFFFFFF {
-			return nil
-		}
-		octets[1] = byte(val1 >> 16)
-		octets[2] = byte(val1 >> 8)
-		octets[3] = byte(val1)
+		octets, ok = decodeTwoPartIP(parts)
+	}
+	if !ok {
+		return nil
 	}
 	return net.IPv4(octets[0], octets[1], octets[2], octets[3])
+}
+
+// decodeSingleNumberIP decodes a single numeric host (no dots) into an IPv4 address.
+func decodeSingleNumberIP(host string) net.IP {
+	val, ok := parseOctet(host, 0xFFFFFFFF)
+	if !ok {
+		return nil
+	}
+	return net.IPv4(byte(val>>24), byte(val>>16), byte(val>>8), byte(val))
+}
+
+// decodeFourPartIP decodes a standard 4-octet dotted IP with non-canonical encoding.
+func decodeFourPartIP(parts []string) ([4]byte, bool) {
+	var octets [4]byte
+	for i, p := range parts {
+		val, ok := parseOctet(p, 0xFF)
+		if !ok || val > 0xFF {
+			return octets, false
+		}
+		octets[i] = byte(val)
+	}
+	return octets, true
+}
+
+// decodeThreePartIP decodes a.b.c → a.b.0.c (c fills last 2 bytes if > 255).
+func decodeThreePartIP(parts []string) ([4]byte, bool) {
+	var octets [4]byte
+	for i := 0; i < 2; i++ {
+		val, ok := parseOctet(parts[i], 0xFF)
+		if !ok || val > 0xFF {
+			return octets, false
+		}
+		octets[i] = byte(val)
+	}
+	val, ok := parseOctet(parts[2], 0xFFFF)
+	if !ok || val > 0xFFFF {
+		return octets, false
+	}
+	octets[2] = byte(val >> 8)
+	octets[3] = byte(val)
+	return octets, true
+}
+
+// decodeTwoPartIP decodes a.b → a.0.0.b (b fills last 3 bytes if > 255).
+func decodeTwoPartIP(parts []string) ([4]byte, bool) {
+	var octets [4]byte
+	val0, ok := parseOctet(parts[0], 0xFF)
+	if !ok || val0 > 0xFF {
+		return octets, false
+	}
+	octets[0] = byte(val0)
+	val1, ok := parseOctet(parts[1], 0xFFFFFF)
+	if !ok || val1 > 0xFFFFFF {
+		return octets, false
+	}
+	octets[1] = byte(val1 >> 16)
+	octets[2] = byte(val1 >> 8)
+	octets[3] = byte(val1)
+	return octets, true
 }
 
 // parseOctet parses a single numeric part: 0x = hex, leading 0 = octal, else decimal.

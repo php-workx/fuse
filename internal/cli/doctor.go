@@ -35,6 +35,8 @@ const (
 	checkNameApprovalTerminalTrust = "Approval terminal trust"
 	checkNameLiveForegroundHandoff = "Live foreground process-group handoff"
 	checkNameFuseInPath            = "fuse binary in PATH"
+	checkNamePolicyYAML            = "Policy (policy.yaml)"
+	checkNameMCPMediationPosture   = "MCP mediation posture"
 )
 
 var (
@@ -311,7 +313,7 @@ func checkPolicyYAML() checkResult {
 
 	if _, err := os.Stat(policyPath); os.IsNotExist(err) {
 		return checkResult{
-			name:   "Policy (policy.yaml)",
+			name:   checkNamePolicyYAML,
 			status: "PASS",
 			detail: "not present (using built-in rules only)",
 		}
@@ -322,7 +324,7 @@ func checkPolicyYAML() checkResult {
 	if err == nil {
 		policyHash := computePolicyHash(policyPath)
 		return checkResult{
-			name:   "Policy (policy.yaml)",
+			name:   checkNamePolicyYAML,
 			status: "PASS",
 			detail: fmt.Sprintf("%d rules loaded (version: %s, hash: %s)", len(pol.Rules), pol.Version, policyHash),
 		}
@@ -333,7 +335,7 @@ func checkPolicyYAML() checkResult {
 	lkgInfo, lkgStatErr := os.Stat(lkgPath)
 	if lkgStatErr != nil {
 		return checkResult{
-			name:   "Policy (policy.yaml)",
+			name:   checkNamePolicyYAML,
 			status: "FAIL",
 			detail: fmt.Sprintf("error loading policy: %v (no LKG fallback available)", err),
 		}
@@ -341,7 +343,7 @@ func checkPolicyYAML() checkResult {
 	// Check freshness — must match runtime behavior (default 7 days).
 	if time.Since(lkgInfo.ModTime()) > 7*24*time.Hour {
 		return checkResult{
-			name:   "Policy (policy.yaml)",
+			name:   checkNamePolicyYAML,
 			status: "FAIL",
 			detail: fmt.Sprintf("error loading policy: %v (LKG fallback is stale: %s)", err, lkgInfo.ModTime().Format("2006-01-02")),
 		}
@@ -349,7 +351,7 @@ func checkPolicyYAML() checkResult {
 	lkgCfg, lkgErr := policy.LoadPolicy(lkgPath)
 	if lkgErr != nil {
 		return checkResult{
-			name:   "Policy (policy.yaml)",
+			name:   checkNamePolicyYAML,
 			status: "FAIL",
 			detail: fmt.Sprintf("error loading policy: %v (LKG fallback also unusable)", err),
 		}
@@ -358,7 +360,7 @@ func checkPolicyYAML() checkResult {
 	// LKG is valid and loadable — report warning with active policy hash.
 	lkgHash := computePolicyHash(lkgPath)
 	return checkResult{
-		name:   "Policy (policy.yaml)",
+		name:   checkNamePolicyYAML,
 		status: "WARN",
 		detail: fmt.Sprintf("WARNING: using fallback policy (policy.yaml has errors: %v). Active LKG hash: %s, %d rules", err, lkgHash, len(lkgCfg.Rules)),
 	}
@@ -708,7 +710,7 @@ func checkMCPMediationPosture() checkResult {
 	cfg, err := config.LoadConfig(config.ConfigPath())
 	if err != nil {
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot assess MCP mediation safely: %v", err),
 		}
@@ -718,13 +720,13 @@ func checkMCPMediationPosture() checkResult {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return checkResult{
-				name:   "MCP mediation posture",
+				name:   checkNameMCPMediationPosture,
 				status: "WARN",
 				detail: "no Claude fuse hook detected; MCP mediation risk not assessed",
 			}
 		}
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot assess MCP mediation posture safely because Claude settings could not be read: %v", err),
 		}
@@ -741,7 +743,7 @@ func checkMCPMediationPosture() checkResult {
 	}
 	if len(warnings) > 0 {
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "WARN",
 			detail: strings.Join(warnings, "; "),
 		}
@@ -749,7 +751,7 @@ func checkMCPMediationPosture() checkResult {
 
 	if !hookInstalled && mediatedServers == 0 {
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "WARN",
 			detail: "no Claude fuse hook detected; MCP mediation risk not assessed",
 		}
@@ -757,13 +759,13 @@ func checkMCPMediationPosture() checkResult {
 
 	if mediatedServers > 0 {
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "PASS",
 			detail: fmt.Sprintf("%d Claude MCP server(s) looks mediated through fuse; %d MCP proxy configuration(s) present", mediatedServers, len(cfg.MCPProxies)),
 		}
 	}
 	return checkResult{
-		name:   "MCP mediation posture",
+		name:   checkNameMCPMediationPosture,
 		status: "PASS",
 		detail: fmt.Sprintf("%d MCP proxy configuration(s) present", len(cfg.MCPProxies)),
 	}

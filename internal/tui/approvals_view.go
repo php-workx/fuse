@@ -28,6 +28,10 @@ const (
 // Delegates to the canonical constant defined in the db package.
 const timestampFormat = db.TimestampMillisFormat
 
+// timestampFormatNoMillis is the timestamp format without millisecond precision,
+// used as a fallback when parsing timestamps that lack the .000 suffix.
+const timestampFormatNoMillis = "2006-01-02T15:04:05Z"
+
 // ApprovalsModel renders pending approval requests and approval history.
 type ApprovalsModel struct {
 	// Pending requests from hook processes.
@@ -113,72 +117,83 @@ func (m ApprovalsModel) Update(msg tea.Msg) (ApprovalsModel, tea.Cmd) {
 	}
 
 	if msg, ok := msg.(tea.KeyMsg); ok {
-		k := msg.Key()
-
-		// Confirmation dialog.
-		if m.confirming != "" {
-			return m.handleConfirm(k)
-		}
-
-		// Scope selection after pressing 'a'.
-		if m.scopeSelect {
-			return m.handleScopeSelect(k)
-		}
-
-		switch {
-		// Toggle focus between pending and history (left/right arrows).
-		case key.Matches(k, keys.Left), key.Matches(k, keys.Right):
-			if m.focus == focusPending {
-				m.focus = focusHistory
-			} else {
-				m.focus = focusPending
-			}
-			return m, nil
-
-		// Navigation.
-		case key.Matches(k, keys.Up):
-			m.moveCursor(-1)
-		case key.Matches(k, keys.Down):
-			m.moveCursor(1)
-
-		// Approve pending request.
-		case k.Code == 'a':
-			if m.focus == focusPending && len(m.pending) > 0 {
-				m.scopeSelect = true
-				return m, nil
-			}
-
-		// Deny pending request.
-		case k.Code == 'd' || k.Code == 'n':
-			if m.focus == focusPending && len(m.pending) > 0 {
-				return m, m.denyCmd()
-			}
-
-		// Toggle detail panel for history item.
-		case key.Matches(k, keys.Enter):
-			if m.focus == focusHistory && len(m.approvals) > 0 {
-				m.toggleDetail()
-				return m, nil
-			}
-
-		// Revoke approval from history.
-		case key.Matches(k, keys.Delete):
-			if m.focus == focusHistory && len(m.approvals) > 0 {
-				m.confirming = "delete"
-				m.confirmID = m.approvals[m.historyIdx].ID
-				return m, nil
-			}
-
-		// Purge expired/consumed.
-		case key.Matches(k, keys.BulkPurge):
-			m.confirming = "purge"
-			return m, nil
-		default:
-		}
+		return m.handleKeyMsg(msg)
 	}
 
 	// Handle action results.
 	m.handleActionResult(msg)
+	return m, nil
+}
+
+// handleKeyMsg dispatches key messages to the appropriate handler.
+func (m ApprovalsModel) handleKeyMsg(msg tea.KeyMsg) (ApprovalsModel, tea.Cmd) {
+	k := msg.Key()
+
+	// Confirmation dialog.
+	if m.confirming != "" {
+		return m.handleConfirm(k)
+	}
+
+	// Scope selection after pressing 'a'.
+	if m.scopeSelect {
+		return m.handleScopeSelect(k)
+	}
+
+	return m.handleNormalKey(k)
+}
+
+// handleNormalKey handles key presses in normal (non-modal) state.
+func (m ApprovalsModel) handleNormalKey(k tea.Key) (ApprovalsModel, tea.Cmd) {
+	switch {
+	// Toggle focus between pending and history (left/right arrows).
+	case key.Matches(k, keys.Left), key.Matches(k, keys.Right):
+		if m.focus == focusPending {
+			m.focus = focusHistory
+		} else {
+			m.focus = focusPending
+		}
+		return m, nil
+
+	// Navigation.
+	case key.Matches(k, keys.Up):
+		m.moveCursor(-1)
+	case key.Matches(k, keys.Down):
+		m.moveCursor(1)
+
+	// Approve pending request.
+	case k.Code == 'a':
+		if m.focus == focusPending && len(m.pending) > 0 {
+			m.scopeSelect = true
+			return m, nil
+		}
+
+	// Deny pending request.
+	case k.Code == 'd' || k.Code == 'n':
+		if m.focus == focusPending && len(m.pending) > 0 {
+			return m, m.denyCmd()
+		}
+
+	// Toggle detail panel for history item.
+	case key.Matches(k, keys.Enter):
+		if m.focus == focusHistory && len(m.approvals) > 0 {
+			m.toggleDetail()
+			return m, nil
+		}
+
+	// Revoke approval from history.
+	case key.Matches(k, keys.Delete):
+		if m.focus == focusHistory && len(m.approvals) > 0 {
+			m.confirming = "delete"
+			m.confirmID = m.approvals[m.historyIdx].ID
+			return m, nil
+		}
+
+	// Purge expired/consumed.
+	case key.Matches(k, keys.BulkPurge):
+		m.confirming = "purge"
+		return m, nil
+	default:
+	}
 	return m, nil
 }
 
@@ -606,7 +621,7 @@ func approvalStatus(a *db.Approval, now time.Time) (string, lipgloss.Style) {
 	if a.ExpiresAt != nil {
 		exp, err := time.Parse(timestampFormat, *a.ExpiresAt)
 		if err != nil {
-			exp, err = time.Parse("2006-01-02T15:04:05Z", *a.ExpiresAt)
+			exp, err = time.Parse(timestampFormatNoMillis, *a.ExpiresAt)
 		}
 		if err == nil && !now.Before(exp) {
 			return "EXPIRED", styleBlocked
@@ -618,7 +633,7 @@ func approvalStatus(a *db.Approval, now time.Time) (string, lipgloss.Style) {
 func formatApprovalTime(ts string) string {
 	t, err := time.Parse(timestampFormat, ts)
 	if err != nil {
-		t, err = time.Parse("2006-01-02T15:04:05Z", ts)
+		t, err = time.Parse(timestampFormatNoMillis, ts)
 		if err != nil {
 			return shorten(ts, 19)
 		}
@@ -629,7 +644,7 @@ func formatApprovalTime(ts string) string {
 func parseTime(ts string) time.Time {
 	t, err := time.Parse(timestampFormat, ts)
 	if err != nil {
-		t, err = time.Parse("2006-01-02T15:04:05Z", ts)
+		t, err = time.Parse(timestampFormatNoMillis, ts)
 		if err != nil {
 			return time.Now()
 		}

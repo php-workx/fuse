@@ -11,7 +11,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const codexConfigDir = ".codex"
+const (
+	codexConfigDir  = ".codex"
+	codexConfigFile = "config.toml"
+)
 
 var installCmd = &cobra.Command{
 	Use:     "install [claude|codex]",
@@ -178,31 +181,31 @@ func mergeFuseHookMatchers(settings map[string]interface{}, matchers []string) {
 	}
 
 	for _, wanted := range wantedMatchers {
-		found := false
-		for i, entry := range preToolUse {
-			entryMap, ok := entry.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			matcher, _ := entryMap["matcher"].(string)
-			if matcher == wanted.Matcher {
-				// Update existing entry: ensure fuse hook is present.
-				preToolUse[i] = ensureFuseHookInEntry(entryMap)
-				found = true
-				break
-			}
-		}
-		if !found {
-			// Add new matcher entry.
-			newEntry := map[string]interface{}{
-				"matcher": wanted.Matcher,
-				"hooks":   fuseHooksToInterface(wanted.Hooks),
-			}
-			preToolUse = append(preToolUse, newEntry)
-		}
+		preToolUse = upsertMatcherEntry(preToolUse, wanted)
 	}
 
 	hooksObj["PreToolUse"] = preToolUse
+}
+
+// upsertMatcherEntry updates an existing matcher entry or appends a new one.
+func upsertMatcherEntry(preToolUse []interface{}, wanted fuseMatcherEntry) []interface{} {
+	for i, entry := range preToolUse {
+		entryMap, ok := entry.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		matcher, _ := entryMap["matcher"].(string)
+		if matcher == wanted.Matcher {
+			preToolUse[i] = ensureFuseHookInEntry(entryMap)
+			return preToolUse
+		}
+	}
+	// Not found — add new matcher entry.
+	newEntry := map[string]interface{}{
+		"matcher": wanted.Matcher,
+		"hooks":   fuseHooksToInterface(wanted.Hooks),
+	}
+	return append(preToolUse, newEntry)
 }
 
 // ensureFuseHookInEntry ensures the "fuse hook evaluate" command is present
@@ -289,19 +292,19 @@ func writeJSONFile(path string, data map[string]interface{}) error {
 
 func codexConfigPath() string {
 	if cwd, err := os.Getwd(); err == nil {
-		localPath := filepath.Join(cwd, codexConfigDir, "config.toml")
+		localPath := filepath.Join(cwd, codexConfigDir, codexConfigFile)
 		if _, statErr := os.Stat(localPath); statErr == nil {
 			return localPath
 		}
 	}
 	if home := os.Getenv("CODEX_HOME"); home != "" {
-		return filepath.Join(home, "config.toml")
+		return filepath.Join(home, codexConfigFile)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(os.TempDir(), codexConfigDir, "config.toml")
+		return filepath.Join(os.TempDir(), codexConfigDir, codexConfigFile)
 	}
-	return filepath.Join(home, codexConfigDir, "config.toml")
+	return filepath.Join(home, codexConfigDir, codexConfigFile)
 }
 
 func rejectSymlinkedCodexConfigPath(configPath string) error {

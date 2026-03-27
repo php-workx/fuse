@@ -135,17 +135,7 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 	}
 
 	// Skip leading bare env var assignments (VAR=value before the command).
-	// Must happen before filepath.Base to avoid mangling VAR=/path/value into a basename.
-	for i < len(tokens) {
-		tok := tokens[i]
-		if !isEnvAssignment(tok) || strings.HasPrefix(tok, "-") {
-			break
-		}
-		if isSensitiveEnvAssignment(tok) {
-			result.SensitiveEnvAssignment = true
-		}
-		i++
-	}
+	i = skipLeadingEnvAssignments(tokens, i, &result)
 	if i >= len(tokens) {
 		result.Outer = ""
 		return result
@@ -178,6 +168,22 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 	result.Outer = strings.Join(remaining, " ")
 
 	return result
+}
+
+// skipLeadingEnvAssignments skips bare env var assignments (VAR=value) before the command.
+// Must happen before filepath.Base to avoid mangling VAR=/path/value into a basename.
+func skipLeadingEnvAssignments(tokens []string, i int, result *ClassifiedCommand) int {
+	for i < len(tokens) {
+		tok := tokens[i]
+		if !isEnvAssignment(tok) || strings.HasPrefix(tok, "-") {
+			break
+		}
+		if isSensitiveEnvAssignment(tok) {
+			result.SensitiveEnvAssignment = true
+		}
+		i++
+	}
+	return i
 }
 
 // handleBashC processes bash/sh -c inner command extraction. Returns true if
@@ -553,6 +559,21 @@ func skipIoniceArgs(tokens []string, i int) int {
 	return i
 }
 
+// timeoutFlagsWithArg are timeout flags that consume the next token as an argument.
+var timeoutFlagsWithArg = map[string]bool{
+	"-s": true, "--signal": true,
+	"-k": true, "--kill-after": true,
+}
+
+// timeoutFlagsNoArg are timeout flags that don't consume an additional token.
+var timeoutFlagsNoArg = map[string]bool{
+	"--foreground": true, "--preserve-status": true,
+	"-v": true, "--verbose": true,
+}
+
+// timeoutCombinedPrefixes are prefix patterns for combined/inline timeout flags.
+var timeoutCombinedPrefixes = []string{"-s", "-k", "--signal=", "--kill-after="}
+
 // skipTimeoutArgs skips timeout flags and the duration argument.
 func skipTimeoutArgs(tokens []string, i int) int {
 	for i < len(tokens) {
@@ -561,20 +582,15 @@ func skipTimeoutArgs(tokens []string, i int) int {
 			i++
 			break
 		}
-		if t == "-s" || t == "--signal" {
+		if timeoutFlagsWithArg[t] {
 			i += 2
 			continue
 		}
-		if t == "-k" || t == "--kill-after" {
-			i += 2
-			continue
-		}
-		if t == "--foreground" || t == "--preserve-status" || t == "-v" || t == "--verbose" {
+		if timeoutFlagsNoArg[t] {
 			i++
 			continue
 		}
-		if strings.HasPrefix(t, "-s") || strings.HasPrefix(t, "-k") ||
-			strings.HasPrefix(t, "--signal=") || strings.HasPrefix(t, "--kill-after=") {
+		if isTimeoutCombinedFlag(t) {
 			i++
 			continue
 		}
@@ -586,6 +602,16 @@ func skipTimeoutArgs(tokens []string, i int) int {
 		break
 	}
 	return i
+}
+
+// isTimeoutCombinedFlag checks if a token is a combined/inline timeout flag.
+func isTimeoutCombinedFlag(t string) bool {
+	for _, prefix := range timeoutCombinedPrefixes {
+		if strings.HasPrefix(t, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // skipTraceArgs skips strace/ltrace flags.

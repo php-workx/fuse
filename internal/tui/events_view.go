@@ -258,20 +258,35 @@ func (m EventsModel) renderDetail(e *db.EventRecord) string {
 	fmt.Fprintf(&b, "  Source:      %s\n", sanitize(fallbackValue(e.Source)))
 	fmt.Fprintf(&b, "  Session:     %s\n", sanitize(fallbackValue(e.SessionID)))
 	fmt.Fprintf(&b, "  Workspace:   %s\n", sanitize(fallbackValue(e.WorkspaceRoot)))
+	renderDetailDuration(&b, e)
+	renderDetailExitCode(&b, e)
+	renderDetailJudge(&b, e, valueWidth)
+
+	return styleDetail.Render(b.String())
+}
+
+// renderDetailDuration writes the duration line to the detail view.
+func renderDetailDuration(b *strings.Builder, e *db.EventRecord) {
 	if e.DurationMs > 0 {
-		fmt.Fprintf(&b, "  Duration:    %dms\n", e.DurationMs)
+		fmt.Fprintf(b, "  Duration:    %dms\n", e.DurationMs)
 	} else {
 		b.WriteString("  Duration:    -\n")
 	}
+}
+
+// renderDetailExitCode writes the exit code line to the detail view.
+func renderDetailExitCode(b *strings.Builder, e *db.EventRecord) {
 	if e.ExecutionExitCode != nil {
-		fmt.Fprintf(&b, "  Exit Code:   %d\n", *e.ExecutionExitCode)
+		fmt.Fprintf(b, "  Exit Code:   %d\n", *e.ExecutionExitCode)
 	} else {
 		b.WriteString("  Exit Code:   -\n")
 	}
+}
 
-	// Judge information.
+// renderDetailJudge writes the judge information section to the detail view.
+func renderDetailJudge(b *strings.Builder, e *db.EventRecord, valueWidth int) {
 	if e.JudgeError != "" {
-		fmt.Fprintf(&b, "  Judge:       ERROR -- %s\n", sanitize(e.JudgeError))
+		fmt.Fprintf(b, "  Judge:       ERROR -- %s\n", sanitize(e.JudgeError))
 	} else if e.JudgeDecision != "" {
 		judgeLine := fmt.Sprintf("%s (%d%%) via %s",
 			sanitize(e.JudgeDecision),
@@ -287,16 +302,14 @@ func (m EventsModel) renderDetail(e *db.EventRecord) string {
 		if e.JudgeApplied {
 			judgeLine += " [APPLIED]"
 		}
-		writeWrapped(&b, "  Judge:       ", judgeLine, valueWidth)
+		writeWrapped(b, "  Judge:       ", judgeLine, valueWidth)
 
 		mode := "shadow (not applied)"
 		if e.JudgeApplied {
 			mode = "applied"
 		}
-		fmt.Fprintf(&b, "  Judge Mode:  %s\n", mode)
+		fmt.Fprintf(b, "  Judge Mode:  %s\n", mode)
 	}
-
-	return styleDetail.Render(b.String())
 }
 
 // writeWrapped writes a labeled value, wrapping long values to fit within maxWidth.
@@ -312,28 +325,8 @@ func writeWrapped(b *strings.Builder, label, value string, maxWidth int) {
 	indent := strings.Repeat(" ", len(label))
 	first := true
 	for len(runes) > 0 {
-		chunk := runes
-		if len(chunk) > maxWidth {
-			// Try to break at a space.
-			cut := maxWidth
-			for cut > maxWidth/2 {
-				if chunk[cut] == ' ' {
-					break
-				}
-				cut--
-			}
-			if cut <= maxWidth/2 {
-				cut = maxWidth // no good break point — hard wrap
-			}
-			chunk = runes[:cut]
-			runes = runes[cut:]
-			// Skip leading space on next line.
-			if len(runes) > 0 && runes[0] == ' ' {
-				runes = runes[1:]
-			}
-		} else {
-			runes = nil
-		}
+		var chunk []rune
+		chunk, runes = splitWrappedChunk(runes, maxWidth)
 
 		if first {
 			b.WriteString(label + string(chunk) + "\n")
@@ -342,6 +335,37 @@ func writeWrapped(b *strings.Builder, label, value string, maxWidth int) {
 			b.WriteString(indent + string(chunk) + "\n")
 		}
 	}
+}
+
+// splitWrappedChunk splits runes into a chunk that fits within maxWidth and the remainder.
+// Tries to break at a space boundary; falls back to hard wrapping.
+func splitWrappedChunk(runes []rune, maxWidth int) (chunk, remainder []rune) {
+	if len(runes) <= maxWidth {
+		return runes, nil
+	}
+
+	cut := findWrapBreakPoint(runes, maxWidth)
+	chunk = runes[:cut]
+	remainder = runes[cut:]
+
+	// Skip leading space on next line.
+	if len(remainder) > 0 && remainder[0] == ' ' {
+		remainder = remainder[1:]
+	}
+	return chunk, remainder
+}
+
+// findWrapBreakPoint finds the best position to break a line, preferring spaces.
+func findWrapBreakPoint(runes []rune, maxWidth int) int {
+	cut := maxWidth
+	for cut > maxWidth/2 {
+		if runes[cut] == ' ' {
+			return cut
+		}
+		cut--
+	}
+	// No good break point — hard wrap at maxWidth.
+	return maxWidth
 }
 
 // formatJudgeColumn returns an 11-char wide judge indicator for the table row.
