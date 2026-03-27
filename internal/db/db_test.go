@@ -377,6 +377,11 @@ func TestCredentialScrubbing_NewPatterns(t *testing.T) {
 			shouldMatch: "session=abc123",
 		},
 		{
+			name:        "Cookie header with multiple values",
+			input:       "Cookie: a=1; b=2",
+			shouldMatch: "a=1; b=2",
+		},
+		{
 			name:        "JWT token",
 			input:       "token eyJhbGciOiJIUzI1NiJ9.eyJ0ZXN0IjoiZGF0YSJ9.signature",
 			shouldMatch: "eyJhbGciOiJIUzI1NiJ9.eyJ0ZXN0IjoiZGF0YSJ9.signature",
@@ -385,6 +390,11 @@ func TestCredentialScrubbing_NewPatterns(t *testing.T) {
 			name:        "AWS ASIA temp cred",
 			input:       "aws sts ASIA1234567890ABCDEF",
 			shouldMatch: "ASIA1234567890ABCDEF",
+		},
+		{
+			name:        "Google API key",
+			input:       "AIzaSyA1234567890_bcdefghijklmnop",
+			shouldMatch: "AIzaSyA1234567890_bcdefghijklmnop",
 		},
 	}
 
@@ -412,6 +422,7 @@ func TestLogEvent_ScrubsAllTextFields(t *testing.T) {
 		Reason:         "blocked: found api_key=TESTVALUE123",
 		Metadata:       `{"token":"secret-value-here"}`,
 		JudgeReasoning: "The command contains Bearer supersecrettoken123 which is risky",
+		JudgeError:     "Cookie: session=abc123",
 	}
 	if err := d.LogEvent(record); err != nil {
 		t.Fatalf("LogEvent failed: %v", err)
@@ -433,6 +444,9 @@ func TestLogEvent_ScrubsAllTextFields(t *testing.T) {
 	}
 	if strings.Contains(e.JudgeReasoning, "supersecrettoken123") {
 		t.Error("JudgeReasoning field should have credential scrubbed")
+	}
+	if strings.Contains(e.JudgeError, "session=abc123") {
+		t.Error("JudgeError field should have credential scrubbed")
 	}
 }
 

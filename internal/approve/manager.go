@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -95,18 +96,21 @@ func (m *Manager) RequestApproval(ctx context.Context, req ApprovalRequest) (cor
 	defer cancel()
 
 	ch := make(chan approvalResult, 2)
-	go m.runTTYPrompt(subCtx, req, ch)
-	go m.runDBPoll(subCtx, req, ch)
+	var workers sync.WaitGroup
+	workers.Add(2)
+	go m.runTTYPrompt(subCtx, req, ch, &workers)
+	go m.runDBPoll(subCtx, req, ch, &workers)
 
 	// Step 4: Wait for first result.
 	r := <-ch
 
 	if r.err != nil {
-		return m.handlePromptError(ctx, cancel, ch, deletePending, r.err)
+		return m.handlePromptError(ctx, cancel, ch, deletePending, &workers, r.err)
 	}
 
 	cancel()        // stop the poll goroutine
 	deletePending() // resolved via TTY prompt
+	workers.Wait()
 
 	return m.resolveApproval(req, r, ch)
 }
@@ -132,22 +136,32 @@ func (m *Manager) insertPendingRequest(req ApprovalRequest) string {
 	return pendingID
 }
 
+func sendApprovalResult(ctx context.Context, ch chan<- approvalResult, result approvalResult) {
+	select {
+	case <-ctx.Done():
+		return
+	case ch <- result:
+	}
+}
+
 // runTTYPrompt runs the interactive TTY approval prompt in a goroutine.
-func (m *Manager) runTTYPrompt(ctx context.Context, req ApprovalRequest, ch chan<- approvalResult) {
+func (m *Manager) runTTYPrompt(ctx context.Context, req ApprovalRequest, ch chan<- approvalResult, workers *sync.WaitGroup) {
+	defer workers.Done()
 	approved, scope, promptErr := PromptUser(ctx, req.Command, req.Reason, req.HookMode, req.NonInteractive)
 	if promptErr != nil {
-		ch <- approvalResult{err: promptErr}
+		sendApprovalResult(ctx, ch, approvalResult{err: promptErr})
 		return
 	}
 	if !approved {
-		ch <- approvalResult{decision: core.DecisionBlocked}
+		sendApprovalResult(ctx, ch, approvalResult{decision: core.DecisionBlocked})
 		return
 	}
-	ch <- approvalResult{decision: core.DecisionApproval, scope: scope}
+	sendApprovalResult(ctx, ch, approvalResult{decision: core.DecisionApproval, scope: scope})
 }
 
 // runDBPoll polls the database for externally-created approvals (from TUI).
-func (m *Manager) runDBPoll(ctx context.Context, req ApprovalRequest, ch chan<- approvalResult) {
+func (m *Manager) runDBPoll(ctx context.Context, req ApprovalRequest, ch chan<- approvalResult, workers *sync.WaitGroup) {
+	defer workers.Done()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -160,7 +174,7 @@ func (m *Manager) runDBPoll(ctx context.Context, req ApprovalRequest, ch chan<- 
 				continue // transient DB error, retry
 			}
 			if decision != "" {
-				ch <- approvalResult{decision: decision, fromPoll: true}
+				sendApprovalResult(ctx, ch, approvalResult{decision: decision, fromPoll: true})
 				return
 			}
 		}
@@ -174,6 +188,7 @@ func (m *Manager) handlePromptError(
 	cancel context.CancelFunc,
 	ch <-chan approvalResult,
 	deletePending func(),
+	workers *sync.WaitGroup,
 	promptErr error,
 ) (core.Decision, error) {
 	// The TUI (fuse monitor) can still resolve this — keep polling until
@@ -186,12 +201,14 @@ func (m *Manager) handlePromptError(
 	select {
 	case r2 := <-ch:
 		cancel()
+		workers.Wait()
 		if r2.err == nil && r2.decision != "" {
 			deletePending() // resolved via TUI poll
 			return r2.decision, nil
 		}
 	case <-ctx.Done():
 		cancel()
+		workers.Wait()
 	}
 	// Timeout — DON'T delete pending request. It persists so the TUI
 	// can still show it and the user can pre-approve for the next retry.
@@ -205,16 +222,24 @@ func (m *Manager) resolveApproval(
 	r approvalResult,
 	ch <-chan approvalResult,
 ) (core.Decision, error) {
-	// If TTY denied but the TUI approved concurrently, prefer the approval.
-	if r.decision == core.DecisionBlocked && !r.fromPoll {
+	for {
 		select {
 		case r2 := <-ch:
-			if r2.decision == core.DecisionApproval {
-				return r2.decision, nil
+			if r2.err != nil {
+				continue
+			}
+			if r.decision == core.DecisionBlocked && !r.fromPoll && r2.decision == core.DecisionApproval {
+				r = r2
 			}
 		default:
-			// no second result — TTY denial stands
+			goto resolved
 		}
+	}
+
+resolved:
+	// If TTY denied but the TUI approved concurrently, prefer the approval.
+	if r.decision == core.DecisionBlocked && !r.fromPoll {
+		return r.decision, nil
 	}
 
 	// If approved via TTY prompt, store the approval.

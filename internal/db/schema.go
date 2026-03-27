@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 )
 
@@ -39,14 +40,22 @@ func migrate(db *sql.DB) error {
 		return nil
 	}
 
-	for _, step := range migrationSteps {
-		if version != step.fromVersion {
-			continue
+	for version != currentSchemaVersion {
+		applied := false
+		for _, step := range migrationSteps {
+			if version != step.fromVersion {
+				continue
+			}
+			if err := step.apply(db); err != nil {
+				return err
+			}
+			version = step.toVersion
+			applied = true
+			break
 		}
-		if err := step.apply(db); err != nil {
-			return err
+		if !applied {
+			return fmt.Errorf("unknown schema version %q: no migration path to %s", version, currentSchemaVersion)
 		}
-		version = step.toVersion
 	}
 	return nil
 }

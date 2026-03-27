@@ -93,7 +93,7 @@ var credentialPatterns = []struct {
 	},
 	{
 		// GitHub fine-grained PATs (ghp_), OAuth tokens (gho_), etc.
-		re:          regexp.MustCompile(`\b(ghp|gho|ghu|ghs|ghr|glpat|xoxb|xoxp|xoxa|xoxr|sk-|rk-|whsec_|AIZA)[_-][A-Za-z0-9_-]{16,}\b`),
+		re:          regexp.MustCompile(`\b(?:AIza[A-Za-z0-9_-]{16,}|(?:ghp|gho|ghu|ghs|ghr|glpat|xoxb|xoxp|xoxa|xoxr|sk-|rk-|whsec_)[A-Za-z0-9_-]{16,})\b`),
 		replacement: "[REDACTED VENDOR TOKEN]",
 	},
 	{
@@ -109,7 +109,7 @@ var credentialPatterns = []struct {
 	// Authorization: Basic/Digest now covered by the generic Authorization pattern above.
 	{
 		// Cookie header values
-		re:          regexp.MustCompile(`(?i)(Cookie|Set-Cookie):\s*\S+`),
+		re:          regexp.MustCompile(`(?im)(Cookie|Set-Cookie):\s*.*$`),
 		replacement: "${1}: [REDACTED]",
 	},
 	{
@@ -145,6 +145,7 @@ func (d *DB) LogEvent(record *EventRecord) error {
 	record.Reason = ScrubCredentials(record.Reason)
 	record.Metadata = ScrubCredentials(record.Metadata)
 	record.JudgeReasoning = ScrubCredentials(record.JudgeReasoning)
+	record.JudgeError = ScrubCredentials(record.JudgeError)
 	record.Cwd = normalizeEventPath(record.Cwd)
 	if record.WorkspaceRoot == "" {
 		record.WorkspaceRoot = detectWorkspaceRoot(record.Cwd)
@@ -422,7 +423,7 @@ func (d *DB) FrequentApprovals(minCount int) ([]PolicyRecommendation, error) {
 			continue
 		}
 		// Generate suggested policy rule
-		escaped := strings.ReplaceAll(r.Command, `\`, `\\`)
+		escaped := regexp.QuoteMeta(r.Command)
 		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 		r.Suggested = fmt.Sprintf(`- pattern: "^%s$"\n  action: "allow"\n  reason: "approved %d times"`, escaped, r.Count)
 		recs = append(recs, r)

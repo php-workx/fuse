@@ -124,8 +124,9 @@ func (d *DB) DeleteApproval(id string) error {
 // Consumed approvals are retained for 1 hour after consumption to allow
 // auditing of recent decisions. Returns the number of rows deleted.
 func (d *DB) CleanupExpired() (int64, error) {
-	now := time.Now().UTC().Format(TimestampMillisFormat)
-	cutoff := time.Now().Add(-time.Hour).UTC().Format(TimestampMillisFormat)
+	t := time.Now().UTC()
+	now := t.Format(TimestampMillisFormat)
+	cutoff := t.Add(-time.Hour).Format(TimestampMillisFormat)
 
 	result, err := d.db.Exec(`
 		DELETE FROM approvals
