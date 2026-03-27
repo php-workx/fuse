@@ -28,7 +28,7 @@ func TestBinaryTOFU_SecondUseSameHash(t *testing.T) {
 }
 
 func TestBinaryTOFU_HashChangeBlocked(t *testing.T) {
-	tofu := NewBinaryTOFU()
+	tofu := NewBinaryTOFUWithInterpreter(func(name string) bool { return name == "fakeinterp" })
 
 	// Create a fake "interpreter" in a temp dir
 	dir := t.TempDir()
@@ -39,10 +39,6 @@ func TestBinaryTOFU_HashChangeBlocked(t *testing.T) {
 
 	// Add to PATH so LookPath finds it
 	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
-
-	// Register as interpreter
-	interpreterBasenames["fakeinterp"] = true
-	defer delete(interpreterBasenames, "fakeinterp")
 
 	// First use — trusted
 	d1, _ := tofu.Verify("fakeinterp")
