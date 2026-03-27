@@ -69,50 +69,47 @@ var HardcodedBlocked = []HardcodedRule{
 	// === Catastrophic filesystem destruction ===
 
 	// rm -rf targeting catastrophic paths (/, /etc, /usr, /home, ~, $VAR, /*).
-	// Specific subdirectories like /tmp/mydir or /var/folders/xxx are NOT blocked.
-	// Those are handled by builtin:fs:rm-rf which produces CAUTION (not BLOCKED).
+	// The regex matches any rm with recursive+force flags. The predicate checks
+	// whether ANY argument targets a catastrophic path — including cases like
+	// `rm -rf ./safe /etc` where the catastrophic path is not the first argument.
 	{
-		Pattern:   regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\s+[/~$]`),
+		Pattern:   regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\b`),
 		Reason:    "Recursive force-remove of system directory, home, or variable path",
 		Predicate: isCatastrophicRmTarget,
-	},
-	{
-		Pattern: regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\s+/\*`),
-		Reason:  "Recursive force-remove of /*",
 	},
 
 	// rm with split short flags (e.g., -r -f, -f -r)
 	{
-		Pattern:   regexp.MustCompile(`\brm\s+.*-r\b.*-f\b.*[/~$]`),
+		Pattern:   regexp.MustCompile(`\brm\s+.*-r\b.*-f\b`),
 		Reason:    "Recursive force-remove (split flags) of system directory",
 		Predicate: isCatastrophicRmTarget,
 	},
 	{
-		Pattern:   regexp.MustCompile(`\brm\s+.*-f\b.*-r\b.*[/~$]`),
+		Pattern:   regexp.MustCompile(`\brm\s+.*-f\b.*-r\b`),
 		Reason:    "Recursive force-remove (split flags) of system directory",
 		Predicate: isCatastrophicRmTarget,
 	},
 
 	// rm with long flags (--recursive --force in any order)
 	{
-		Pattern:   regexp.MustCompile(`\brm\s+.*--recursive\b.*--force\b.*[/~$]`),
+		Pattern:   regexp.MustCompile(`\brm\s+.*--recursive\b.*--force\b`),
 		Reason:    "Recursive force-remove (long flags) of system directory",
 		Predicate: isCatastrophicRmTarget,
 	},
 	{
-		Pattern:   regexp.MustCompile(`\brm\s+.*--force\b.*--recursive\b.*[/~$]`),
+		Pattern:   regexp.MustCompile(`\brm\s+.*--force\b.*--recursive\b`),
 		Reason:    "Recursive force-remove (long flags) of system directory",
 		Predicate: isCatastrophicRmTarget,
 	},
 
 	// rm with mixed short/long flags
 	{
-		Pattern:   regexp.MustCompile(`\brm\s+.*-r\b.*--force\b.*[/~$]`),
+		Pattern:   regexp.MustCompile(`\brm\s+.*-r\b.*--force\b`),
 		Reason:    "Recursive force-remove (mixed flags) of system directory",
 		Predicate: isCatastrophicRmTarget,
 	},
 	{
-		Pattern:   regexp.MustCompile(`\brm\s+.*--recursive\b.*-f\b.*[/~$]`),
+		Pattern:   regexp.MustCompile(`\brm\s+.*--recursive\b.*-f\b`),
 		Reason:    "Recursive force-remove (mixed flags) of system directory",
 		Predicate: isCatastrophicRmTarget,
 	},

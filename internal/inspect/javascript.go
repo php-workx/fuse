@@ -98,7 +98,11 @@ func ScanJavaScript(content []byte) []Signal {
 		trimmed, inBlockComment = stripBlockComment(trimmed, inBlockComment)
 		trimmed = strings.TrimSpace(trimmed)
 
-		if inBlockComment || trimmed == "" || strings.HasPrefix(trimmed, "//") {
+		// Skip empty lines and pure single-line comments.
+		// Note: check trimmed content BEFORE inBlockComment — if stripBlockComment
+		// returned code before a block comment start, we must scan it even though
+		// inBlockComment is now true for the NEXT line.
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
 			continue
 		}
 

@@ -602,11 +602,22 @@ func gitRestoreSafe(args []string) bool {
 }
 
 // isSqliteSafe: sqlite3 is safe with read-only queries (SELECT, PRAGMA, EXPLAIN).
+// Blocks destructive SQL keywords and sqlite3 dot-commands that execute code.
 func isSqliteSafe(fields []string) bool {
 	cmd := strings.ToUpper(strings.Join(fields, " "))
 	destructive := []string{"DELETE", "DROP", "INSERT", "UPDATE", "ALTER", "ATTACH", "DETACH", "CREATE"}
 	for _, kw := range destructive {
 		if strings.Contains(cmd, kw) {
+			return false
+		}
+	}
+	// Block sqlite3 dot-commands that can execute arbitrary code or modify files.
+	for _, f := range fields {
+		lower := strings.ToLower(f)
+		if strings.HasPrefix(lower, ".shell") || strings.HasPrefix(lower, ".system") ||
+			strings.HasPrefix(lower, ".output") || strings.HasPrefix(lower, ".import") ||
+			strings.HasPrefix(lower, ".load") || strings.HasPrefix(lower, ".save") ||
+			strings.HasPrefix(lower, ".restore") || strings.HasPrefix(lower, ".clone") {
 			return false
 		}
 	}
@@ -626,15 +637,15 @@ func isNcSafe(fields []string) bool {
 	return false
 }
 
-// isPipSafe: pip is safe for read-only operations.
+// isPipSafe: pip is safe for truly read-only operations.
+// Excludes config (can modify index), cache (can delete), wheel (executes setup.py).
 func isPipSafe(fields []string) bool {
 	if len(fields) < 2 {
 		return false
 	}
 	safeSubs := map[string]bool{
 		"list": true, "show": true, "freeze": true, "check": true,
-		"search": true, "config": true, "debug": true, "cache": true,
-		"wheel": true,
+		"search": true, "debug": true,
 	}
 	return safeSubs[fields[1]]
 }
