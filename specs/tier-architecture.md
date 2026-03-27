@@ -43,7 +43,7 @@ The following decisions were made during the adversarial security review on 2026
 
 ### 3.2 Profile Behavior Matrix
 
-```
+```text
                  Relaxed              Balanced             Strict
 --------------------------------------------------------------------------
 BLOCKED      deny                  deny                  deny
@@ -173,11 +173,11 @@ The system prompt must reflect the new tier semantics. Key changes:
 
 ### 5.4 Judge Verdict Flow
 
-```
+```text
 Command classified as CAUTION:
   Judge enabled + triggers CAUTION?
     YES -> Query judge
-      Judge says SAFE     -> SAFE (auto-approve, no log)
+      Judge says SAFE     -> CAUTION (auto-approve, log)
       Judge says CAUTION  -> CAUTION (auto-approve, log)
       Judge says APPROVAL -> APPROVAL (ask user)
       Judge fails         -> CAUTION (auto-approve, log) [fail-open for triage tier]

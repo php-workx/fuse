@@ -119,11 +119,11 @@ func (m Model) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
 
 // handleData processes data fetch results.
 func (m Model) handleData(msg dataMsg) (tea.Model, tea.Cmd) {
-	m.fetching = false
 	if msg.reqGen < m.fetchGen {
 		// Stale result — discard and schedule next tick.
 		return m, tickCmd(m.activeView)
 	}
+	m.fetching = false
 	if msg.err != nil {
 		m.lastErr = msg.err
 	} else {
@@ -170,7 +170,7 @@ func (m Model) shouldQuit(k tea.Key) bool {
 		return false
 	}
 	// Don't quit on 'q' while searching — only Ctrl+C quits.
-	return m.activeView != viewEvents || !m.events.searching || k.Code == tea.KeyLeftCtrl+'c'
+	return m.activeView != viewEvents || !m.events.searching || k.String() == "ctrl+c"
 }
 
 // handleViewSwitch processes view-switching keys (Tab, 1/2/3).
