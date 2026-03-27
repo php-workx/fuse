@@ -899,6 +899,7 @@ func TestIntegration_V2_HeredocVariableAssembly(t *testing.T) {
 
 func TestIntegration_EnvWrapperSensitiveVarDetected(t *testing.T) {
 	skipIfShort(t)
+	withIsolatedHome(t)
 	core.ResetBinaryTOFU()
 	t.Cleanup(core.ResetBinaryTOFU)
 	evaluator := policy.NewEvaluator(nil)
@@ -927,6 +928,7 @@ func TestIntegration_EnvWrapperSensitiveVarDetected(t *testing.T) {
 
 func TestIntegration_BareEnvVarPathBypass(t *testing.T) {
 	skipIfShort(t)
+	withIsolatedHome(t)
 	core.ResetBinaryTOFU()
 	t.Cleanup(core.ResetBinaryTOFU)
 	evaluator := policy.NewEvaluator(nil)
