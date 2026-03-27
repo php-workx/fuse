@@ -202,14 +202,14 @@ func init() {
 		{
 			ID:      "builtin:cred:cat-gpg-key",
 			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*\.gnupg/`),
-			Action:  core.DecisionCaution,
-			Reason:  "Reads GPG key material",
+			Action:  core.DecisionApproval,
+			Reason:  "Reads GPG key material - requires approval (native file path classification will be tightened separately)",
 		},
 		{
 			ID:      "builtin:cred:cat-pypirc",
 			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*\.pypirc\b`),
-			Action:  core.DecisionCaution,
-			Reason:  "Reads PyPI credentials",
+			Action:  core.DecisionApproval,
+			Reason:  "Reads PyPI credentials - requires approval (native file path classification will be tightened separately)",
 		},
 
 		// ---------------------------------------------------------------
