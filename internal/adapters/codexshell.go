@@ -306,7 +306,17 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 		logEvent(database, event)
 	}
 
-	proceed, err := handleCodexDecision(ctx, result, command, cwd, sessionID, database, cfg, verdict, dryRun, logWithVerdict)
+	proceed, err := handleCodexDecision(codexDecisionContext{
+		ctx:            ctx,
+		result:         result,
+		command:        command,
+		sessionID:      sessionID,
+		database:       database,
+		cfg:            cfg,
+		verdict:        verdict,
+		dryRun:         dryRun,
+		logWithVerdict: logWithVerdict,
+	})
 	if !proceed {
 		return "", "", 0, err
 	}
@@ -331,18 +341,27 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 	return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
 }
 
+// codexDecisionContext bundles the parameters needed by handleCodexDecision.
+type codexDecisionContext struct {
+	ctx            context.Context
+	result         *core.ClassifyResult
+	command        string
+	sessionID      string
+	database       *db.DB
+	cfg            *config.Config
+	verdict        *judge.Verdict
+	dryRun         bool
+	logWithVerdict func(string)
+}
+
 // handleCodexDecision handles the decision switch for codex shell commands.
 // Returns (proceed, err) where proceed=true means execution should continue.
-func handleCodexDecision(
-	ctx context.Context,
-	result *core.ClassifyResult,
-	command, cwd, sessionID string,
-	database *db.DB,
-	cfg *config.Config,
-	verdict *judge.Verdict,
-	dryRun bool,
-	logWithVerdict func(string),
-) (bool, error) {
+func handleCodexDecision(dc codexDecisionContext) (bool, error) {
+	result := dc.result
+	logWithVerdict := dc.logWithVerdict
+	database := dc.database
+	cfg := dc.cfg
+	dryRun := dc.dryRun
 	switch result.Decision {
 	case core.DecisionBlocked:
 		logWithVerdict("blocked")
@@ -354,7 +373,7 @@ func handleCodexDecision(
 		// Execute directly.
 	case core.DecisionApproval:
 		if !dryRun {
-			decision, err := handleCodexApproval(ctx, result, command, sessionID, database)
+			decision, err := handleCodexApproval(dc.ctx, result, dc.command, dc.sessionID, database)
 			if err != nil {
 				return false, err
 			}

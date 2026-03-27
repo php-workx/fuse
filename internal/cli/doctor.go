@@ -37,6 +37,7 @@ const (
 	checkNameFuseInPath            = "fuse binary in PATH"
 	checkNamePolicyYAML            = "Policy (policy.yaml)"
 	checkNameMCPMediationPosture   = "MCP mediation posture"
+	checkNameTagOverrides          = "Tag overrides"
 )
 
 var (
@@ -76,6 +77,31 @@ type checkResult struct {
 }
 
 func runDoctor(live, security bool) error {
+	results := gatherDoctorChecks(live, security)
+
+	fmt.Println("fuse doctor")
+	fmt.Println("===========")
+	fmt.Println()
+
+	passes, warns, fails, fixed := printDoctorResults(results)
+
+	fmt.Println()
+	summary := fmt.Sprintf("Results: %d passed, %d warnings, %d failed", passes, warns, fails)
+	if fixed > 0 {
+		summary += fmt.Sprintf(", %d auto-fixed", fixed)
+	}
+	fmt.Println(summary)
+
+	printPolicyRecommendations()
+
+	if fails > 0 {
+		return fmt.Errorf("%d check(s) failed", fails)
+	}
+	return nil
+}
+
+// gatherDoctorChecks collects all diagnostic check results.
+func gatherDoctorChecks(live, security bool) []checkResult {
 	var results []checkResult
 
 	results = append(results, checkGoVersion())
@@ -100,17 +126,14 @@ func runDoctor(live, security bool) error {
 		results = append(results, checkLiveRawMode())
 		results = append(results, checkLiveForegroundProcessGroup())
 	}
+	return results
+}
 
-	// Print results.
-	fmt.Println("fuse doctor")
-	fmt.Println("===========")
-	fmt.Println()
+// printDoctorResults prints each check result and applies auto-fixes.
+// Returns (passes, warns, fails, fixed) counts.
+func printDoctorResults(results []checkResult) (int, int, int, int) {
+	var passes, fails, warns, fixed int
 
-	passes := 0
-	fails := 0
-	warns := 0
-
-	var fixed int
 	for _, r := range results {
 		icon := "[ PASS ]"
 		switch r.status {
@@ -124,48 +147,45 @@ func runDoctor(live, security bool) error {
 			passes++
 		}
 		fmt.Printf("  %s  %s\n", icon, r.name)
-		if r.detail != "" {
-			detail := r.detail
-			if !doctorVerbose && len(detail) > 120 {
-				// Count semicolons as a proxy for number of items.
-				items := strings.Count(detail, ";") + 1
-				if items > 2 {
-					// Truncate: show first item + count.
-					first := strings.SplitN(detail, ";", 2)[0]
-					detail = fmt.Sprintf("%s (and %d more — use --verbose for full list)", strings.TrimSpace(first), items-1)
-				}
-			}
-			fmt.Printf("           %s\n", detail)
-		}
-		if r.fixHint != "" && r.status == "WARN" {
-			if doctorFix && r.fixFunc != nil {
-				fmt.Printf("           fixing: %s\n", r.fixHint)
-				if err := r.fixFunc(); err != nil {
-					fmt.Printf("           fix failed: %v\n", err)
-				} else {
-					fmt.Printf("           fixed.\n")
-					fixed++
-				}
-			} else if !doctorFix {
-				fmt.Printf("           fix: %s\n", r.fixHint)
-			}
+		printResultDetail(r)
+		fixed += applyResultFix(r)
+	}
+	return passes, warns, fails, fixed
+}
+
+// printResultDetail prints the detail line for a check result, truncating if needed.
+func printResultDetail(r checkResult) {
+	if r.detail == "" {
+		return
+	}
+	detail := r.detail
+	if !doctorVerbose && len(detail) > 120 {
+		items := strings.Count(detail, ";") + 1
+		if items > 2 {
+			first := strings.SplitN(detail, ";", 2)[0]
+			detail = fmt.Sprintf("%s (and %d more — use --verbose for full list)", strings.TrimSpace(first), items-1)
 		}
 	}
+	fmt.Printf("           %s\n", detail)
+}
 
-	fmt.Println()
-	summary := fmt.Sprintf("Results: %d passed, %d warnings, %d failed", passes, warns, fails)
-	if fixed > 0 {
-		summary += fmt.Sprintf(", %d auto-fixed", fixed)
+// applyResultFix attempts to auto-fix a warning if --fix is set. Returns 1 if fixed, 0 otherwise.
+func applyResultFix(r checkResult) int {
+	if r.fixHint == "" || r.status != "WARN" {
+		return 0
 	}
-	fmt.Println(summary)
-
-	// Policy recommendations from approval history.
-	printPolicyRecommendations()
-
-	if fails > 0 {
-		return fmt.Errorf("%d check(s) failed", fails)
+	if doctorFix && r.fixFunc != nil {
+		fmt.Printf("           fixing: %s\n", r.fixHint)
+		if err := r.fixFunc(); err != nil {
+			fmt.Printf("           fix failed: %v\n", err)
+		} else {
+			fmt.Printf("           fixed.\n")
+			return 1
+		}
+	} else if !doctorFix {
+		fmt.Printf("           fix: %s\n", r.fixHint)
 	}
-	return nil
+	return 0
 }
 
 // printPolicyRecommendations queries the event database for frequently-approved
@@ -415,7 +435,7 @@ func checkTagOverrides() checkResult {
 	policyPath := config.PolicyPath()
 	if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
 		return checkResult{
-			name:   "Tag overrides",
+			name:   checkNameTagOverrides,
 			status: "PASS",
 			detail: "no policy file (no tag overrides configured)",
 		}
@@ -423,7 +443,7 @@ func checkTagOverrides() checkResult {
 	policyCfg, err := policy.LoadPolicy(policyPath)
 	if err != nil {
 		return checkResult{
-			name:   "Tag overrides",
+			name:   checkNameTagOverrides,
 			status: "FAIL",
 			detail: fmt.Sprintf("cannot load policy.yaml: %v", err),
 		}
@@ -432,7 +452,7 @@ func checkTagOverrides() checkResult {
 	overrides, parseErr := policy.ParseTagOverrides(policyCfg)
 	if parseErr != nil {
 		return checkResult{
-			name:   "Tag overrides",
+			name:   checkNameTagOverrides,
 			status: "FAIL",
 			detail: fmt.Sprintf("invalid tag_overrides in policy.yaml: %v", parseErr),
 		}
@@ -440,7 +460,7 @@ func checkTagOverrides() checkResult {
 
 	if len(overrides) == 0 {
 		return checkResult{
-			name:   "Tag overrides",
+			name:   checkNameTagOverrides,
 			status: "PASS",
 			detail: "no tag overrides configured (all rules follow global mode)",
 		}
@@ -452,7 +472,7 @@ func checkTagOverrides() checkResult {
 	}
 	sort.Strings(details)
 	return checkResult{
-		name:   "Tag overrides",
+		name:   checkNameTagOverrides,
 		status: "PASS",
 		detail: fmt.Sprintf("%d tag override(s): %s", len(details), strings.Join(details, ", ")),
 	}
@@ -571,7 +591,7 @@ func isFuseHookDef(h interface{}) bool {
 	hookType, _ := hMap["type"].(string)
 	cmd, _ := hMap["command"].(string)
 	timeout, _ := hMap["timeout"].(float64)
-	return cmd == "fuse hook evaluate" && hookType == "command" && timeout == 30
+	return cmd == fuseHookCommand && hookType == "command" && timeout == 30
 }
 
 // checkSQLiteDB checks that the SQLite database is accessible if it exists.

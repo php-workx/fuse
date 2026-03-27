@@ -14,6 +14,9 @@ import (
 const (
 	codexConfigDir  = ".codex"
 	codexConfigFile = "config.toml"
+
+	// fuseHookCommand is the command string used in Claude Code PreToolUse hook entries.
+	fuseHookCommand = "fuse hook evaluate"
 )
 
 var installCmd = &cobra.Command{
@@ -71,33 +74,46 @@ func rejectSymlinkedClaudeSettingsPath(settingsPath string) error {
 	// home directory. System-level symlinks (e.g., /var -> /private/var on
 	// macOS) are normal and should not be flagged.
 	homeDir, _ := os.UserHomeDir()
+	cleanHome := filepath.Clean(homeDir)
 	for candidate := filepath.Clean(settingsPath); ; {
 		// Stop at home directory — system paths above it may have normal symlinks.
-		if homeDir != "" && candidate == filepath.Clean(homeDir) {
+		if homeDir != "" && candidate == cleanHome {
 			break
 		}
-		info, err := os.Lstat(candidate)
+		next, err := checkAncestorSymlink(candidate)
 		if err != nil {
-			if os.IsNotExist(err) {
-				parent := filepath.Dir(candidate)
-				if parent == candidate {
-					break
-				}
-				candidate = parent
-				continue
-			}
-			return fmt.Errorf("inspect %s: %w", candidate, err)
+			return err
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("refusing to use symlinked Claude settings path %s", candidate)
-		}
-		parent := filepath.Dir(candidate)
-		if parent == candidate {
+		if next == "" {
 			break
 		}
-		candidate = parent
+		candidate = next
 	}
 	return nil
+}
+
+// checkAncestorSymlink checks whether a path component is a symlink.
+// Returns the parent path to continue walking, or "" to stop.
+func checkAncestorSymlink(candidate string) (string, error) {
+	info, err := os.Lstat(candidate)
+	if err != nil {
+		if os.IsNotExist(err) {
+			parent := filepath.Dir(candidate)
+			if parent == candidate {
+				return "", nil
+			}
+			return parent, nil
+		}
+		return "", fmt.Errorf("inspect %s: %w", candidate, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return "", fmt.Errorf("refusing to use symlinked Claude settings path %s", candidate)
+	}
+	parent := filepath.Dir(candidate)
+	if parent == candidate {
+		return "", nil
+	}
+	return parent, nil
 }
 
 // installClaude installs fuse as a Claude Code PreToolUse hook.
@@ -175,7 +191,7 @@ func mergeFuseHookMatchers(settings map[string]interface{}, matchers []string) {
 		wantedMatchers = append(wantedMatchers, fuseMatcherEntry{
 			Matcher: matcher,
 			Hooks: []fuseHookEntry{
-				{Type: "command", Command: "fuse hook evaluate", Timeout: 300},
+				{Type: "command", Command: fuseHookCommand, Timeout: 300},
 			},
 		})
 	}
@@ -214,7 +230,7 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 	hooksRaw, ok := entry["hooks"]
 	if !ok {
 		entry["hooks"] = fuseHooksToInterface([]fuseHookEntry{
-			{Type: "command", Command: "fuse hook evaluate", Timeout: 300},
+			{Type: "command", Command: fuseHookCommand, Timeout: 300},
 		})
 		return entry
 	}
@@ -222,7 +238,7 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 	hooks, ok := hooksRaw.([]interface{})
 	if !ok {
 		entry["hooks"] = fuseHooksToInterface([]fuseHookEntry{
-			{Type: "command", Command: "fuse hook evaluate", Timeout: 300},
+			{Type: "command", Command: fuseHookCommand, Timeout: 300},
 		})
 		return entry
 	}
@@ -234,7 +250,7 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 			continue
 		}
 		cmd, _ := hMap["command"].(string)
-		if cmd == "fuse hook evaluate" {
+		if cmd == fuseHookCommand {
 			// Already present — update timeout.
 			hMap["timeout"] = float64(300)
 			return entry
@@ -244,7 +260,7 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 	// Not present, add it.
 	fuseHook := map[string]interface{}{
 		"type":    "command",
-		"command": "fuse hook evaluate",
+		"command": fuseHookCommand,
 		"timeout": float64(300),
 	}
 	hooks = append(hooks, fuseHook)

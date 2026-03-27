@@ -160,35 +160,36 @@ func (m ApprovalsModel) handleNormalKey(k tea.Key) (ApprovalsModel, tea.Cmd) {
 	case key.Matches(k, keys.Down):
 		m.moveCursor(1)
 
-	// Approve pending request.
+	// Action keys (approve, deny, detail, revoke, purge).
+	default:
+		return m.handleActionKey(k)
+	}
+	return m, nil
+}
+
+// handleActionKey handles action key presses (approve, deny, detail, revoke, purge).
+func (m ApprovalsModel) handleActionKey(k tea.Key) (ApprovalsModel, tea.Cmd) {
+	switch {
 	case k.Code == 'a':
 		if m.focus == focusPending && len(m.pending) > 0 {
 			m.scopeSelect = true
 			return m, nil
 		}
-
-	// Deny pending request.
 	case k.Code == 'd' || k.Code == 'n':
 		if m.focus == focusPending && len(m.pending) > 0 {
 			return m, m.denyCmd()
 		}
-
-	// Toggle detail panel for history item.
 	case key.Matches(k, keys.Enter):
 		if m.focus == focusHistory && len(m.approvals) > 0 {
 			m.toggleDetail()
 			return m, nil
 		}
-
-	// Revoke approval from history.
 	case key.Matches(k, keys.Delete):
 		if m.focus == focusHistory && len(m.approvals) > 0 {
 			m.confirming = "delete"
 			m.confirmID = m.approvals[m.historyIdx].ID
 			return m, nil
 		}
-
-	// Purge expired/consumed.
 	case key.Matches(k, keys.BulkPurge):
 		m.confirming = "purge"
 		return m, nil
