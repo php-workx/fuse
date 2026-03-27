@@ -102,9 +102,9 @@ func TestGoldenFixtures_HighRiskFamilyCoverage(t *testing.T) {
 			pattern:  regexp.MustCompile(`\bdocker\b`),
 			minTotal: 8,
 			requiredByDec: map[string]int{
-				string(core.DecisionSafe):     3,
-				string(core.DecisionCaution):  2,
-				string(core.DecisionApproval): 3,
+				string(core.DecisionSafe):    3,
+				string(core.DecisionCaution): 2,
+				string(core.DecisionBlocked): 2, // mount-sock, mount-root
 			},
 		},
 	}
