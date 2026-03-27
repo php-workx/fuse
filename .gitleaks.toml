@@ -8,9 +8,11 @@
 
   # SonarQube default credentials used in sonar-setup recipe (well-known defaults, not real secrets).
   # Test fixtures in db_test.go use fake credential patterns for scrubbing verification.
+  # Spec reviews contain example exploit patterns with fake secrets for illustration.
   paths = [
     '''justfile''',
     '''internal/db/db_test.go''',
+    '''specs/reviews/''',
   ]
   regexTarget = "match"
   regexes = [
