@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -207,10 +208,11 @@ func printPolicyRecommendations() {
 	fmt.Println("----------------------")
 	fmt.Printf("Based on your approval history, consider adding these rules to policy.yaml:\n\n")
 	for _, r := range recs {
+		regexVal := "^" + escapePattern(r.Command) + "$"
 		fmt.Printf("  # Approved %d times: %s\n", r.Count, truncateCmd(r.Command, 60))
-		fmt.Printf("  - pattern: \"^%s$\"\n", escapePattern(r.Command))
-		fmt.Printf("    action: \"allow\"\n")
-		fmt.Printf("    reason: \"approved %d times\"\n\n", r.Count)
+		fmt.Printf("  - pattern: %s\n", strconv.Quote(regexVal))
+		fmt.Printf("    action: %s\n", strconv.Quote("allow"))
+		fmt.Printf("    reason: %s\n\n", strconv.Quote(fmt.Sprintf("approved %d times", r.Count)))
 	}
 }
 
@@ -582,7 +584,7 @@ func hasFuseHookInEntry(entryMap map[string]interface{}) bool {
 }
 
 // isFuseHookDef returns true if the hook definition matches the expected
-// fuse hook configuration: command="fuse hook evaluate", type="command", timeout=30.
+// fuse hook configuration: command="fuse hook evaluate", type="command", timeout=300.
 func isFuseHookDef(h interface{}) bool {
 	hMap, ok := h.(map[string]interface{})
 	if !ok {
@@ -591,7 +593,7 @@ func isFuseHookDef(h interface{}) bool {
 	hookType, _ := hMap["type"].(string)
 	cmd, _ := hMap["command"].(string)
 	timeout, _ := hMap["timeout"].(float64)
-	return cmd == fuseHookCommand && hookType == "command" && timeout == 30
+	return cmd == fuseHookCommand && hookType == "command" && (timeout == 30 || timeout == 300)
 }
 
 // checkSQLiteDB checks that the SQLite database is accessible if it exists.

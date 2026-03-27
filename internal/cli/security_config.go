@@ -209,10 +209,10 @@ func checkSingleMCPServer(name string, entryRaw interface{}, configured map[stri
 		return fmt.Sprintf("mcpServers.%s is not mediated through fuse", name), false
 	}
 	if downstreamName == "" {
-		return fmt.Sprintf("mcpServers.%s is missing configured --downstream-name", name), false
+		return fmt.Sprintf("mcpServers.%s is missing configured --downstream-name", name), true
 	}
 	if !configuredMCPProxyExists(configured, downstreamName) {
-		return fmt.Sprintf("mcpServers.%s references unknown downstream MCP proxy %q", name, downstreamName), false
+		return fmt.Sprintf("mcpServers.%s references unknown downstream MCP proxy %q", name, downstreamName), true
 	}
 	return "", true
 }

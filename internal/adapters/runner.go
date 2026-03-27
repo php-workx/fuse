@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -200,7 +201,11 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	}
 
 	// Load policy.
-	policyCfg, _ := policy.LoadPolicyWithLKG(config.PolicyPath(), 0)
+	policyCfg, err := policy.LoadPolicyWithLKG(config.PolicyPath(), 0)
+	if err != nil && !os.IsNotExist(err) {
+		slog.Warn("policy load failed for runner command", "path", config.PolicyPath(), "error", err)
+		return 1, fmt.Errorf("load policy: %w", err)
+	}
 	evaluator := policy.NewEvaluator(policyCfg)
 
 	// Classify the command.
@@ -456,7 +461,9 @@ func newEvent(result *core.ClassifyResult, source, agent, sessionID, command, cw
 func loadRuntimeConfig() *config.Config {
 	cfg, err := config.LoadConfig(config.ConfigPath())
 	if err != nil {
-		return config.DefaultConfig()
+		cfg = config.DefaultConfig()
+		core.SetTrustedDomains(cfg.URLTrustPolicy.TrustedDomains)
+		return cfg
 	}
 	// Apply URL trust policy from config to the URL inspection module.
 	core.SetTrustedDomains(cfg.URLTrustPolicy.TrustedDomains)

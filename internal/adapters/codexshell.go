@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -269,7 +271,11 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 		return "", "", 0, ctx.Err()
 	}
 
-	policyCfg, _ := policy.LoadPolicyWithLKG(config.PolicyPath(), 0)
+	policyCfg, err := policy.LoadPolicyWithLKG(config.PolicyPath(), 0)
+	if err != nil && !os.IsNotExist(err) {
+		slog.Warn("policy load failed for codex shell request", "path", config.PolicyPath(), "error", err)
+		return "", "", 0, fmt.Errorf("load policy: %w", err)
+	}
 	evaluator := policy.NewEvaluator(policyCfg)
 	req := core.ShellRequest{
 		RawCommand: command,
