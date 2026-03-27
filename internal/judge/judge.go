@@ -243,33 +243,7 @@ func MaybeJudge(ctx context.Context, cfg *config.Config, result *core.ClassifyRe
 	}
 
 	if verdict.Applied {
-		judgeSev := core.DecisionSeverity(verdict.JudgeDecision)
-		origSev := core.DecisionSeverity(result.Decision)
-
-		if judgeSev < origSev {
-			// Attempting downgrade — apply guards.
-
-			// Guard 1: Fail-closed results are never downgradeable.
-			// These APPROVALs mean "I can't analyze this" — the judge
-			// shouldn't override them regardless of confidence.
-			if result.FailClosed {
-				verdict.Applied = false
-				verdict.Reasoning += " (downgrade blocked: fail-closed classification)"
-			}
-
-			// Guard 2: ExtractionIncomplete results are never downgradeable (SEC-009).
-			if promptCtx.ExtractionIncomplete {
-				verdict.Applied = false
-				verdict.Reasoning += " (downgrade blocked: extraction incomplete)"
-			}
-
-			// Guard 3: APPROVAL may downgrade to CAUTION but never to SAFE.
-			// Prevents prompt injection from completely removing protection.
-			if verdict.Applied && result.Decision == core.DecisionApproval &&
-				verdict.JudgeDecision == core.DecisionSafe {
-				verdict.JudgeDecision = core.DecisionCaution
-			}
-		}
+		applyDowngradeGuards(verdict, result, promptCtx)
 
 		if verdict.Applied {
 			result = result.WithDecision(verdict.JudgeDecision,
@@ -278,4 +252,37 @@ func MaybeJudge(ctx context.Context, cfg *config.Config, result *core.ClassifyRe
 	}
 
 	return result, verdict
+}
+
+// applyDowngradeGuards enforces safety guards when the judge attempts to
+// downgrade a classification. It may clear verdict.Applied or adjust
+// verdict.JudgeDecision in place.
+func applyDowngradeGuards(verdict *Verdict, result *core.ClassifyResult, promptCtx PromptContext) {
+	judgeSev := core.DecisionSeverity(verdict.JudgeDecision)
+	origSev := core.DecisionSeverity(result.Decision)
+
+	if judgeSev >= origSev {
+		return // not a downgrade
+	}
+
+	// Guard 1: Fail-closed results are never downgradeable.
+	// These APPROVALs mean "I can't analyze this" — the judge
+	// shouldn't override them regardless of confidence.
+	if result.FailClosed {
+		verdict.Applied = false
+		verdict.Reasoning += " (downgrade blocked: fail-closed classification)"
+	}
+
+	// Guard 2: ExtractionIncomplete results are never downgradeable (SEC-009).
+	if promptCtx.ExtractionIncomplete {
+		verdict.Applied = false
+		verdict.Reasoning += " (downgrade blocked: extraction incomplete)"
+	}
+
+	// Guard 3: APPROVAL may downgrade to CAUTION but never to SAFE.
+	// Prevents prompt injection from completely removing protection.
+	if verdict.Applied && result.Decision == core.DecisionApproval &&
+		verdict.JudgeDecision == core.DecisionSafe {
+		verdict.JudgeDecision = core.DecisionCaution
+	}
 }

@@ -14,6 +14,9 @@ import (
 	"github.com/php-workx/fuse/internal/db"
 )
 
+// errMsgPrefix is the prefix for error status messages.
+const errMsgPrefix = "Error: "
+
 type approvalFocus int
 
 const (
@@ -22,7 +25,8 @@ const (
 )
 
 // timestampFormat is the standard timestamp format used for parsing approval timestamps.
-const timestampFormat = "2006-01-02T15:04:05.000Z"
+// Delegates to the canonical constant defined in the db package.
+const timestampFormat = db.TimestampMillisFormat
 
 // ApprovalsModel renders pending approval requests and approval history.
 type ApprovalsModel struct {
@@ -182,25 +186,25 @@ func (m *ApprovalsModel) handleActionResult(msg tea.Msg) {
 	switch msg := msg.(type) {
 	case approveResultMsg:
 		if msg.err != nil {
-			m.statusMsg = "Error: " + msg.err.Error()
+			m.statusMsg = errMsgPrefix + msg.err.Error()
 		} else {
 			m.statusMsg = "Approved (" + msg.scope + ")"
 		}
 	case denyResultMsg:
 		if msg.err != nil {
-			m.statusMsg = "Error: " + msg.err.Error()
+			m.statusMsg = errMsgPrefix + msg.err.Error()
 		} else {
 			m.statusMsg = "Denied"
 		}
 	case deleteResultMsg:
 		if msg.err != nil {
-			m.statusMsg = "Error: " + msg.err.Error()
+			m.statusMsg = errMsgPrefix + msg.err.Error()
 		} else {
 			m.statusMsg = "Revoked"
 		}
 	case purgeResultMsg:
 		if msg.err != nil {
-			m.statusMsg = "Error: " + msg.err.Error()
+			m.statusMsg = errMsgPrefix + msg.err.Error()
 		} else {
 			m.statusMsg = fmt.Sprintf("Purged %d", msg.deleted)
 		}

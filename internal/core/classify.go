@@ -290,7 +290,6 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 
 	// Step 4a: Classification normalize.
 	classified := ClassificationNormalize(subCmd)
-	outerCmd := classified.Outer
 
 	// Fail-closed: if bash -c extraction failed, force APPROVAL.
 	if classified.ExtractionFailed {
@@ -301,7 +300,27 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	}
 
 	// Classify all commands (outer + inner), take most restrictive.
-	allCmds := []string{outerCmd}
+	classifyAllNormalizedCommands(&sub, classified, evaluator, cwd)
+
+	// Apply post-classification modifiers.
+	applyEnvVarEscalations(&sub, subCmd, classified)
+
+	// Detect fail-closed APPROVAL from file inspection or TOFU verification.
+	detectFailClosedApproval(&sub, subCmd, cwd)
+
+	// Extract and classify inline script bodies (heredocs, $() contents).
+	applyInlineClassification(&sub, subCmd, evaluator, cwd)
+
+	// URL inspection: scan command and extracted inline bodies for URLs (SEC-006).
+	applyURLInspection(&sub, subCmd, sub.InlineBody)
+
+	return sub
+}
+
+// classifyAllNormalizedCommands classifies the outer and inner commands from
+// normalization and populates the SubCommandResult with the most restrictive decision.
+func classifyAllNormalizedCommands(sub *SubCommandResult, classified ClassifiedCommand, evaluator PolicyEvaluator, cwd string) {
+	allCmds := []string{classified.Outer}
 	allCmds = append(allCmds, classified.Inner...)
 
 	bestDecision := DecisionSafe
@@ -314,7 +333,6 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 		if cmd == "" {
 			continue
 		}
-
 		d, reason, ruleID, dryMatches, override := classifySingleCommand(cmd, evaluator, cwd)
 		combined := MaxDecision(bestDecision, d)
 		if combined != bestDecision {
@@ -331,12 +349,22 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 		bestDecision, bestReason = escalateDecision(bestDecision, bestReason)
 	}
 
+	sub.Decision = bestDecision
+	sub.Reason = bestReason
+	sub.RuleID = bestRuleID
+	sub.DryRunMatches = allDryRunMatches
+	sub.TagOverrideEnforced = tagOverrideEnforced
+}
+
+// applyEnvVarEscalations applies sensitive environment variable detection and
+// assignment escalation modifiers to the sub-command result.
+func applyEnvVarEscalations(sub *SubCommandResult, subCmd string, classified ClassifiedCommand) {
 	// Sensitive env var detection (§5.3 from issue).
 	if reSensitiveEnvVar.MatchString(subCmd) {
-		escalated := MaxDecision(bestDecision, DecisionCaution)
-		if escalated != bestDecision {
-			bestDecision = escalated
-			bestReason = "references sensitive environment variable"
+		escalated := MaxDecision(sub.Decision, DecisionCaution)
+		if escalated != sub.Decision {
+			sub.Decision = escalated
+			sub.Reason = "references sensitive environment variable"
 		}
 	}
 
@@ -344,34 +372,37 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	// Applied after the classification loop so it doesn't short-circuit
 	// BLOCKED detection (e.g., LD_PRELOAD=/evil rm -rf / should be BLOCKED, not APPROVAL).
 	if classified.SensitiveEnvAssignment {
-		combined := MaxDecision(bestDecision, DecisionApproval)
-		if combined != bestDecision {
-			bestDecision = combined
-			bestReason = "security-sensitive environment variable assignment (via env or bare prefix)"
+		combined := MaxDecision(sub.Decision, DecisionApproval)
+		if combined != sub.Decision {
+			sub.Decision = combined
+			sub.Reason = "security-sensitive environment variable assignment (via env or bare prefix)"
 		}
 	}
+}
 
-	sub.Decision = bestDecision
-	sub.Reason = bestReason
-	sub.RuleID = bestRuleID
-	sub.DryRunMatches = allDryRunMatches
-	sub.TagOverrideEnforced = tagOverrideEnforced
-
-	// Detect fail-closed APPROVAL from file inspection or TOFU verification.
-	// These are "can't analyze" signals where the judge should not downgrade.
-	if bestDecision == DecisionApproval {
-		refFile := DetectReferencedFile(subCmd)
-		if refFile != "" {
-			resolvedPath := resolvePath(refFile, cwd)
-			if inspection, err := InspectFile(resolvedPath, DefaultMaxBytes); err == nil && inspection != nil {
-				if !inspection.Exists || (inspection.Truncated && len(inspection.Signals) == 0) {
-					sub.FailClosed = true
-				}
-			}
-		}
+// detectFailClosedApproval marks APPROVAL results as fail-closed when the
+// referenced file cannot be fully analyzed (missing or truncated with no signals).
+func detectFailClosedApproval(sub *SubCommandResult, subCmd, cwd string) {
+	if sub.Decision != DecisionApproval {
+		return
 	}
+	refFile := DetectReferencedFile(subCmd)
+	if refFile == "" {
+		return
+	}
+	resolvedPath := resolvePath(refFile, cwd)
+	inspection, err := InspectFile(resolvedPath, DefaultMaxBytes)
+	if err != nil || inspection == nil {
+		return
+	}
+	if !inspection.Exists || (inspection.Truncated && len(inspection.Signals) == 0) {
+		sub.FailClosed = true
+	}
+}
 
-	// Extract and classify inline script bodies (heredocs, $() contents).
+// applyInlineClassification extracts and classifies inline script bodies
+// (heredocs, $() contents) and merges the result into the sub-command result.
+func applyInlineClassification(sub *SubCommandResult, subCmd string, evaluator PolicyEvaluator, cwd string) {
 	inlineResult := classifyInlineBodies(subCmd, evaluator, cwd)
 	sub.InlineBody = inlineResult.body
 	sub.ExtractionIncomplete = !inlineResult.complete
@@ -387,11 +418,6 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 			sub.RuleID = "" // inline analysis wins — clear stale RuleID
 		}
 	}
-
-	// URL inspection: scan command and extracted inline bodies for URLs (SEC-006).
-	applyURLInspection(&sub, subCmd, inlineResult.body)
-
-	return sub
 }
 
 // applyURLInspection scans the command and inline body for URL-based threats.

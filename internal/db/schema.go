@@ -8,72 +8,68 @@ import (
 // currentSchemaVersion is the latest schema version applied by migrate.
 const currentSchemaVersion = "6"
 
+// migrationStep maps a schema version to its migration function.
+type migrationStep struct {
+	fromVersion string // version that triggers this migration ("" for initial)
+	apply       func(*sql.DB) error
+	toVersion   string // version after successful migration
+}
+
+// migrationSteps defines the ordered sequence of schema migrations.
+var migrationSteps = []migrationStep{
+	{"", applyV1, "1"},
+	{"1", applyV2, "2"},
+	{"2", applyV3, "3"},
+	{"3", applyV4, "4"},
+	{"4", applyV5, "5"},
+	{"5", applyV6, "6"},
+}
+
 // migrate creates or updates the database schema.
 func migrate(db *sql.DB) error {
-	// Create the schema_meta table first so we can track versions.
-	if _, err := db.Exec(`
+	if err := ensureSchemaMeta(db); err != nil {
+		return err
+	}
+
+	version, err := readSchemaVersion(db)
+	if err != nil {
+		return err
+	}
+	if version == currentSchemaVersion {
+		return nil
+	}
+
+	for _, step := range migrationSteps {
+		if version != step.fromVersion {
+			continue
+		}
+		if err := step.apply(db); err != nil {
+			return err
+		}
+		version = step.toVersion
+	}
+	return nil
+}
+
+// ensureSchemaMeta creates the schema_meta table if it doesn't exist.
+func ensureSchemaMeta(db *sql.DB) error {
+	_, err := db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_meta (
 			key   TEXT PRIMARY KEY,
 			value TEXT NOT NULL
 		)
-	`); err != nil {
-		return err
-	}
+	`)
+	return err
+}
 
-	// Read current version (empty string if table is empty).
+// readSchemaVersion returns the current schema version, or "" if unset.
+func readSchemaVersion(db *sql.DB) (string, error) {
 	var version string
 	row := db.QueryRow(`SELECT value FROM schema_meta WHERE key = 'version'`)
 	if err := row.Scan(&version); err != nil && err != sql.ErrNoRows {
-		return err
+		return "", err
 	}
-
-	if version == currentSchemaVersion {
-		return nil // already up to date
-	}
-
-	// Apply schema v1.
-	if version == "" {
-		if err := applyV1(db); err != nil {
-			return err
-		}
-		version = "1"
-	}
-
-	if version == "1" {
-		if err := applyV2(db); err != nil {
-			return err
-		}
-		version = "2"
-	}
-
-	if version == "2" {
-		if err := applyV3(db); err != nil {
-			return err
-		}
-		version = "3"
-	}
-
-	if version == "3" {
-		if err := applyV4(db); err != nil {
-			return err
-		}
-		version = "4"
-	}
-
-	if version == "4" {
-		if err := applyV5(db); err != nil {
-			return err
-		}
-		version = "5"
-	}
-
-	if version == "5" {
-		if err := applyV6(db); err != nil {
-			return err
-		}
-	}
-
-	return nil
+	return version, nil
 }
 
 func applyV1(db *sql.DB) error {

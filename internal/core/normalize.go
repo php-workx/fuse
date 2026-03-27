@@ -224,53 +224,77 @@ func handleSSH(tokens []string, i int, result *ClassifiedCommand) bool {
 func tokenizeQuoteAware(s string) ([]string, bool) {
 	var tokens []string
 	var current strings.Builder
-	inSingle := false
-	inDouble := false
-	escaped := false
+	state := &quoteState{}
 
 	for idx := 0; idx < len(s); idx++ {
 		ch := s[idx]
-
-		if escaped {
+		action := state.processChar(ch)
+		switch action {
+		case charConsumed:
 			current.WriteByte(ch)
-			escaped = false
-			continue
-		}
-
-		if ch == '\\' && !inSingle {
-			escaped = true
-			// In double-quote context, keep the backslash for non-special chars
-			// For simplicity in tokenization, we just skip the backslash
-			continue
-		}
-
-		if ch == '\'' && !inDouble {
-			inSingle = !inSingle
-			continue
-		}
-
-		if ch == '"' && !inSingle {
-			inDouble = !inDouble
-			continue
-		}
-
-		if (ch == ' ' || ch == '\t') && !inSingle && !inDouble {
+		case charToggle:
+			// Quote toggled; character itself is not written.
+		case charWhitespace:
 			if current.Len() > 0 {
 				tokens = append(tokens, current.String())
 				current.Reset()
 			}
-			continue
+		case charEscaped:
+			// Backslash consumed; nothing written yet.
 		}
-
-		current.WriteByte(ch)
 	}
 
 	if current.Len() > 0 {
 		tokens = append(tokens, current.String())
 	}
 
-	unbalanced := inSingle || inDouble
-	return tokens, unbalanced
+	return tokens, state.unbalanced()
+}
+
+// charAction describes what the tokenizer should do after processing a character.
+type charAction int
+
+const (
+	charConsumed   charAction = iota // write the character to the current token
+	charToggle                       // quote toggled; skip the character
+	charWhitespace                   // whitespace outside quotes; flush token
+	charEscaped                      // backslash consumed; skip the character
+)
+
+// quoteState tracks the quoting context during tokenization.
+type quoteState struct {
+	inSingle bool
+	inDouble bool
+	escaped  bool
+}
+
+func (q *quoteState) unbalanced() bool {
+	return q.inSingle || q.inDouble
+}
+
+// processChar evaluates a single character in the current quoting context and
+// returns the action the tokenizer should take.
+func (q *quoteState) processChar(ch byte) charAction {
+	if q.escaped {
+		q.escaped = false
+		return charConsumed
+	}
+	if ch == '\\' && !q.inSingle {
+		q.escaped = true
+		return charEscaped
+	}
+	if ch == '\'' && !q.inDouble {
+		q.inSingle = !q.inSingle
+		return charToggle
+	}
+	if ch == '"' && !q.inSingle {
+		q.inDouble = !q.inDouble
+		return charToggle
+	}
+	if (ch == ' ' || ch == '\t') && !q.inSingle && !q.inDouble {
+		return charWhitespace
+	}
+	return charConsumed
 }
 
 // stripWrappers removes known wrapper prefixes and their flags/arguments

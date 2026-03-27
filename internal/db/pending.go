@@ -70,7 +70,7 @@ func (d *DB) DeletePendingRequest(id string) error {
 // CleanupStalePendingRequests removes requests older than maxAge.
 // Returns the number of deleted rows.
 func (d *DB) CleanupStalePendingRequests(maxAge time.Duration) (int64, error) {
-	cutoff := time.Now().UTC().Add(-maxAge).Format("2006-01-02T15:04:05.000Z")
+	cutoff := time.Now().UTC().Add(-maxAge).Format(TimestampMillisFormat)
 	result, err := d.db.Exec("DELETE FROM pending_requests WHERE created_at < ?", cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("cleanup stale pending requests: %w", err)

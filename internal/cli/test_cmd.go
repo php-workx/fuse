@@ -13,6 +13,12 @@ import (
 	"github.com/php-workx/fuse/internal/policy"
 )
 
+// Format strings for classification/inspection output.
+const (
+	fmtDecision = "  Decision:   %s\n"
+	fmtReason   = "  Reason:     %s\n"
+)
+
 var testCmd = &cobra.Command{
 	Use:     "test",
 	Short:   "Test commands for dry-run classification and inspection",
@@ -68,8 +74,8 @@ func runTestClassify(command string) error {
 	fmt.Println("Classification Result")
 	fmt.Println("=====================")
 	fmt.Printf("  Command:    %s\n", command)
-	fmt.Printf("  Decision:   %s\n", result.Decision)
-	fmt.Printf("  Reason:     %s\n", result.Reason)
+	fmt.Printf(fmtDecision, result.Decision)
+	fmt.Printf(fmtReason, result.Reason)
 	if result.RuleID != "" {
 		fmt.Printf("  Rule ID:    %s\n", result.RuleID)
 	}
@@ -111,16 +117,16 @@ func runTestInspect(path string) error {
 	fmt.Printf("  Exists:     %v\n", inspection.Exists)
 
 	if !inspection.Exists {
-		fmt.Printf("  Decision:   %s\n", inspection.Decision)
-		fmt.Printf("  Reason:     %s\n", inspection.Reason)
+		fmt.Printf(fmtDecision, inspection.Decision)
+		fmt.Printf(fmtReason, inspection.Reason)
 		return nil
 	}
 
 	fmt.Printf("  Size:       %d bytes\n", inspection.Size)
 	fmt.Printf("  Truncated:  %v\n", inspection.Truncated)
 	fmt.Printf("  Hash:       %s\n", inspection.Hash)
-	fmt.Printf("  Decision:   %s\n", inspection.Decision)
-	fmt.Printf("  Reason:     %s\n", inspection.Reason)
+	fmt.Printf(fmtDecision, inspection.Decision)
+	fmt.Printf(fmtReason, inspection.Reason)
 
 	if len(inspection.Signals) > 0 {
 		fmt.Println()

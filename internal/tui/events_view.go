@@ -494,7 +494,7 @@ func pageSize(height int) int {
 }
 
 func formatTime(ts string) string {
-	t, err := time.Parse("2006-01-02T15:04:05.000Z", ts)
+	t, err := time.Parse(db.TimestampMillisFormat, ts)
 	if err != nil {
 		// Try without milliseconds.
 		t, err = time.Parse("2006-01-02T15:04:05Z", ts)

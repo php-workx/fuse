@@ -34,6 +34,7 @@ const (
 	checkNameCodexSecurityPosture  = "Codex security posture"
 	checkNameApprovalTerminalTrust = "Approval terminal trust"
 	checkNameLiveForegroundHandoff = "Live foreground process-group handoff"
+	checkNameFuseInPath            = "fuse binary in PATH"
 )
 
 var (
@@ -512,12 +513,7 @@ func hasFuseHook(settings map[string]interface{}) bool {
 		return false
 	}
 
-	preToolUseRaw, ok := hooksObj["PreToolUse"]
-	if !ok {
-		return false
-	}
-
-	preToolUse, ok := preToolUseRaw.([]interface{})
+	preToolUse, ok := hooksObj["PreToolUse"].([]interface{})
 	if !ok {
 		return false
 	}
@@ -533,26 +529,9 @@ func hasFuseHook(settings map[string]interface{}) bool {
 			continue
 		}
 		matcher, _ := entryMap["matcher"].(string)
-		hooksRaw, ok := entryMap["hooks"]
-		if !ok {
-			continue
-		}
-		hooks, ok := hooksRaw.([]interface{})
-		if !ok {
-			continue
-		}
-		for _, h := range hooks {
-			hMap, ok := h.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			hookType, _ := hMap["type"].(string)
-			cmd, _ := hMap["command"].(string)
-			timeout, _ := hMap["timeout"].(float64)
-			if cmd == "fuse hook evaluate" && hookType == "command" && timeout == 30 {
-				if _, wanted := requiredMatchers[matcher]; wanted {
-					requiredMatchers[matcher] = true
-				}
+		if hasFuseHookInEntry(entryMap) {
+			if _, wanted := requiredMatchers[matcher]; wanted {
+				requiredMatchers[matcher] = true
 			}
 		}
 	}
@@ -563,6 +542,34 @@ func hasFuseHook(settings map[string]interface{}) bool {
 		}
 	}
 	return true
+}
+
+// hasFuseHookInEntry checks whether a single PreToolUse entry contains
+// the expected fuse hook configuration (command, type, and timeout).
+func hasFuseHookInEntry(entryMap map[string]interface{}) bool {
+	hooks, ok := entryMap["hooks"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, h := range hooks {
+		if isFuseHookDef(h) {
+			return true
+		}
+	}
+	return false
+}
+
+// isFuseHookDef returns true if the hook definition matches the expected
+// fuse hook configuration: command="fuse hook evaluate", type="command", timeout=30.
+func isFuseHookDef(h interface{}) bool {
+	hMap, ok := h.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	hookType, _ := hMap["type"].(string)
+	cmd, _ := hMap["command"].(string)
+	timeout, _ := hMap["timeout"].(float64)
+	return cmd == "fuse hook evaluate" && hookType == "command" && timeout == 30
 }
 
 // checkSQLiteDB checks that the SQLite database is accessible if it exists.
@@ -604,21 +611,21 @@ func checkFuseInPath() checkResult {
 			base := filepath.Base(selfPath)
 			if foundPath, lookErr := exec.LookPath(base); lookErr == nil {
 				return checkResult{
-					name:   "fuse binary in PATH",
+					name:   checkNameFuseInPath,
 					status: "PASS",
 					detail: foundPath,
 				}
 			}
 		}
 		return checkResult{
-			name:   "fuse binary in PATH",
+			name:   checkNameFuseInPath,
 			status: "WARN",
 			detail: "fuse not found in PATH (hooks may not work)",
 		}
 	}
 
 	return checkResult{
-		name:   "fuse binary in PATH",
+		name:   checkNameFuseInPath,
 		status: "PASS",
 		detail: fusePath,
 	}

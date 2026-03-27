@@ -233,19 +233,7 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 
 	// Non-canonical numeric host: decode and check against blocked ranges (SEC-002).
 	if isNonCanonicalNumericHost(host) {
-		if decoded := decodeNonCanonicalIP(host); decoded != nil {
-			// Check decoded IP against blocked/caution ranges.
-			if d, reason := matchIPRanges(decoded, host); d != "" {
-				return d, reason + " (decoded from non-canonical form)"
-			}
-			// Also check the decoded canonical form against BlockedHostnames.
-			canonical := decoded.String()
-			if BlockedHostnames[canonical] {
-				return DecisionBlocked, "blocked hostname: " + canonical + " (decoded from " + host + ")"
-			}
-		}
-		// Decoding failed or IP not in any range — still suspicious.
-		return DecisionCaution, "non-canonical numeric IP in URL"
+		return classifyNonCanonicalHost(host)
 	}
 
 	// Check against BlockedHostnames.
@@ -268,6 +256,26 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 	}
 
 	return "", ""
+}
+
+// classifyNonCanonicalHost decodes a non-canonical numeric IP and checks it
+// against blocked ranges and hostnames. Returns CAUTION if decoding fails or
+// the IP is not in any known range (still suspicious).
+func classifyNonCanonicalHost(host string) (Decision, string) {
+	decoded := decodeNonCanonicalIP(host)
+	if decoded == nil {
+		return DecisionCaution, "non-canonical numeric IP in URL"
+	}
+	// Check decoded IP against blocked/caution ranges.
+	if d, reason := matchIPRanges(decoded, host); d != "" {
+		return d, reason + " (decoded from non-canonical form)"
+	}
+	// Also check the decoded canonical form against BlockedHostnames.
+	canonical := decoded.String()
+	if BlockedHostnames[canonical] {
+		return DecisionBlocked, "blocked hostname: " + canonical + " (decoded from " + host + ")"
+	}
+	return DecisionCaution, "non-canonical numeric IP in URL"
 }
 
 // classifyIPHost checks a host against blocked and caution IP ranges.
