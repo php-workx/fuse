@@ -232,6 +232,7 @@ func escapePattern(cmd string) string {
 		`]`, `\]`, `{`, `\{`, `}`, `\}`, `^`, `\^`,
 		`$`, `\$`, `|`, `\|`,
 	)
+	cmd = strings.ReplaceAll(cmd, "-", `\-`)
 	return replacer.Replace(cmd)
 }
 

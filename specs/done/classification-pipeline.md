@@ -79,7 +79,7 @@ Pre-mortem applied: `.agents/council/2026-03-24-pre-mortem-v2-classification.md`
 - Non-allowlisted hostnames in network commands → CAUTION minimum (SEC-004)
 - Redirect-following flags (`curl -L`, `wget` default, `httpie --follow`) → CAUTION (SEC-003)
 - URL scanning runs on extracted inline bodies too, not just top-level commands (SEC-006)
-- Default-blocked URL schemes: `file`, `gopher`, `dict`, `ftp`, `scp`, `sftp`, `ldap`, `smb` (SEC-011)
+- Default-blocked URL schemes: `file`, `gopher`, `dict`, `ftp`, `ftps`, `scp`, `sftp`, `tftp`, `ldap`, `ldaps`, `smb` (SEC-011)
 - Non-canonical numeric hosts (hex, octal, decimal IP) → CAUTION (SEC-002 partial fix)
 - Scrub inline bodies with expanded patterns: PEM blocks, SSH keys, vendor tokens,
   URL userinfo, high-entropy blobs. Skip sending body to judge if still secret-heavy (SEC-010)

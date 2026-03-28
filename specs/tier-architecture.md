@@ -121,6 +121,8 @@ Note on Strict: the judge does NOT review APPROVAL in strict mode. APPROVAL alwa
 3. Override with any explicitly set values in config
 4. Explicit settings always win over profile defaults
 
+This `balanced` default applies only to the profile-resolution algorithm after a `profile` key is present. It does not override the install flow in Section 8.1, which intentionally defaults to `relaxed` because Balanced requires an LLM provider, or the migration path in Section 11.1, which also resolves missing legacy profiles to `relaxed` for existing users.
+
 This means a user can start with `profile: relaxed` and override just `caution_fallback: approve` for belt-and-suspenders behavior.
 
 ### 4.4 Config Struct Changes

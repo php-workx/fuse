@@ -288,6 +288,45 @@ func TestProxyDownstreamToAgent_ToolsListWarnsForRiskyToolNamesWithoutBlocking(t
 	}
 }
 
+func TestHandleAgentMethod_DropsBlockedNotificationWithoutResponse(t *testing.T) {
+	var agent bytes.Buffer
+	requests := newInFlightRequests()
+	msg := jsonRPCMessage{
+		"jsonrpc": "2.0",
+		"method":  "resources/read",
+		"params": map[string]interface{}{
+			"uri": "~/.fuse/state/fuse.db",
+		},
+	}
+
+	forward, err := handleAgentMethod(msg, &agent, requests)
+	if err != nil {
+		t.Fatalf("handleAgentMethod returned error: %v", err)
+	}
+	if forward {
+		t.Fatal("expected blocked notification not to be forwarded")
+	}
+	if agent.Len() != 0 {
+		t.Fatalf("expected no JSON-RPC response for blocked notification, wrote %d bytes", agent.Len())
+	}
+}
+
+func TestProcessDownstreamMessage_ForwardsServerInitiatedRequest(t *testing.T) {
+	requests := newInFlightRequests()
+	payload := []byte(`{"jsonrpc":"2.0","id":42,"method":"tools/list","params":{}}`)
+
+	forward, err := processDownstreamMessage(payload, requests)
+	if err != nil {
+		t.Fatalf("processDownstreamMessage returned error: %v", err)
+	}
+	if !forward {
+		t.Fatal("expected server-initiated request to be forwarded")
+	}
+	if _, ok := requests.pop(float64(42)); ok {
+		t.Fatal("expected server-initiated request not to consume in-flight request state")
+	}
+}
+
 func rawMCPFrame(payload []byte) string {
 	return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(payload), payload)
 }

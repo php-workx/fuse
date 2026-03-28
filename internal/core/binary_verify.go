@@ -110,13 +110,20 @@ func (t *BinaryTOFU) Verify(resolvedPath string) (Decision, string) {
 			t.mu.Unlock()
 			return DecisionBlocked, fmt.Sprintf(
 				"binary identity changed for %s (%s): expected %s, got %s",
-				basename, resolvedPath, entry.hash[:12], currentHash[:12])
+				basename, resolvedPath, hashPrefix(entry.hash), hashPrefix(currentHash))
 		}
 
 		t.entries[resolvedPath] = binaryEntry{hash: currentHash, mtime: latestInfo.ModTime(), size: latestInfo.Size()}
 		t.mu.Unlock()
 		return "", ""
 	}
+}
+
+func hashPrefix(hash string) string {
+	if len(hash) <= 12 {
+		return hash
+	}
+	return hash[:12]
 }
 
 // hashFile returns the hex-encoded SHA-256 hash of a file using streaming I/O.

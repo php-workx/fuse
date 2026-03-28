@@ -60,8 +60,8 @@ func TestInspectURLs_CarrierGradeNAT(t *testing.T) {
 
 func TestInspectURLs_NormalURL(t *testing.T) {
 	d, _ := InspectCommandURLs("curl https://api.github.com/repos")
-	if d == DecisionBlocked || d == DecisionApproval {
-		t.Errorf("got %s, want SAFE or CAUTION for normal URL", d)
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for normal URL", d)
 	}
 }
 
@@ -432,11 +432,9 @@ func TestInspectURLs_VariableURLBraces(t *testing.T) {
 
 func TestInspectURLs_LiteralURLWithVariableHeader(t *testing.T) {
 	// Has literal :// — should NOT trigger variable URL detection
-	d, _ := InspectCommandURLs(`curl -H "Authorization: Bearer $TOKEN" https://api.github.com/repos`)
+	d, r := InspectCommandURLs(`curl -H "Authorization: Bearer $TOKEN" https://api.github.com/repos`)
 	// Should NOT be flagged as variable destination (literal URL is present)
 	if d == DecisionCaution {
-		// Check it's not the variable-destination reason
-		_, r := InspectCommandURLs(`curl -H "Authorization: Bearer $TOKEN" https://api.github.com/repos`)
 		if r == "network command with variable/unresolvable destination" {
 			t.Error("should not flag variable destination when literal URL is present")
 		}

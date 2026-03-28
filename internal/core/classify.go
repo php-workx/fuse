@@ -42,6 +42,7 @@ type SubCommandResult struct {
 	Decision             Decision
 	Reason               string
 	RuleID               string
+	FileHash             string
 	DryRunMatches        []BuiltinMatch
 	TagOverrideEnforced  bool   // true when a tag_override explicitly enforced this decision
 	InlineBody           string // extracted inline script body
@@ -230,7 +231,7 @@ func classifyAllSubCommands(result *ClassifyResult, subCmds []string, evaluator 
 		}
 
 		mergeSubCommandFlags(result, &sub)
-		fileHashes = collectFileHash(fileHashes, subCmd, cwd)
+		fileHashes = collectFileHash(fileHashes, sub.FileHash)
 	}
 
 	result.Decision = overallDecision
@@ -261,15 +262,9 @@ func mergeSubCommandFlags(result *ClassifyResult, sub *SubCommandResult) {
 }
 
 // collectFileHash gathers a file hash if a referenced file was inspected.
-func collectFileHash(fileHashes []string, subCmd, cwd string) []string {
-	refFile := DetectReferencedFile(subCmd)
-	if refFile == "" {
-		return fileHashes
-	}
-	resolvedPath := resolvePath(refFile, cwd)
-	inspection, inspErr := InspectFile(resolvedPath, DefaultMaxBytes)
-	if inspErr == nil && inspection != nil && inspection.Hash != "" {
-		fileHashes = append(fileHashes, inspection.Hash)
+func collectFileHash(fileHashes []string, fileHash string) []string {
+	if fileHash != "" {
+		fileHashes = append(fileHashes, fileHash)
 	}
 	return fileHashes
 }
@@ -296,6 +291,7 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 		if combined != result.Decision {
 			result.Decision = combined
 			result.Reason = "compound command contains cwd-changing builtin (cd/pushd/popd)"
+			result.RuleID = ""
 		}
 	}
 }
@@ -306,6 +302,10 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 
 	// Step 4a: Classification normalize.
 	classified := ClassificationNormalize(subCmd)
+	fileInspection := inspectReferencedFile(subCmd, cwd)
+	if fileInspection != nil {
+		sub.FileHash = fileInspection.Hash
+	}
 
 	// Fail-closed: if bash -c extraction failed, force APPROVAL.
 	if classified.ExtractionFailed {
@@ -316,7 +316,7 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	}
 
 	// Classify all commands (outer + inner), take most restrictive.
-	classifyAllNormalizedCommands(&sub, classified, evaluator, cwd)
+	classifyAllNormalizedCommands(&sub, classified, evaluator, cwd, fileInspection)
 
 	// Apply post-classification modifiers.
 	applyEnvVarEscalations(&sub, subCmd, classified)
@@ -335,7 +335,7 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 
 // classifyAllNormalizedCommands classifies the outer and inner commands from
 // normalization and populates the SubCommandResult with the most restrictive decision.
-func classifyAllNormalizedCommands(sub *SubCommandResult, classified ClassifiedCommand, evaluator PolicyEvaluator, cwd string) {
+func classifyAllNormalizedCommands(sub *SubCommandResult, classified ClassifiedCommand, evaluator PolicyEvaluator, cwd string, fileInspection *FileInspection) {
 	allCmds := []string{classified.Outer}
 	allCmds = append(allCmds, classified.Inner...)
 
@@ -345,24 +345,32 @@ func classifyAllNormalizedCommands(sub *SubCommandResult, classified ClassifiedC
 	var allDryRunMatches []BuiltinMatch
 	tagOverrideEnforced := false
 
-	for _, cmd := range allCmds {
+	for i, cmd := range allCmds {
 		if cmd == "" {
 			continue
 		}
-		d, reason, ruleID, dryMatches, override := classifySingleCommand(cmd, evaluator, cwd)
-		combined := MaxDecision(bestDecision, d)
+		currentInspection := (*FileInspection)(nil)
+		if i == 0 {
+			currentInspection = fileInspection
+		}
+		classification := classifySingleCommand(cmd, evaluator, cwd, currentInspection)
+		combined := MaxDecision(bestDecision, classification.decision)
 		if combined != bestDecision {
 			bestDecision = combined
-			bestReason = reason
-			bestRuleID = ruleID
-			tagOverrideEnforced = override
+			bestReason = classification.reason
+			bestRuleID = classification.ruleID
+			tagOverrideEnforced = classification.tagOverrideEnforced
 		}
-		allDryRunMatches = append(allDryRunMatches, dryMatches...)
+		if classification.failClosed {
+			sub.FailClosed = true
+		}
+		allDryRunMatches = append(allDryRunMatches, classification.dryRunMatches...)
 	}
 
 	// Step 10: Apply sudo/doas escalation modifier.
 	if classified.EscalateClassification {
 		bestDecision, bestReason = escalateDecision(bestDecision, bestReason)
+		bestRuleID = ""
 	}
 
 	sub.Decision = bestDecision
@@ -381,6 +389,7 @@ func applyEnvVarEscalations(sub *SubCommandResult, subCmd string, classified Cla
 		if escalated != sub.Decision {
 			sub.Decision = escalated
 			sub.Reason = "references sensitive environment variable"
+			sub.RuleID = ""
 		}
 	}
 
@@ -392,6 +401,7 @@ func applyEnvVarEscalations(sub *SubCommandResult, subCmd string, classified Cla
 		if combined != sub.Decision {
 			sub.Decision = combined
 			sub.Reason = "security-sensitive environment variable assignment (via env or bare prefix)"
+			sub.RuleID = ""
 		}
 	}
 }
@@ -425,6 +435,9 @@ func applyInlineClassification(sub *SubCommandResult, subCmd string, evaluator P
 	sub.DryRunMatches = append(sub.DryRunMatches, inlineResult.dryRunMatches...)
 	if inlineResult.tagOverrideEnforced {
 		sub.TagOverrideEnforced = true
+	}
+	if inlineResult.failClosed {
+		sub.FailClosed = true
 	}
 	if inlineResult.decision != "" {
 		combined := MaxDecision(sub.Decision, inlineResult.decision)
@@ -468,10 +481,18 @@ func applyURLInspection(sub *SubCommandResult, cmd, inlineBody string) {
 	}
 }
 
+type commandClassificationResult struct {
+	decision            Decision
+	reason              string
+	ruleID              string
+	dryRunMatches       []BuiltinMatch
+	tagOverrideEnforced bool
+	failClosed          bool
+}
+
 // classifySingleCommand classifies a single (already classification-normalized) command string.
-// classifySingleCommand returns (decision, reason, ruleID, dryRunMatches, tagOverrideEnforced).
 // tagOverrideEnforced is true when the decision was enforced by an explicit tag_override.
-func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (Decision, string, string, []BuiltinMatch, bool) {
+func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string, fileInspection *FileInspection) commandClassificationResult {
 	var dryRunMatches []BuiltinMatch
 
 	// Step 5: Inline script detection (§5.4).
@@ -481,9 +502,13 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	basename := extractBasename(cmd)
 
 	// Step 6.5: Binary identity TOFU — verify interpreter binaries haven't changed mid-session.
-	if resolvedPath, ok := resolveCommandPath(cmd); ok {
+	if resolvedPath, ok := resolveCommandPath(cmd, cwd); ok {
 		if tofuD, tofuR := VerifyBinaryIdentity(resolvedPath); tofuD != "" {
-			return tofuD, tofuR, "", nil, false
+			return commandClassificationResult{
+				decision:   tofuD,
+				reason:     tofuR,
+				failClosed: tofuD == DecisionApproval,
+			}
 		}
 	}
 
@@ -491,18 +516,30 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	sanitized := SanitizeForClassification(cmd, knownSafe)
 
 	// Step 7-8: Detect and inspect referenced files.
-	fileInspection := inspectReferencedFile(cmd, cwd)
+	if fileInspection == nil {
+		fileInspection = inspectReferencedFile(cmd, cwd)
+	}
 
 	// Check for security-sensitive env var assignments at start of command.
 	if hasSensitiveEnvPrefix(cmd) {
-		return DecisionApproval, "security-sensitive environment variable assignment", "", nil, false
+		return commandClassificationResult{
+			decision: DecisionApproval,
+			reason:   "security-sensitive environment variable assignment",
+		}
 	}
 
 	// Evaluate policy rules (hardcoded, user, builtins).
 	if evaluator != nil {
 		pr := evaluatePolicyRules(cmd, sanitized, evaluator, fileInspection, dryRunMatches)
 		if pr.matched {
-			return pr.decision, pr.reason, pr.ruleID, pr.dryRunMatches, pr.tagOverrideEnforced
+			return commandClassificationResult{
+				decision:            pr.decision,
+				reason:              pr.reason,
+				ruleID:              pr.ruleID,
+				dryRunMatches:       pr.dryRunMatches,
+				tagOverrideEnforced: pr.tagOverrideEnforced,
+				failClosed:          pr.failClosed,
+			}
 		}
 		dryRunMatches = pr.dryRunMatches
 	}
@@ -511,7 +548,7 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string) (D
 	return classifyFallbackLayers(cmd, basename, fileInspection, inlineDecision, inlineReason, dryRunMatches)
 }
 
-func resolveCommandPath(cmd string) (string, bool) {
+func resolveCommandPath(cmd, cwd string) (string, bool) {
 	classified := ClassificationNormalize(cmd)
 	fields := strings.Fields(classified.Outer)
 	if len(fields) == 0 {
@@ -519,13 +556,27 @@ func resolveCommandPath(cmd string) (string, bool) {
 	}
 	command := fields[0]
 	if strings.Contains(command, "/") {
-		return command, true
+		return resolveExecutablePath(command, cwd)
 	}
 	resolvedPath, err := exec.LookPath(command)
 	if err != nil {
 		return "", false
 	}
+	if !filepath.IsAbs(resolvedPath) {
+		return resolveExecutablePath(resolvedPath, cwd)
+	}
 	return resolvedPath, true
+}
+
+func resolveExecutablePath(path, cwd string) (string, bool) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(cwd, path)
+	}
+	resolvedPath, err := filepath.Abs(path)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Clean(resolvedPath), true
 }
 
 // inspectReferencedFile detects and inspects a file referenced in the command.
@@ -552,6 +603,7 @@ type policyResult struct {
 	ruleID              string
 	dryRunMatches       []BuiltinMatch
 	tagOverrideEnforced bool
+	failClosed          bool
 	matched             bool // true if a policy rule matched (caller should stop)
 }
 
@@ -584,7 +636,8 @@ func evaluatePolicyRules(
 			if isInspectTriggerRule(match.RuleID) && fileInspection != nil {
 				return policyResult{
 					decision: fileInspection.Decision, reason: fileInspection.Reason,
-					dryRunMatches: dryRunMatches, tagOverrideEnforced: match.TagOverrideEnforced, matched: true,
+					dryRunMatches: dryRunMatches, tagOverrideEnforced: match.TagOverrideEnforced,
+					failClosed: inspectionIsFailClosed(fileInspection), matched: true,
 				}
 			}
 			return policyResult{
@@ -604,34 +657,46 @@ func classifyFallbackLayers(
 	fileInspection *FileInspection,
 	inlineDecision Decision, inlineReason string,
 	dryRunMatches []BuiltinMatch,
-) (Decision, string, string, []BuiltinMatch, bool) {
+) commandClassificationResult {
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
-		return DecisionSafe, "unconditionally safe command", "", dryRunMatches, false
+		return commandClassificationResult{decision: DecisionSafe, reason: "unconditionally safe command", dryRunMatches: dryRunMatches}
 	}
 
 	// Layer 5: Conditionally safe commands.
 	if IsConditionallySafe(basename, cmd) {
-		return DecisionSafe, "conditionally safe command", "", dryRunMatches, false
+		return commandClassificationResult{decision: DecisionSafe, reason: "conditionally safe command", dryRunMatches: dryRunMatches}
 	}
 
 	// Layer 6: File inspection result (if applicable).
 	if fileInspection != nil {
-		return fileInspection.Decision, fileInspection.Reason, "", dryRunMatches, false
+		return commandClassificationResult{
+			decision:      fileInspection.Decision,
+			reason:        fileInspection.Reason,
+			dryRunMatches: dryRunMatches,
+			failClosed:    inspectionIsFailClosed(fileInspection),
+		}
 	}
 
 	// Check inline script detection result (deferred from step 5).
 	if inlineDecision != "" {
-		return inlineDecision, inlineReason, "", dryRunMatches, false
+		return commandClassificationResult{decision: inlineDecision, reason: inlineReason, dryRunMatches: dryRunMatches}
 	}
 
 	// Check for explicitly safe inline patterns (e.g., python -c with safe imports).
 	if isSafePythonInline(cmd) {
-		return DecisionSafe, "safe Python inline (read-only modules)", "", dryRunMatches, false
+		return commandClassificationResult{decision: DecisionSafe, reason: "safe Python inline (read-only modules)", dryRunMatches: dryRunMatches}
 	}
 
 	// Fallback: CAUTION for unknown commands (enables judge triage).
-	return DecisionCaution, "unknown command (no matching rule)", "", dryRunMatches, false
+	return commandClassificationResult{decision: DecisionCaution, reason: "unknown command (no matching rule)", dryRunMatches: dryRunMatches}
+}
+
+func inspectionIsFailClosed(fileInspection *FileInspection) bool {
+	if fileInspection == nil || fileInspection.Decision != DecisionApproval {
+		return false
+	}
+	return !fileInspection.Exists || (fileInspection.Truncated && len(fileInspection.Signals) == 0)
 }
 
 // Patterns that indicate dangerous inline Python code.
@@ -656,13 +721,12 @@ var safePythonInline = regexp.MustCompile(
 	`\bpython[23]?\s+(-c\s+.*\bimport\s+|-m\s+)(ast|json|sys|pathlib|` +
 		`collections|re|math|hashlib|base64|struct|textwrap|inspect|tokenize|` +
 		`configparser|tomllib|typing|dataclasses|enum|functools|itertools|operator|string|` +
-		`platform|sysconfig|site|pprint|py_compile|json\.tool|compileall|` +
-		`timeit|cProfile|pdb|doctest|unittest|pytest)\b`,
+		`platform|sysconfig|site|pprint|json\.tool)\b`,
 )
 
 // reSafePipePython matches piping to read-only Python module invocations.
 var reSafePipePython = regexp.MustCompile(
-	`\|\s*python[23]?\s+-m\s+(json\.tool|pprint|ast|tokenize|py_compile|compileall)\b`,
+	`\|\s*python[23]?\s+-m\s+(json\.tool|pprint|ast|tokenize)\b`,
 )
 
 // isExemptInlinePattern returns true if the matched pattern should be skipped
@@ -829,6 +893,7 @@ type inlineBodiesResult struct {
 	reason              string
 	body                string
 	complete            bool
+	failClosed          bool
 	dryRunMatches       []BuiltinMatch
 	tagOverrideEnforced bool
 }
@@ -872,6 +937,7 @@ func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd st
 		reason:              acc.bestReason,
 		body:                strings.Join(allBodies, "\n---\n"),
 		complete:            acc.complete,
+		failClosed:          acc.failClosed,
 		dryRunMatches:       acc.dryRunMatches,
 		tagOverrideEnforced: acc.tagOverrideEnforced,
 	}
@@ -882,6 +948,7 @@ type inlineAccumulator struct {
 	bestDecision        Decision
 	bestReason          string
 	complete            bool
+	failClosed          bool
 	nestedBodies        []string       // bodies from nested extraction (depth > 0)
 	dryRunMatches       []BuiltinMatch // collected from inline rule evaluations
 	tagOverrideEnforced bool           // OR across all inline evaluations
@@ -899,6 +966,9 @@ func (a *inlineAccumulator) applyResult(r extractedSubCommandResult, label strin
 	a.dryRunMatches = append(a.dryRunMatches, r.dryRunMatches...)
 	if r.tagOverrideEnforced {
 		a.tagOverrideEnforced = true
+	}
+	if r.failClosed {
+		a.failClosed = true
 	}
 }
 
@@ -923,6 +993,9 @@ func (a *inlineAccumulator) classifyExtractedCmd(cmd, label string, evaluator Po
 	if !nested.complete {
 		a.complete = false
 	}
+	if nested.failClosed {
+		a.failClosed = true
+	}
 	a.update(nested.decision, nested.reason)
 	a.dryRunMatches = append(a.dryRunMatches, nested.dryRunMatches...)
 	if nested.tagOverrideEnforced {
@@ -943,6 +1016,7 @@ func (a *inlineAccumulator) classifyExtractedCmd(cmd, label string, evaluator Po
 type extractedSubCommandResult struct {
 	decision            Decision
 	reason              string
+	failClosed          bool
 	dryRunMatches       []BuiltinMatch
 	tagOverrideEnforced bool
 }
@@ -952,8 +1026,9 @@ func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd s
 
 	if classified.ExtractionFailed {
 		return extractedSubCommandResult{
-			decision: DecisionApproval,
-			reason:   "inline bash -c extraction failed (fail-closed)",
+			decision:   DecisionApproval,
+			reason:     "inline bash -c extraction failed (fail-closed)",
+			failClosed: true,
 		}
 	}
 
@@ -966,14 +1041,17 @@ func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd s
 		if cmd == "" {
 			continue
 		}
-		d, reason, _, dryMatches, override := classifySingleCommand(cmd, evaluator, cwd)
-		combined := MaxDecision(result.decision, d)
+		classification := classifySingleCommand(cmd, evaluator, cwd, nil)
+		combined := MaxDecision(result.decision, classification.decision)
 		if combined != result.decision {
 			result.decision = combined
-			result.reason = reason
+			result.reason = classification.reason
 		}
-		result.dryRunMatches = append(result.dryRunMatches, dryMatches...)
-		if override {
+		if classification.failClosed {
+			result.failClosed = true
+		}
+		result.dryRunMatches = append(result.dryRunMatches, classification.dryRunMatches...)
+		if classification.tagOverrideEnforced {
 			result.tagOverrideEnforced = true
 		}
 	}

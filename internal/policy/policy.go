@@ -47,31 +47,7 @@ func LoadPolicy(path string) (*PolicyConfig, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading policy file: %w", err)
 	}
-
-	var cfg PolicyConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parsing policy YAML: %w", err)
-	}
-
-	for i := range cfg.Rules {
-		r := &cfg.Rules[i]
-		compiled, err := regexp.Compile(r.Pattern)
-		if err != nil {
-			return nil, fmt.Errorf("compiling rule pattern %q: %w", r.Pattern, err)
-		}
-		r.compiled = compiled
-
-		// Validate action string
-		if _, ok := actionToDecision[r.Action]; !ok {
-			return nil, fmt.Errorf("invalid action %q in rule with pattern %q", r.Action, r.Pattern)
-		}
-	}
-
-	if _, err := ParseTagOverrides(&cfg); err != nil {
-		return nil, err
-	}
-
-	return &cfg, nil
+	return loadPolicyFromBytes(data)
 }
 
 // EvaluateUserRules checks the normalized command string against all user-defined

@@ -177,6 +177,9 @@ func handleAgentMethod(msg jsonRPCMessage, agent io.Writer, requests *inFlightRe
 	}
 	if !allowed {
 		if response != nil {
+			if _, hasID := response["id"]; !hasID || response["id"] == nil {
+				return false, nil
+			}
 			data, encErr := encodeJSONRPC(response)
 			if encErr != nil {
 				return false, encErr
@@ -228,6 +231,10 @@ func processDownstreamMessage(payload []byte, requests *inFlightRequests) (bool,
 	}
 	if !isJSONRPCResponseEnvelope(msg) {
 		slog.Warn("received malformed downstream JSON-RPC envelope", "message", msg)
+	}
+
+	if _, hasMethod := msg["method"]; hasMethod {
+		return true, nil
 	}
 
 	_, hasID := msg["id"]
