@@ -260,6 +260,35 @@ func TestApprovalsView_PurgeConfirmation(t *testing.T) {
 	_ = cmd
 }
 
+func TestApprovalsView_ViewPersistsHistoryOffset(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.width = 80
+	m.height = 12
+	m.focus = focusHistory
+
+	approvals := make([]db.Approval, 0, 10)
+	for i := 0; i < 10; i++ {
+		approvals = append(approvals, db.Approval{
+			ID:          fmt.Sprintf("a%d", i),
+			DecisionKey: fmt.Sprintf("key-%d", i),
+			Decision:    "APPROVAL",
+			Scope:       "once",
+			CreatedAt:   fmt.Sprintf("2026-03-20T12:%02d:00Z", i),
+		})
+	}
+	m.SetData(approvals)
+	m.historyIdx = len(approvals) - 1
+
+	_ = m.View()
+
+	if m.histOffset == 0 {
+		t.Fatal("expected View to persist a non-zero history offset for the selected row")
+	}
+	if m.histOffset > m.historyIdx {
+		t.Fatalf("histOffset = %d, want <= historyIdx %d", m.histOffset, m.historyIdx)
+	}
+}
+
 func TestApprovalsView_ApproveEmptyListNoOp(t *testing.T) {
 	m := NewApprovalsModel(nil, nil)
 	m.width = 80

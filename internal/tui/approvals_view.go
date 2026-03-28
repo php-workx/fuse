@@ -331,7 +331,7 @@ func (m ApprovalsModel) renderDetail(a *db.Approval) string {
 }
 
 // View renders the approvals view.
-func (m ApprovalsModel) View() string {
+func (m *ApprovalsModel) View() string {
 	var b strings.Builder
 
 	b.WriteString(m.renderPendingSection())
@@ -391,7 +391,7 @@ func (m ApprovalsModel) renderPendingSection() string {
 }
 
 // renderHistorySection renders the approval history table.
-func (m ApprovalsModel) renderHistorySection() string {
+func (m *ApprovalsModel) renderHistorySection() string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "  Approval History (%d)\n\n", len(m.approvals))

@@ -92,20 +92,20 @@ func TestBuildUserPrompt_TruncatedScript(t *testing.T) {
 func TestBuildUserPrompt_ScrubsContextFields(t *testing.T) {
 	ctx := PromptContext{
 		Command:         "echo hello",
-		Cwd:             "/tmp/api_key=SECRET123",
-		WorkspaceRoot:   "/workspace/Cookie: session=abc123",
+		Cwd:             "/tmp/api_key=EXAMPLE_API_KEY",
+		WorkspaceRoot:   "/workspace/Cookie: session=EXAMPLE_SESSION_ID",
 		CurrentDecision: "APPROVAL",
-		Reason:          "Bearer supersecrettoken123 detected",
-		RuleID:          "rule-token=ghp_secretvalue",
-		ToolName:        "mcp__server__Authorization: Basic dXNlcjpwYXNz",
+		Reason:          "Bearer EXAMPLE_TOKEN detected",
+		RuleID:          "rule-token=ghp_EXAMPLE_GITHUB_TOKEN",
+		ToolName:        "mcp__server__Authorization: Basic ZXhhbXBsZTp1c2Vy",
 	}
 	prompt := BuildUserPrompt(ctx)
 	for _, forbidden := range []string{
-		"SECRET123",
-		"session=abc123",
-		"supersecrettoken123",
-		"ghp_secretvalue",
-		"dXNlcjpwYXNz",
+		"EXAMPLE_API_KEY",
+		"session=EXAMPLE_SESSION_ID",
+		"EXAMPLE_TOKEN",
+		"ghp_EXAMPLE_GITHUB_TOKEN",
+		"ZXhhbXBsZTp1c2Vy",
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("prompt leaked %q:\n%s", forbidden, prompt)
