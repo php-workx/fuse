@@ -28,6 +28,7 @@ type commandExecution struct {
 // strippedEnvVars lists environment variables that are stripped from the child
 // process environment for security (§10.1).
 var strippedEnvVars = map[string]bool{
+	// Unix loader/module injection vectors.
 	"LD_PRELOAD":      true,
 	"LD_LIBRARY_PATH": true,
 	"PYTHONPATH":      true,
@@ -35,6 +36,11 @@ var strippedEnvVars = map[string]bool{
 	"RUBYLIB":         true,
 	"BASH_ENV":        true,
 	"ENV":             true,
+	// Windows injection vectors (harmless no-ops on Unix).
+	"COMSPEC":           true, // Controls which shell runs commands.
+	"PSModulePath":      true, // PowerShell module loading path.
+	"JAVA_TOOL_OPTIONS": true, // JVM startup flag injection.
+	"NODE_OPTIONS":      true, // Node.js startup flag injection.
 }
 
 // BuildChildEnv sanitizes the environment for child process execution.

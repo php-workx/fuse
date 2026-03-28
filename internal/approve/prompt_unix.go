@@ -111,9 +111,8 @@ func readApprovalDecision(ctx context.Context, tty *os.File, deadline time.Time,
 		}
 
 		if time.Now().After(deadline) {
-			fmt.Fprintf(tty, "\n  Denied (timeout).\n")
-			fmt.Fprintf(tty, "  fuse:TIMEOUT_WAITING_FOR_USER STOP. The user did not approve this action in time. Do not retry this exact command.\n\n")
-			return false, "", nil
+			fmt.Fprintf(tty, "\n  Timed out. The command remains pending — approve via fuse monitor.\n\n")
+			return false, "", errPromptTimeout
 		}
 
 		n, err := tty.Read(buf)
