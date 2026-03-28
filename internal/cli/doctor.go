@@ -869,14 +869,14 @@ func checkLiveRawMode() checkResult {
 	if err := unix.IoctlSetTermios(fd, doctorIoctlSetTermios, &raw); err != nil {
 		return checkResult{
 			name:   checkNameLiveRawMode,
-			status: "FAIL",
+			status: "WARN",
 			detail: fmt.Sprintf("enter raw mode: %v", err),
 		}
 	}
 	if err := unix.IoctlSetTermios(fd, doctorIoctlSetTermios, orig); err != nil {
 		return checkResult{
 			name:   checkNameLiveRawMode,
-			status: "FAIL",
+			status: "WARN",
 			detail: fmt.Sprintf("restore terminal state: %v", err),
 		}
 	}
