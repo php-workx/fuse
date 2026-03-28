@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -127,7 +128,9 @@ func forwardSignals(pid int, sigCh <-chan os.Signal, done <-chan struct{}) {
 			// Send to process group (negative PID).
 			if err := syscall.Kill(-pid, sysSig); err != nil {
 				// Fallback: retry direct child PID.
-				_ = syscall.Kill(pid, sysSig)
+				if err2 := syscall.Kill(pid, sysSig); err2 != nil {
+					slog.Debug("signal forward failed", "pid", pid, "signal", sysSig, "pgrp_err", err, "pid_err", err2)
+				}
 			}
 		case <-done:
 			return

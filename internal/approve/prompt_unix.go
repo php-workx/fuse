@@ -92,11 +92,11 @@ func PromptUser(ctx context.Context, command, reason string, hookMode, nonIntera
 	// Render the prompt and read the user's decision.
 	renderPrompt(tty, command, reason)
 	deadline := time.Now().Add(timeout)
-	return readApprovalDecision(ctx, tty, fd, deadline, sigCh)
+	return readApprovalDecision(ctx, tty, deadline, sigCh)
 }
 
 // readApprovalDecision polls the TTY for the user's approve/deny decision.
-func readApprovalDecision(ctx context.Context, tty *os.File, fd int, deadline time.Time, sigCh <-chan os.Signal) (bool, string, error) {
+func readApprovalDecision(ctx context.Context, tty *os.File, deadline time.Time, sigCh <-chan os.Signal) (bool, string, error) {
 	buf := make([]byte, 1)
 
 	for {
@@ -134,7 +134,7 @@ func readApprovalDecision(ctx context.Context, tty *os.File, fd int, deadline ti
 			fmt.Fprintf(tty, "    [o] once  |  [c] command  |  [s] session  |  [f] forever\n")
 			fmt.Fprintf(tty, "  > ")
 
-			scopeResult, denied := readScope(ctx, tty, fd, deadline, sigCh)
+			scopeResult, denied := readScope(ctx, tty, deadline, sigCh)
 			if denied {
 				return false, "", nil
 			}
@@ -166,7 +166,7 @@ func openTTY(nonInteractive bool) (*os.File, error) {
 
 // readScope reads the scope selection from the user.
 // Returns the scope string and whether the user denied.
-func readScope(ctx context.Context, tty *os.File, fd int, deadline time.Time, sigCh <-chan os.Signal) (string, bool) {
+func readScope(ctx context.Context, tty *os.File, deadline time.Time, sigCh <-chan os.Signal) (string, bool) {
 	buf := make([]byte, 1)
 	for {
 		select {

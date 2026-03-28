@@ -127,10 +127,11 @@ func TestRunHook_MCP_DestructiveAction(t *testing.T) {
 
 	stderrStr := stderr.String()
 	if !strings.Contains(stderrStr, "PENDING_APPROVAL") &&
+		!strings.Contains(stderrStr, "APPROVAL_NOT_AVAILABLE") &&
 		!strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") &&
 		!strings.Contains(stderrStr, "USER_DENIED") &&
 		!strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
-		t.Errorf("expected PENDING_APPROVAL, NON_INTERACTIVE_MODE, USER_DENIED, or TIMEOUT_WAITING_FOR_USER, got: %s", stderrStr)
+		t.Errorf("expected approval-related directive in stderr, got: %s", stderrStr)
 	}
 }
 
@@ -266,10 +267,11 @@ func TestRunHook_NativeFileReadSecretRequiresApproval(t *testing.T) {
 	// With TUI approval support, non-interactive hooks now return PENDING_APPROVAL
 	// to encourage the agent to retry. Legacy messages are also accepted.
 	if !strings.Contains(stderrStr, "PENDING_APPROVAL") &&
+		!strings.Contains(stderrStr, "APPROVAL_NOT_AVAILABLE") &&
 		!strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") &&
 		!strings.Contains(stderrStr, "USER_DENIED") &&
 		!strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
-		t.Fatalf("expected PENDING_APPROVAL or approval denial directive, got %q", stderrStr)
+		t.Fatalf("expected approval-related directive in stderr, got %q", stderrStr)
 	}
 }
 

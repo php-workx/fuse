@@ -5,6 +5,7 @@ package fuse_test
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -19,14 +20,15 @@ func TestCrossBuild_WindowsCompiles(t *testing.T) {
 	}
 	env = append(env, "GOOS=windows", "GOARCH=amd64")
 
-	// Build the full binary, not just one package.
-	cmd := exec.Command("go", "build", "./cmd/fuse")
+	// Build the full binary to a temp dir to avoid dropping fuse.exe in the repo root.
+	outPath := filepath.Join(t.TempDir(), "fuse.exe")
+	cmd := exec.Command("go", "build", "-o", outPath, "./cmd/fuse")
 	cmd.Env = env
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("Windows cross-compilation failed:\n%s", out)
 	}
 
-	// Also verify go vet passes.
+	// Also verify go vet passes for Windows.
 	vetCmd := exec.Command("go", "vet", "./...")
 	vetCmd.Env = env
 	if out, err := vetCmd.CombinedOutput(); err != nil {

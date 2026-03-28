@@ -122,6 +122,7 @@ jobs:
     needs:
       - check
       - compat
+      - windows-check
     permissions:
       contents: read
     steps:

@@ -167,19 +167,19 @@ var HardcodedBlocked = []HardcodedRule{
 
 	// Prevent agent from modifying fuse config/policy files
 	{
-		Pattern: regexp.MustCompile(`(>|>>|tee|cp|mv|sed\s+-i|cat\s+.*>)\s*.*[~/.]fuse/config/`),
+		Pattern: regexp.MustCompile(`(>|>>|tee|cp|mv|sed\s+-i|cat\s+.*>)\s*.*[~/.]fuse[/\\]config[/\\]`),
 		Reason:  "Cannot modify fuse configuration through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`(>|>>|tee|cp|mv|sed\s+-i|cat\s+.*>)\s*.*\.claude/settings\.json`),
+		Pattern: regexp.MustCompile(`(>|>>|tee|cp|mv|sed\s+-i|cat\s+.*>)\s*.*\.claude[/\\]settings\.json`),
 		Reason:  "Cannot modify Claude Code hooks through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*[~/.]fuse/`),
+		Pattern: regexp.MustCompile(`\brm\s+.*[~/.]fuse[/\\]`),
 		Reason:  "Cannot delete fuse files through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*\.claude/settings\.json`),
+		Pattern: regexp.MustCompile(`\brm\s+.*\.claude[/\\]settings\.json`),
 		Reason:  "Cannot delete Claude Code settings through mediated path",
 	},
 
@@ -192,9 +192,12 @@ var HardcodedBlocked = []HardcodedRule{
 		Reason: "Cannot modify fuse database through mediated path",
 	},
 
-	// Prevent inline interpreter/eval commands from touching fuse-managed files
+	// Prevent inline interpreter/eval commands from touching fuse-managed files.
+	// [/\\] matches both Unix forward-slash and Windows backslash separators.
 	{
-		Pattern: regexp.MustCompile(`\b(python[23]?|node|perl|ruby|(ba)?sh)\s+(-c|-e|--eval)\b.*(~/\.fuse/|\.fuse/|\.claude/settings\.json|fuse\.db|secret\.key)`),
-		Reason:  "Cannot reference fuse-managed files through inline interpreter/eval",
+		Pattern: regexp.MustCompile(
+			`\b(python[23]?|node|perl|ruby|(ba)?sh)\s+(-c|-e|--eval)\b` +
+				`.*(~[/\\]\.fuse[/\\]|\.fuse[/\\]|\.claude[/\\]settings\.json|fuse\.db|secret\.key)`),
+		Reason: "Cannot reference fuse-managed files through inline interpreter/eval",
 	},
 }
