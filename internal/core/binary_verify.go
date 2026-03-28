@@ -74,13 +74,9 @@ func (t *BinaryTOFU) Verify(resolvedPath string) (Decision, string) {
 			return DecisionApproval, fmt.Sprintf("cannot stat binary %s: %v", basename, err)
 		}
 
-		t.mu.Lock()
-		entry, exists := t.entries[resolvedPath]
-		if exists && entry.mtime.Equal(info.ModTime()) && entry.size == info.Size() {
-			t.mu.Unlock()
+		if t.cachedAndUnchanged(resolvedPath, info) {
 			return "", ""
 		}
-		t.mu.Unlock()
 
 		currentHash, err := hashFile(resolvedPath)
 		if err != nil {
@@ -92,31 +88,39 @@ func (t *BinaryTOFU) Verify(resolvedPath string) (Decision, string) {
 			return DecisionApproval, fmt.Sprintf("cannot stat binary %s: %v", basename, err)
 		}
 		if !latestInfo.ModTime().Equal(info.ModTime()) || latestInfo.Size() != info.Size() {
-			continue
+			continue // File changed during hashing — retry.
 		}
 
-		t.mu.Lock()
-		entry, exists = t.entries[resolvedPath]
-		if exists && entry.mtime.Equal(latestInfo.ModTime()) && entry.size == latestInfo.Size() {
-			t.mu.Unlock()
-			return "", ""
-		}
-		if !exists {
-			t.entries[resolvedPath] = binaryEntry{hash: currentHash, mtime: latestInfo.ModTime(), size: latestInfo.Size()}
-			t.mu.Unlock()
-			return "", ""
-		}
-		if entry.hash != currentHash {
-			t.mu.Unlock()
-			return DecisionBlocked, fmt.Sprintf(
-				"binary identity changed for %s (%s): expected %s, got %s",
-				basename, resolvedPath, hashPrefix(entry.hash), hashPrefix(currentHash))
-		}
-
-		t.entries[resolvedPath] = binaryEntry{hash: currentHash, mtime: latestInfo.ModTime(), size: latestInfo.Size()}
-		t.mu.Unlock()
-		return "", ""
+		return t.compareAndStore(resolvedPath, basename, currentHash, latestInfo)
 	}
+}
+
+// cachedAndUnchanged returns true if the entry is cached and stat metadata matches.
+func (t *BinaryTOFU) cachedAndUnchanged(path string, info os.FileInfo) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry, exists := t.entries[path]
+	return exists && entry.mtime.Equal(info.ModTime()) && entry.size == info.Size()
+}
+
+// compareAndStore checks the newly computed hash against any cached entry and
+// stores the result. Returns (decision, reason).
+func (t *BinaryTOFU) compareAndStore(path, basename, currentHash string, info os.FileInfo) (Decision, string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	entry, exists := t.entries[path]
+	if exists && entry.mtime.Equal(info.ModTime()) && entry.size == info.Size() {
+		return "", "" // Another goroutine updated while we were hashing.
+	}
+	if exists && entry.hash != currentHash {
+		return DecisionBlocked, fmt.Sprintf(
+			"binary identity changed for %s (%s): expected %s, got %s",
+			basename, path, hashPrefix(entry.hash), hashPrefix(currentHash))
+	}
+
+	t.entries[path] = binaryEntry{hash: currentHash, mtime: info.ModTime(), size: info.Size()}
+	return "", ""
 }
 
 func hashPrefix(hash string) string {
