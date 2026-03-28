@@ -322,7 +322,7 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	applyEnvVarEscalations(&sub, subCmd, classified)
 
 	// Detect fail-closed APPROVAL from file inspection or TOFU verification.
-	detectFailClosedApproval(&sub, subCmd, cwd)
+	detectFailClosedApproval(&sub, fileInspection)
 
 	// Extract and classify inline script bodies (heredocs, $() contents).
 	applyInlineClassification(&sub, subCmd, evaluator, cwd)
@@ -408,17 +408,10 @@ func applyEnvVarEscalations(sub *SubCommandResult, subCmd string, classified Cla
 
 // detectFailClosedApproval marks APPROVAL results as fail-closed when the
 // referenced file cannot be fully analyzed (missing or truncated with no signals).
-func detectFailClosedApproval(sub *SubCommandResult, subCmd, cwd string) {
-	if sub.Decision != DecisionApproval {
-		return
-	}
-	refFile := DetectReferencedFile(subCmd)
-	if refFile == "" {
-		return
-	}
-	resolvedPath := resolvePath(refFile, cwd)
-	inspection, err := InspectFile(resolvedPath, DefaultMaxBytes)
-	if err != nil || inspection == nil {
+// Reuses the inspection already performed by inspectReferencedFile to avoid a
+// redundant file open (TOCTOU + wasted I/O).
+func detectFailClosedApproval(sub *SubCommandResult, inspection *FileInspection) {
+	if sub.Decision != DecisionApproval || inspection == nil {
 		return
 	}
 	if !inspection.Exists || (inspection.Truncated && len(inspection.Signals) == 0) {
@@ -1036,50 +1029,51 @@ func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd s
 	allCmds = append(allCmds, classified.Inner...)
 
 	result := extractedSubCommandResult{decision: DecisionSafe, reason: "default safe"}
-
 	for _, cmd := range allCmds {
 		if cmd == "" {
 			continue
 		}
-		classification := classifySingleCommand(cmd, evaluator, cwd, nil)
-		combined := MaxDecision(result.decision, classification.decision)
-		if combined != result.decision {
-			result.decision = combined
-			result.reason = classification.reason
-		}
-		if classification.failClosed {
-			result.failClosed = true
-		}
-		result.dryRunMatches = append(result.dryRunMatches, classification.dryRunMatches...)
-		if classification.tagOverrideEnforced {
-			result.tagOverrideEnforced = true
-		}
+		mergeClassificationInto(&result, classifySingleCommand(cmd, evaluator, cwd, nil))
 	}
 
-	// Apply sudo/doas escalation.
+	applyExtractedEscalations(&result, subCmd, classified)
+	return result
+}
+
+// mergeClassificationInto folds a single-command classification into an
+// accumulated extracted sub-command result, taking the most restrictive decision.
+func mergeClassificationInto(result *extractedSubCommandResult, c commandClassificationResult) {
+	if combined := MaxDecision(result.decision, c.decision); combined != result.decision {
+		result.decision = combined
+		result.reason = c.reason
+	}
+	if c.failClosed {
+		result.failClosed = true
+	}
+	result.dryRunMatches = append(result.dryRunMatches, c.dryRunMatches...)
+	if c.tagOverrideEnforced {
+		result.tagOverrideEnforced = true
+	}
+}
+
+// applyExtractedEscalations applies sudo/doas and env-var escalations to an
+// extracted sub-command result.
+func applyExtractedEscalations(result *extractedSubCommandResult, subCmd string, classified ClassifiedCommand) {
 	if classified.EscalateClassification {
 		result.decision, result.reason = escalateDecision(result.decision, result.reason)
 	}
-
-	// Sensitive env var detection.
 	if reSensitiveEnvVar.MatchString(subCmd) {
-		escalated := MaxDecision(result.decision, DecisionCaution)
-		if escalated != result.decision {
+		if escalated := MaxDecision(result.decision, DecisionCaution); escalated != result.decision {
 			result.decision = escalated
 			result.reason = "references sensitive environment variable"
 		}
 	}
-
-	// Security-sensitive env var assignment (same MaxDecision pattern as classifySubCommand).
 	if classified.SensitiveEnvAssignment {
-		combined := MaxDecision(result.decision, DecisionApproval)
-		if combined != result.decision {
+		if combined := MaxDecision(result.decision, DecisionApproval); combined != result.decision {
 			result.decision = combined
 			result.reason = "security-sensitive environment variable assignment in inline body"
 		}
 	}
-
-	return result
 }
 
 func isInspectTriggerRule(ruleID string) bool {

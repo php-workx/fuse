@@ -955,3 +955,23 @@ func writeJSONForTest(t *testing.T, path string, data map[string]interface{}) {
 		t.Fatalf("write JSON file: %v", err)
 	}
 }
+
+func TestEscapePattern_NoDashDoubleEscaping(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"foo-bar", `foo\-bar`},
+		{`foo\bar`, `foo\\bar`},
+		{"a-b.c", `a\-b\.c`},
+		{"git push --force", `git push \-\-force`},
+		{"rm -rf /", `rm \-rf /`},
+		{"no-special", `no\-special`},
+	}
+	for _, tc := range tests {
+		got := escapePattern(tc.input)
+		if got != tc.want {
+			t.Errorf("escapePattern(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}

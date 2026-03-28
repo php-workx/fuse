@@ -634,40 +634,53 @@ func isSqliteSafe(fields []string) bool {
 			return false
 		}
 	}
+	// Per-field checks for injection markers and dangerous dot-commands.
+	safeDotCmds := map[string]bool{
+		".tables": true, ".schema": true, ".headers": true, ".mode": true,
+		".separator": true, ".width": true, ".help": true, ".show": true,
+		".databases": true, ".indices": true, ".explain": true, ".timer": true,
+		".nullvalue": true, ".print": true, ".bail": true, ".eqp": true,
+		".stats": true, ".dbinfo": true, ".lint": true, ".fullschema": true,
+	}
 	for _, f := range fields {
 		lower := strings.ToLower(f)
 		if strings.ContainsAny(f, ";`") {
 			return false
 		}
-		if strings.HasPrefix(lower, ".") {
-			return false
-		}
-		if strings.Contains(lower, ".shell") || strings.Contains(lower, ".system") ||
-			strings.Contains(lower, ".output") || strings.Contains(lower, ".import") ||
-			strings.Contains(lower, ".load") || strings.Contains(lower, ".read") ||
-			strings.Contains(lower, ".save") || strings.Contains(lower, ".restore") ||
-			strings.Contains(lower, ".clone") {
+		if strings.HasPrefix(lower, ".") && !safeDotCmds[lower] {
 			return false
 		}
 	}
 	return true
 }
 
-// isNcSafe: nc/ncat/netcat is safe in scan mode (-z).
+// isNcSafe: nc/ncat/netcat is safe in scan mode (-z) without exec flags.
 func isNcSafe(fields []string) bool {
+	if hasNcExecFlag(fields) {
+		return false
+	}
+	return hasNcScanFlag(fields)
+}
+
+// hasNcExecFlag returns true if any field is an exec flag (-e, -c, --exec, etc.).
+func hasNcExecFlag(fields []string) bool {
 	for _, f := range fields {
 		lower := strings.ToLower(f)
 		if lower == "--exec" || lower == "--sh-exec" || lower == "--lua-exec" ||
 			strings.HasPrefix(lower, "--exec=") || strings.HasPrefix(lower, "--sh-exec=") || strings.HasPrefix(lower, "--lua-exec=") {
-			return false
+			return true
 		}
 		if len(f) > 1 && f[0] == '-' && f[1] != '-' {
-			flags := f[1:]
-			if strings.ContainsRune(flags, 'e') || strings.ContainsRune(flags, 'c') {
-				return false
+			if strings.ContainsRune(f[1:], 'e') || strings.ContainsRune(f[1:], 'c') {
+				return true
 			}
 		}
 	}
+	return false
+}
+
+// hasNcScanFlag returns true if any field contains the -z scan flag.
+func hasNcScanFlag(fields []string) bool {
 	for _, f := range fields {
 		if f == "-z" {
 			return true
