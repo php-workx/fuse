@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -43,6 +44,9 @@ func withIsolatedHome(t *testing.T) {
 }
 
 func TestIntegration_RunUsageErrorsExitTwo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	skipIfShort(t)
 
 	binPath := filepath.Join(t.TempDir(), "fuse-test-bin")
@@ -73,6 +77,9 @@ func TestIntegration_RunUsageErrorsExitTwo(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIntegration_HookFlow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	skipIfShort(t)
 	withIsolatedHome(t)
 
@@ -118,6 +125,9 @@ func TestIntegration_HookFlow(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIntegration_HookFlow_MCP(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	skipIfShort(t)
 	withIsolatedHome(t)
 
@@ -408,6 +418,9 @@ func TestIntegration_LazyDB(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIntegration_DirectiveMessaging(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	skipIfShort(t)
 	withIsolatedHome(t)
 
@@ -672,6 +685,9 @@ func TestIntegration_DecisionKeyDeterminism(t *testing.T) {
 }
 
 func TestIntegration_NonBashToolAllowed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	skipIfShort(t)
 	withIsolatedHome(t)
 
@@ -696,6 +712,9 @@ func TestIntegration_NonBashToolAllowed(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestIntegration_V2_HeredocWithMetadataURL(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	skipIfShort(t)
 	withIsolatedHome(t)
 	core.ResetBinaryTOFU()
@@ -715,6 +734,9 @@ func TestIntegration_V2_HeredocWithMetadataURL(t *testing.T) {
 }
 
 func TestIntegration_V2_HeredocDangerousCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	skipIfShort(t)
 	withIsolatedHome(t)
 	core.ResetBinaryTOFU()
@@ -756,6 +778,9 @@ func TestIntegration_V2_InlineBodyPopulated(t *testing.T) {
 }
 
 func TestIntegration_V2_SSRFMetadataBlocked(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	skipIfShort(t)
 	withIsolatedHome(t)
 	core.ResetBinaryTOFU()

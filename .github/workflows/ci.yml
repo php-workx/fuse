@@ -97,6 +97,24 @@ jobs:
             -run 'TestReleaseCheckShellWrapperCompatibility|TestReleaseCheckLocaleInvariantClassification' \
             -v
 
+  windows-check:
+    name: Windows Build Check
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test ./... -race -timeout 120s
+
   build:
     name: Build
     runs-on: ubuntu-latest

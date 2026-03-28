@@ -4,16 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"os/exec"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
-
-	"golang.org/x/sys/unix"
 
 	"github.com/php-workx/fuse/internal/approve"
 	"github.com/php-workx/fuse/internal/config"
@@ -78,42 +72,6 @@ func BuildChildEnv(environ []string) []string {
 	}
 
 	return result
-}
-
-// ForegroundChildProcessGroupIfTTY transfers foreground TTY ownership to the
-// child process group if stdin is a terminal. Returns a restore function that
-// should be deferred to restore the original foreground group.
-func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
-	fd := int(os.Stdin.Fd())
-
-	// Check if stdin is a terminal using the platform-specific ioctl.
-	if _, termErr := unix.IoctlGetTermios(fd, ioctlGetTermios); termErr != nil {
-		// Not a terminal — nothing to do.
-		return nil, nil //nolint:nilerr // termErr means not-a-tty, which is a valid no-op
-	}
-
-	// Get the current foreground process group.
-	origPgrp, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
-	if err != nil {
-		return nil, fmt.Errorf("get foreground pgrp: %w", err)
-	}
-
-	// Suppress SIGTTOU during foreground group changes.
-	signal.Ignore(syscall.SIGTTOU)
-
-	// Set the child's process group as the foreground group.
-	childPgrp := pid
-	if err := unix.IoctlSetInt(fd, unix.TIOCSPGRP, childPgrp); err != nil {
-		signal.Reset(syscall.SIGTTOU)
-		return nil, fmt.Errorf("set child foreground pgrp: %w", err)
-	}
-
-	restore = func() {
-		_ = unix.IoctlSetInt(fd, unix.TIOCSPGRP, origPgrp)
-		signal.Reset(syscall.SIGTTOU)
-	}
-
-	return restore, nil
 }
 
 // runContext bundles parameters shared across ExecuteCommand helper functions.
@@ -296,143 +254,8 @@ func reverifyDecisionKey(req core.ShellRequest, evaluator core.PolicyEvaluator, 
 	return nil
 }
 
-// executeShellCommand runs a shell command with safety controls (§10.1).
-func executeShellCommand(command, cwd string, timeout time.Duration) (int, error) {
-	ctx := context.Background()
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	cmd := exec.CommandContext( // nosemgrep: dangerous-exec-command
-		ctx, "/bin/sh", "-c", command,
-	)
-	cmd.Dir = cwd
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = BuildChildEnv(os.Environ())
-
-	// Platform-specific SysProcAttr (Setpgid, optionally Pdeathsig on Linux).
-	cmd.SysProcAttr = platformSysProcAttr()
-
-	if err := cmd.Start(); err != nil {
-		return -1, fmt.Errorf("start command: %w", err)
-	}
-
-	return waitForManagedCommand(cmd)
-}
-
-func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
-	// Transfer foreground TTY ownership to child process group.
-	restoreTTY, err := ForegroundChildProcessGroupIfTTY(cmd.Process.Pid)
-	if err != nil {
-		_ = cmd.Process.Kill()
-		return -1, fmt.Errorf("foreground child process group: %w", err)
-	}
-	if restoreTTY != nil {
-		defer restoreTTY()
-	}
-
-	// Forward signals to child process group.
-	sigCh := make(chan os.Signal, 1)
-	done := make(chan struct{})
-	signal.Notify(sigCh,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGHUP,
-		syscall.SIGTSTP,  // job control (Ctrl+Z)
-		syscall.SIGWINCH, // terminal resize
-	)
-	go forwardSignals(cmd.Process.Pid, sigCh, done)
-
-	waitErr := cmd.Wait()
-	signal.Stop(sigCh)
-	close(done)
-
-	return interpretWaitError(waitErr)
-}
-
-// forwardSignals relays OS signals to a child process group until done is closed.
-func forwardSignals(pid int, sigCh <-chan os.Signal, done <-chan struct{}) {
-	for {
-		select {
-		case sig, ok := <-sigCh:
-			if !ok {
-				return
-			}
-			sysSig, isSyscall := sig.(syscall.Signal)
-			if !isSyscall {
-				continue
-			}
-			// Send to process group (negative PID).
-			if err := syscall.Kill(-pid, sysSig); err != nil {
-				// Fallback: retry direct child PID.
-				_ = syscall.Kill(pid, sysSig)
-			}
-		case <-done:
-			return
-		}
-	}
-}
-
-// interpretWaitError converts a cmd.Wait error into an exit code.
-func interpretWaitError(waitErr error) (int, error) {
-	if waitErr == nil {
-		return 0, nil
-	}
-	var exitErr *exec.ExitError
-	if errors.As(waitErr, &exitErr) {
-		if status, ok := exitErr.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-			return 128 + int(status.Signal()), nil
-		}
-		return exitErr.ExitCode(), nil
-	}
-	return -1, fmt.Errorf("wait for command: %w", waitErr)
-}
-
 func executeCapturedShellCommand(ctx context.Context, command, cwd string, timeout time.Duration) (commandExecution, error) {
 	return executeCapturedShellCommandWithStdin(ctx, command, cwd, timeout, nil)
-}
-
-func executeCapturedShellCommandWithStdin(ctx context.Context, command, cwd string, timeout time.Duration, stdin io.Reader) (commandExecution, error) {
-	if timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
-	cmd := exec.CommandContext( // nosemgrep: dangerous-exec-command
-		ctx, "/bin/sh", "-c", command,
-	)
-	cmd.Dir = cwd
-	cmd.Stdin = stdin
-	cmd.Env = BuildChildEnv(os.Environ())
-	cmd.SysProcAttr = platformSysProcAttr()
-
-	var stdoutBuf strings.Builder
-	var stderrBuf strings.Builder
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
-
-	if err := cmd.Start(); err != nil {
-		return commandExecution{}, fmt.Errorf("start command: %w", err)
-	}
-
-	exitCode, err := waitForManagedCommand(cmd)
-	if err != nil {
-		return commandExecution{
-			Stdout: stdoutBuf.String(),
-			Stderr: stderrBuf.String(),
-		}, err
-	}
-
-	return commandExecution{
-		Stdout:   stdoutBuf.String(),
-		Stderr:   stderrBuf.String(),
-		ExitCode: exitCode,
-	}, nil
 }
 
 // logEvent logs an execution event to the database if available.

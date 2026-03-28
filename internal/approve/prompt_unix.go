@@ -1,3 +1,5 @@
+//go:build unix
+
 package approve
 
 import (
@@ -5,26 +7,12 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/php-workx/fuse/internal/sanitize"
 )
-
-// sanitizePrompt delegates to the shared sanitize package and additionally
-// replaces \n and \r with spaces to prevent prompt layout injection.
-func sanitizePrompt(s string) string {
-	s = sanitize.String(s)
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	return s
-}
-
-var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
 
 // ttyMu serializes concurrent TTY approval prompts. Without this, two
 // goroutines could both open /dev/tty and fight over raw mode and keystrokes.

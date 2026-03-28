@@ -3,6 +3,7 @@ package adapters
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -207,6 +208,9 @@ func TestBuildChildEnv_StripsLDPreload(t *testing.T) {
 }
 
 func TestExecuteCommand_SafeCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	// This test actually executes a command, so use a safe one.
 	// We need to set up a temporary working directory.
 	tmpDir := t.TempDir()
@@ -226,6 +230,9 @@ func TestExecuteCommand_SafeCommand(t *testing.T) {
 }
 
 func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	withFuseHome(t)
 	enableDryRunForTest(t)
 	exitCode, err := ExecuteCommand("printf dryrun", t.TempDir(), time.Minute)
@@ -238,6 +245,9 @@ func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
 }
 
 func TestExecuteCommand_DisabledPassesThrough(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	withFuseHome(t)
 	// Neither enabled nor dry-run — fully disabled.
 
@@ -251,6 +261,9 @@ func TestExecuteCommand_DisabledPassesThrough(t *testing.T) {
 }
 
 func TestExecuteCommand_EnabledBlockedCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell execution not yet supported on Windows")
+	}
 	withFuseHome(t)
 	enableFuseForTest(t)
 

@@ -241,8 +241,8 @@ build:
 install:
     go install -ldflags '{{ldflags}}' ./cmd/fuse
 
-# Cross-build for all platforms (linux + macOS, no Windows — fuse uses Unix TTY)
-build-all: build-linux build-darwin
+# Cross-build for all platforms (linux + macOS + Windows)
+build-all: build-linux build-darwin build-windows
 
 build-linux:
     GOOS=linux GOARCH=amd64 go build -ldflags '{{ldflags}}' -o bin/fuse-linux-amd64 ./cmd/fuse
@@ -251,6 +251,10 @@ build-linux:
 build-darwin:
     GOOS=darwin GOARCH=amd64 go build -ldflags '{{ldflags}}' -o bin/fuse-darwin-amd64 ./cmd/fuse
     GOOS=darwin GOARCH=arm64 go build -ldflags '{{ldflags}}' -o bin/fuse-darwin-arm64 ./cmd/fuse
+
+build-windows:
+    GOOS=windows GOARCH=amd64 go build -ldflags '{{ldflags}}' -o bin/fuse-windows-amd64.exe ./cmd/fuse
+    GOOS=windows GOARCH=arm64 go build -ldflags '{{ldflags}}' -o bin/fuse-windows-arm64.exe ./cmd/fuse
 
 # --- Setup ---
 
