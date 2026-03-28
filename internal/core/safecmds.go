@@ -28,6 +28,9 @@ var unconditionalSafe = map[string]bool{
 	"id": true, "groups": true, "uptime": true, "free": true, "top": true,
 	"htop": true, "ps": true, "pgrep": true, "lsof": true, "lsblk": true,
 	"mount": true,
+	// Network diagnostics (read-only)
+	"ping": true, "traceroute": true, "tracepath": true, "mtr": true,
+	"host": true, "nslookup": true, "dig": true, "whois": true,
 	// Read-only help/docs
 	"man": true, "info": true, "tldr": true, "help": true,
 	// Linters / formatters / test runners (single-word basenames)
@@ -118,6 +121,12 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 		return isGcloudSafe(fields)
 	case "az":
 		return isAzSafe(fields)
+	case "sqlite3":
+		return isSqliteSafe(fields)
+	case "nc", "ncat", "netcat":
+		return isNcSafe(fields)
+	case "pip", "pip3":
+		return isPipSafe(fields)
 	default:
 		return false
 	}
@@ -166,6 +175,7 @@ var conditionalGitCheckers = map[string]func([]string) bool{
 	"checkout": gitCheckoutSafe,
 	"config":   gitConfigSafe,
 	"tag":      gitTagSafe,
+	"restore":  gitRestoreSafe,
 }
 
 // isGitSafe: git is safe with read-only subcommands.
@@ -452,6 +462,19 @@ func isAwsSafe(fields []string) bool {
 	return false
 }
 
+// skipGcloudFlags advances past leading flags (and their non-flag arguments)
+// starting at position start, returning the index of the first positional token.
+func skipGcloudFlags(fields []string, start int) int {
+	idx := start
+	for idx < len(fields) && strings.HasPrefix(fields[idx], "-") {
+		idx++
+		if idx < len(fields) && !strings.HasPrefix(fields[idx], "-") {
+			idx++
+		}
+	}
+	return idx
+}
+
 // isGcloudSafe: gcloud is safe with describe, list, config list, info, auth list.
 func isGcloudSafe(fields []string) bool {
 	if len(fields) < 2 {
@@ -459,13 +482,7 @@ func isGcloudSafe(fields []string) bool {
 	}
 
 	// Find the first non-flag token after "gcloud".
-	idx := 1
-	for idx < len(fields) && strings.HasPrefix(fields[idx], "-") {
-		idx++
-		if idx < len(fields) && !strings.HasPrefix(fields[idx], "-") {
-			idx++
-		}
-	}
+	idx := skipGcloudFlags(fields, 1)
 	if idx >= len(fields) {
 		return false
 	}
@@ -571,4 +588,119 @@ func IsSafeBuildCleanup(cmd string) bool {
 		}
 	}
 	return true
+}
+
+// gitRestoreSafe: git restore is safe with --staged (unstages without discarding).
+// Without --staged, git restore discards working tree changes.
+func gitRestoreSafe(args []string) bool {
+	sawStaged := false
+	for _, a := range args {
+		if a == "--worktree" {
+			return false
+		}
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a[1:], 'W') {
+			return false
+		}
+		if a == "--staged" {
+			sawStaged = true
+			continue
+		}
+		if len(a) > 1 && a[0] == '-' && a[1] != '-' && strings.ContainsRune(a[1:], 'S') {
+			sawStaged = true
+		}
+	}
+	return sawStaged
+}
+
+// isSqliteSafe: sqlite3 is safe with read-only queries (SELECT, PRAGMA, EXPLAIN).
+// Blocks destructive SQL keywords and sqlite3 dot-commands that execute code.
+func isSqliteSafe(fields []string) bool {
+	destructive := []string{"DELETE", "DROP", "INSERT", "UPDATE", "ALTER", "ATTACH", "DETACH", "CREATE"}
+	normalized := strings.NewReplacer(
+		`""`, "",
+		`''`, "",
+		"``", "",
+		`"`, "",
+		`'`, "",
+		"`", "",
+		" ", "",
+		"\t", "",
+		"\n", "",
+		"\r", "",
+	).Replace(strings.Join(fields, " "))
+	normalized = strings.ToUpper(normalized)
+	for _, kw := range destructive {
+		if strings.Contains(normalized, kw) {
+			return false
+		}
+	}
+	// Per-field checks for injection markers and dangerous dot-commands.
+	safeDotCmds := map[string]bool{
+		".tables": true, ".schema": true, ".headers": true, ".mode": true,
+		".separator": true, ".width": true, ".help": true, ".show": true,
+		".databases": true, ".indices": true, ".explain": true, ".timer": true,
+		".nullvalue": true, ".print": true, ".bail": true, ".eqp": true,
+		".stats": true, ".dbinfo": true, ".lint": true, ".fullschema": true,
+	}
+	for _, f := range fields {
+		lower := strings.ToLower(f)
+		if strings.ContainsAny(f, ";`") {
+			return false
+		}
+		if strings.HasPrefix(lower, ".") && !safeDotCmds[lower] {
+			return false
+		}
+	}
+	return true
+}
+
+// isNcSafe: nc/ncat/netcat is safe in scan mode (-z) without exec flags.
+func isNcSafe(fields []string) bool {
+	if hasNcExecFlag(fields) {
+		return false
+	}
+	return hasNcScanFlag(fields)
+}
+
+// hasNcExecFlag returns true if any field is an exec flag (-e, -c, --exec, etc.).
+func hasNcExecFlag(fields []string) bool {
+	for _, f := range fields {
+		lower := strings.ToLower(f)
+		if lower == "--exec" || lower == "--sh-exec" || lower == "--lua-exec" ||
+			strings.HasPrefix(lower, "--exec=") || strings.HasPrefix(lower, "--sh-exec=") || strings.HasPrefix(lower, "--lua-exec=") {
+			return true
+		}
+		if len(f) > 1 && f[0] == '-' && f[1] != '-' {
+			if strings.ContainsRune(f[1:], 'e') || strings.ContainsRune(f[1:], 'c') {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// hasNcScanFlag returns true if any field contains the -z scan flag.
+func hasNcScanFlag(fields []string) bool {
+	for _, f := range fields {
+		if f == "-z" {
+			return true
+		}
+		if len(f) > 1 && f[0] == '-' && f[1] != '-' && strings.ContainsRune(f, 'z') {
+			return true
+		}
+	}
+	return false
+}
+
+// isPipSafe: pip is safe for truly read-only operations.
+// Excludes config (can modify index), cache (can delete), wheel (executes setup.py).
+func isPipSafe(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	safeSubs := map[string]bool{
+		"list": true, "show": true, "freeze": true, "check": true,
+		"search": true, "debug": true,
+	}
+	return safeSubs[fields[1]]
 }

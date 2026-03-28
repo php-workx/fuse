@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -269,7 +271,11 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 		return "", "", 0, ctx.Err()
 	}
 
-	policyCfg, _ := policy.LoadPolicy(config.PolicyPath())
+	policyCfg, err := policy.LoadPolicyWithLKG(config.PolicyPath(), 0)
+	if err != nil && !os.IsNotExist(err) {
+		slog.Warn("policy load failed for codex shell request", "path", config.PolicyPath(), "error", err)
+		return "", "", 0, fmt.Errorf("load policy: %w", err)
+	}
 	evaluator := policy.NewEvaluator(policyCfg)
 	req := core.ShellRequest{
 		RawCommand: command,
@@ -306,51 +312,19 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 		logEvent(database, event)
 	}
 
-	switch result.Decision {
-	case core.DecisionBlocked:
-		logWithVerdict("blocked")
-		cleanupExecutionState(database, cfg)
-		if !dryRun {
-			return "", "", 0, fmt.Errorf("fuse blocked command: %s", result.Reason)
-		}
-	case core.DecisionSafe, core.DecisionCaution:
-		// Execute directly.
-	case core.DecisionApproval:
-		if !dryRun {
-			if database == nil {
-				return "", "", 0, fmt.Errorf("database unavailable for approval")
-			}
-			secret, secretErr := db.EnsureSecret(config.SecretPath())
-			if secretErr != nil {
-				return "", "", 0, secretErr
-			}
-
-			mgr, mgrErr := approve.NewManager(database, secret)
-			if mgrErr != nil {
-				return "", "", 0, mgrErr
-			}
-			decision, promptErr := mgr.RequestApproval(ctx, approve.ApprovalRequest{
-				DecisionKey:    result.DecisionKey,
-				Command:        command,
-				Reason:         result.Reason,
-				SessionID:      sessionID,
-				Source:         "codex-shell",
-				NonInteractive: dryRun,
-			})
-			if promptErr != nil {
-				return "", "", 0, promptErr
-			}
-			if decision == core.DecisionBlocked {
-				logWithVerdict("denied")
-				cleanupExecutionState(database, cfg)
-				return "", "", 0, errApprovalDenied
-			}
-		} else {
-			logWithVerdict("dry-run")
-		}
-
-	default:
-		// Unknown decision — execute directly (safe fallback).
+	proceed, err := handleCodexDecision(codexDecisionContext{
+		ctx:            ctx,
+		result:         result,
+		command:        command,
+		sessionID:      sessionID,
+		database:       database,
+		cfg:            cfg,
+		verdict:        verdict,
+		dryRun:         dryRun,
+		logWithVerdict: logWithVerdict,
+	})
+	if !proceed {
+		return "", "", 0, err
 	}
 
 	if ctx.Err() != nil {
@@ -371,6 +345,84 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 	logWithVerdict(outcome)
 	cleanupExecutionState(database, cfg)
 	return execResult.Stdout, execResult.Stderr, execResult.ExitCode, err
+}
+
+// codexDecisionContext bundles the parameters needed by handleCodexDecision.
+type codexDecisionContext struct {
+	ctx            context.Context
+	result         *core.ClassifyResult
+	command        string
+	sessionID      string
+	database       *db.DB
+	cfg            *config.Config
+	verdict        *judge.Verdict
+	dryRun         bool
+	logWithVerdict func(string)
+}
+
+// handleCodexDecision handles the decision switch for codex shell commands.
+// Returns (proceed, err) where proceed=true means execution should continue.
+func handleCodexDecision(dc codexDecisionContext) (bool, error) {
+	result := dc.result
+	logWithVerdict := dc.logWithVerdict
+	database := dc.database
+	cfg := dc.cfg
+	dryRun := dc.dryRun
+	switch result.Decision {
+	case core.DecisionBlocked:
+		logWithVerdict("blocked")
+		cleanupExecutionState(database, cfg)
+		if !dryRun {
+			return false, fmt.Errorf("fuse blocked command: %s", result.Reason)
+		}
+	case core.DecisionSafe, core.DecisionCaution:
+		// Execute directly.
+	case core.DecisionApproval:
+		if !dryRun {
+			decision, err := handleCodexApproval(dc.ctx, result, dc.command, dc.sessionID, database)
+			if err != nil {
+				return false, err
+			}
+			if decision == core.DecisionBlocked {
+				logWithVerdict("denied")
+				cleanupExecutionState(database, cfg)
+				return false, errApprovalDenied
+			}
+		} else {
+			logWithVerdict("dry-run")
+		}
+	default:
+		// Unknown decision — execute directly (safe fallback).
+	}
+	return true, nil
+}
+
+// handleCodexApproval manages the approval flow for codex shell commands.
+func handleCodexApproval(
+	ctx context.Context,
+	result *core.ClassifyResult,
+	command, sessionID string,
+	database *db.DB,
+) (core.Decision, error) {
+	if database == nil {
+		return "", fmt.Errorf("database unavailable for approval")
+	}
+	secret, secretErr := db.EnsureSecret(config.SecretPath())
+	if secretErr != nil {
+		return "", secretErr
+	}
+	mgr, mgrErr := approve.NewManager(database, secret)
+	if mgrErr != nil {
+		return "", mgrErr
+	}
+	return mgr.RequestApproval(ctx, approve.ApprovalRequest{
+		DecisionKey:    result.DecisionKey,
+		Command:        command,
+		Reason:         result.Reason,
+		SessionID:      sessionID,
+		Source:         "codex-shell",
+		NonInteractive: false,
+	})
 }
 
 // codexShellWriter serializes MCP response writes to stdout.

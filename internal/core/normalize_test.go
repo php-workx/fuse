@@ -1,6 +1,7 @@
 package core
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -707,6 +708,152 @@ func TestClassificationNormalize_BashCExtractionFailure(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Heredoc body extraction tests (v2 pipeline)
+// ---------------------------------------------------------------------------
+
+func TestExtractHeredocBody_Simple(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<EOF\necho hello\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if body != "echo hello\n" && body != "echo hello" {
+		t.Errorf("got body=%q, want 'echo hello'", body)
+	}
+}
+
+func TestExtractHeredocBody_TabStripped(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<-EOF\n\techo hello\n\tEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if !strings.Contains(body, "echo hello") {
+		t.Errorf("got body=%q, want it to contain 'echo hello'", body)
+	}
+}
+
+func TestExtractHeredocBody_QuotedMarker(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<'EOF'\necho $HOME\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if !strings.Contains(body, "$HOME") {
+		t.Errorf("got body=%q, want literal $HOME preserved", body)
+	}
+}
+
+func TestExtractHeredocBody_Truncated(t *testing.T) {
+	// Create body > 50KB
+	bigBody := strings.Repeat("echo hello\n", 5500) // ~60KB
+	cmd := "bash <<EOF\n" + bigBody + "EOF"
+	body, complete := extractHeredocBody(cmd)
+	if complete {
+		t.Error("expected complete=false for truncated body")
+	}
+	if len(body) > maxInlineBodyBytes+100 { // allow small overhead from joins
+		t.Errorf("body too large: %d bytes", len(body))
+	}
+}
+
+func TestExtractHeredocBody_Empty(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<EOF\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if body != "" {
+		t.Errorf("got body=%q, want empty", body)
+	}
+}
+
+func TestExtractHeredocBody_CatPipedToBash(t *testing.T) {
+	// cat <<EOF | bash — NOT string quoting, body should be extracted for analysis
+	body, complete := extractHeredocBody("cat <<EOF | bash\nrm -rf /\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if !strings.Contains(body, "rm -rf") {
+		t.Errorf("got body=%q, want it to contain 'rm -rf' (cat heredoc piped to shell should be extracted)", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Command substitution extraction tests (v2 pipeline)
+// ---------------------------------------------------------------------------
+
+func TestExtractHeredocBody_DelimiterInBody(t *testing.T) {
+	body, complete := extractHeredocBody("bash <<EOF\necho \"not EOF\"\nEOF")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if !strings.Contains(body, "not EOF") {
+		t.Errorf("got body=%q, want it to contain 'not EOF'", body)
+	}
+}
+
+func TestExtractCommandSubstitution_QuotedParen(t *testing.T) {
+	results, complete := extractCommandSubstitutions(`echo $(echo ")")`)
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1: %v", len(results), results)
+	}
+	if !strings.Contains(results[0], "echo") {
+		t.Errorf("got %q, want it to contain 'echo'", results[0])
+	}
+}
+
+func TestExtractCommandSubstitution_Simple(t *testing.T) {
+	results, complete := extractCommandSubstitutions("echo $(whoami)")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if len(results) != 1 || results[0] != "whoami" {
+		t.Errorf("got %v, want [whoami]", results)
+	}
+}
+
+func TestExtractCommandSubstitution_Multiple(t *testing.T) {
+	results, complete := extractCommandSubstitutions("echo $(whoami) $(date)")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if len(results) != 2 {
+		t.Errorf("got %d results, want 2: %v", len(results), results)
+	}
+}
+
+func TestExtractCommandSubstitution_Nested(t *testing.T) {
+	results, complete := extractCommandSubstitutions("$(echo $(id))")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1: %v", len(results), results)
+	}
+	if !strings.Contains(results[0], "echo") {
+		t.Errorf("got %q, want it to contain 'echo'", results[0])
+	}
+}
+
+func TestExtractCommandSubstitution_CatExempt(t *testing.T) {
+	results, complete := extractCommandSubstitutions("echo \"$(cat <<'EOF'\nhello\nEOF\n)\"")
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if len(results) != 0 {
+		t.Errorf("got %v, want empty (cat heredoc substitution should be skipped)", results)
+	}
+}
+
+func TestExtractCommandSubstitution_ParseError(t *testing.T) {
+	results, complete := extractCommandSubstitutions("echo $('unbalanced")
+	if complete {
+		t.Error("expected complete=false on parse error")
+	}
+	_ = results // no panic = pass
+}
+
 // stringSliceEqual compares two string slices for equality, treating nil and empty as equal.
 func stringSliceEqual(a, b []string) bool {
 	if len(a) == 0 && len(b) == 0 {
@@ -721,4 +868,40 @@ func stringSliceEqual(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestClassificationNormalize_SensitiveEnvAssignment(t *testing.T) {
+	tests := []struct {
+		name     string
+		sub      string
+		wantFlag bool
+		wantCmd  string // expected outer command (post-stripping)
+	}{
+		{"env LD_PRELOAD", "env LD_PRELOAD=/evil/lib.so ls", true, "ls"},
+		{"env DYLD_INSERT", "env DYLD_INSERT_LIBRARIES=/evil.dylib python", true, "python"},
+		{"env PATH override", "env PATH=/evil:$PATH command_here", true, "command_here"},
+		{"env PYTHONPATH (not sensitive)", "env PYTHONPATH=/evil python script.py", false, "python script.py"},
+		{"env benign", "env FOO=bar ls", false, "ls"},
+		{"env -i with PATH", "env -i PATH=/usr/bin ls", true, "ls"},
+		{"bare LD_PRELOAD with path", "LD_PRELOAD=/tmp/evil.so ls -la", true, "ls -la"},
+		{"bare DYLD with path", "DYLD_INSERT_LIBRARIES=/evil/lib.dylib python script.py", true, "python script.py"},
+		{"bare PATH", "PATH=/evil curl http://example.com", true, "curl http://example.com"},
+		{"bare benign with path", "FOO=/bar/baz ls", false, "ls"},
+		{"bare benign no path", "EDITOR=vim git commit", false, "git commit"},
+		{"bare LD_PRELOAD no path", "LD_PRELOAD=evil.so ls", true, "ls"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassificationNormalize(tt.sub)
+			if got.SensitiveEnvAssignment != tt.wantFlag {
+				t.Errorf("ClassificationNormalize(%q).SensitiveEnvAssignment = %v, want %v",
+					tt.sub, got.SensitiveEnvAssignment, tt.wantFlag)
+			}
+			if tt.wantCmd != "" && got.Outer != tt.wantCmd {
+				t.Errorf("ClassificationNormalize(%q).Outer = %q, want %q",
+					tt.sub, got.Outer, tt.wantCmd)
+			}
+		})
+	}
 }

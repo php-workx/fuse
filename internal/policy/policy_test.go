@@ -5,15 +5,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"testing"
+	"time"
 
 	"github.com/php-workx/fuse/internal/core"
 )
 
-// TestHardcoded_AllCompile verifies that all 22 hardcoded patterns are valid
+// TestHardcoded_AllCompile verifies that all 21 hardcoded patterns are valid
 // compiled regexes (they use MustCompile, so this also confirms the count).
 func TestHardcoded_AllCompile(t *testing.T) {
-	if len(HardcodedBlocked) != 22 {
-		t.Fatalf("expected 22 hardcoded rules, got %d", len(HardcodedBlocked))
+	if len(HardcodedBlocked) != 21 {
+		t.Fatalf("expected 21 hardcoded rules, got %d", len(HardcodedBlocked))
 	}
 	for i, r := range HardcodedBlocked {
 		if r.Pattern == nil {
@@ -441,5 +442,320 @@ func TestEffectiveTagMode_UnmatchedTags(t *testing.T) {
 	}
 	if explicit {
 		t.Error("expected explicit=false when no tag matches")
+	}
+}
+
+// --- DisabledTagSet ---
+
+func TestDisabledTagSet_NilPolicy(t *testing.T) {
+	m := DisabledTagSet(nil)
+	if m != nil {
+		t.Errorf("expected nil for nil policy, got %v", m)
+	}
+}
+
+func TestDisabledTagSet_Empty(t *testing.T) {
+	m := DisabledTagSet(&PolicyConfig{})
+	if m != nil {
+		t.Errorf("expected nil for empty disabled_tags, got %v", m)
+	}
+}
+
+func TestDisabledTagSet_WithTags(t *testing.T) {
+	cfg := &PolicyConfig{DisabledTags: []string{"git", "aws"}}
+	m := DisabledTagSet(cfg)
+	if !m["git"] || !m["aws"] {
+		t.Errorf("expected git and aws in set, got %v", m)
+	}
+	if m["gcp"] {
+		t.Error("expected gcp not in set")
+	}
+}
+
+// --- ParseTagOverrides ---
+
+func TestParseTagOverrides_NilPolicy(t *testing.T) {
+	m, err := ParseTagOverrides(nil)
+	if err != nil || m != nil {
+		t.Errorf("expected nil,nil for nil policy, got %v,%v", m, err)
+	}
+}
+
+func TestParseTagOverrides_EmptyOverrides(t *testing.T) {
+	m, err := ParseTagOverrides(&PolicyConfig{})
+	if err != nil || m != nil {
+		t.Errorf("expected nil,nil for empty overrides, got %v,%v", m, err)
+	}
+}
+
+func TestParseTagOverrides_UnknownTag(t *testing.T) {
+	cfg := &PolicyConfig{TagOverrides: map[string]string{"nonexistent_tag_xyz": "enabled"}}
+	_, err := ParseTagOverrides(cfg)
+	if err == nil {
+		t.Fatal("expected error for unknown tag")
+	}
+}
+
+func TestParseTagOverrides_InvalidMode(t *testing.T) {
+	// Use a tag we know exists in builtins.
+	var knownTag string
+	for _, r := range BuiltinRules {
+		if len(r.Tags) > 0 {
+			knownTag = r.Tags[0]
+			break
+		}
+	}
+	if knownTag == "" {
+		t.Skip("no builtin rules with tags")
+	}
+	cfg := &PolicyConfig{TagOverrides: map[string]string{knownTag: "invalid_mode"}}
+	_, err := ParseTagOverrides(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+}
+
+// --- LoadPolicy edge cases ---
+
+func TestLoadPolicy_NonexistentFile(t *testing.T) {
+	_, err := LoadPolicy("/tmp/does-not-exist-policy-xyz.yaml")
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+}
+
+func TestLoadPolicy_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "policy.yaml")
+	if err := os.WriteFile(path, []byte("{{{{not yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadPolicy(path)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestLoadPolicy_InvalidTagOverride(t *testing.T) {
+	yaml := `
+version: "1"
+tag_overrides:
+  nonexistent_tag_xyz: "enabled"
+`
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "policy.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadPolicy(path)
+	if err == nil {
+		t.Fatal("expected error for unknown tag in tag_overrides")
+	}
+}
+
+// --- LKG lifecycle ---
+
+func TestLoadPolicyWithLKG_SavesAndLoadsLKG(t *testing.T) {
+	tmpDir := t.TempDir()
+	policyPath := filepath.Join(tmpDir, "policy.yaml")
+	lkgPath := policyPath + ".lkg"
+
+	yaml := `
+version: "1"
+rules:
+  - pattern: "\\btest\\b"
+    action: "caution"
+    reason: "test rule"
+`
+	if err := os.WriteFile(policyPath, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Load should succeed and create LKG.
+	cfg, err := LoadPolicyWithLKG(policyPath, 0)
+	if err != nil {
+		t.Fatalf("LoadPolicyWithLKG: %v", err)
+	}
+	if len(cfg.Rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(cfg.Rules))
+	}
+	if _, err := os.Stat(lkgPath); err != nil {
+		t.Fatalf("expected LKG file created: %v", err)
+	}
+
+	// Now corrupt the primary and verify LKG fallback works.
+	if err := os.WriteFile(policyPath, []byte("{{invalid"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = LoadPolicyWithLKG(policyPath, time.Hour)
+	if err != nil {
+		t.Fatalf("expected LKG fallback, got error: %v", err)
+	}
+	if len(cfg.Rules) != 1 {
+		t.Fatalf("expected 1 rule from LKG, got %d", len(cfg.Rules))
+	}
+}
+
+func TestLoadPolicyWithLKG_NonexistentReturnsError(t *testing.T) {
+	_, err := LoadPolicyWithLKG("/tmp/does-not-exist-xyz.yaml", 0)
+	if err == nil {
+		t.Fatal("expected error for nonexistent policy")
+	}
+}
+
+func TestLoadPolicyWithLKG_UnreadableNoLKG(t *testing.T) {
+	tmpDir := t.TempDir()
+	policyPath := filepath.Join(tmpDir, "policy.yaml")
+
+	// Create a directory where the file should be — ReadFile will fail with a non-NotExist error.
+	if err := os.MkdirAll(policyPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadPolicyWithLKG(policyPath, time.Hour)
+	if err == nil {
+		t.Fatal("expected error when policy unreadable and no LKG")
+	}
+}
+
+func TestLoadLKG_TooOld(t *testing.T) {
+	tmpDir := t.TempDir()
+	lkgPath := filepath.Join(tmpDir, "policy.yaml.lkg")
+
+	yaml := `
+version: "1"
+rules: []
+`
+	if err := os.WriteFile(lkgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set modtime to 8 days ago.
+	oldTime := time.Now().Add(-8 * 24 * time.Hour)
+	if err := os.Chtimes(lkgPath, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadLKG(lkgPath, 7*24*time.Hour)
+	if err == nil {
+		t.Fatal("expected error for expired LKG")
+	}
+}
+
+func TestLoadLKG_NonexistentFile(t *testing.T) {
+	_, err := LoadLKG("/tmp/does-not-exist-lkg-xyz.yaml.lkg", time.Hour)
+	if err == nil {
+		t.Fatal("expected error for nonexistent LKG")
+	}
+}
+
+func TestLoadLKG_StripsHeaderComments(t *testing.T) {
+	tmpDir := t.TempDir()
+	lkgPath := filepath.Join(tmpDir, "policy.yaml.lkg")
+
+	content := `# LKG saved: 2026-03-28T00:00:00Z
+# Original: /tmp/policy.yaml (sha256: abc123)
+version: "1"
+rules:
+  - pattern: "\\btest\\b"
+    action: "caution"
+    reason: "from lkg"
+`
+	if err := os.WriteFile(lkgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadLKG(lkgPath, time.Hour)
+	if err != nil {
+		t.Fatalf("LoadLKG: %v", err)
+	}
+	if len(cfg.Rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(cfg.Rules))
+	}
+	if cfg.Rules[0].Reason != "from lkg" {
+		t.Errorf("expected reason 'from lkg', got %q", cfg.Rules[0].Reason)
+	}
+}
+
+func TestLoadLKG_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	lkgPath := filepath.Join(tmpDir, "policy.yaml.lkg")
+	if err := os.WriteFile(lkgPath, []byte("{{not yaml"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadLKG(lkgPath, time.Hour)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML in LKG")
+	}
+}
+
+func TestLoadLKG_InvalidAction(t *testing.T) {
+	tmpDir := t.TempDir()
+	lkgPath := filepath.Join(tmpDir, "policy.yaml.lkg")
+	content := `
+version: "1"
+rules:
+  - pattern: "\\btest\\b"
+    action: "bogus"
+    reason: "bad action"
+`
+	if err := os.WriteFile(lkgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadLKG(lkgPath, time.Hour)
+	if err == nil {
+		t.Fatal("expected error for invalid action in LKG")
+	}
+}
+
+func TestLoadLKG_InvalidRegex(t *testing.T) {
+	tmpDir := t.TempDir()
+	lkgPath := filepath.Join(tmpDir, "policy.yaml.lkg")
+	content := `
+version: "1"
+rules:
+  - pattern: "[invalid"
+    action: "block"
+    reason: "bad regex"
+`
+	if err := os.WriteFile(lkgPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := LoadLKG(lkgPath, time.Hour)
+	if err == nil {
+		t.Fatal("expected error for invalid regex in LKG")
+	}
+}
+
+// --- DisabledBuiltinSet ---
+
+func TestDisabledBuiltinSet_NilPolicy(t *testing.T) {
+	m := DisabledBuiltinSet(nil)
+	if m != nil {
+		t.Errorf("expected nil for nil policy, got %v", m)
+	}
+}
+
+func TestDisabledBuiltinSet_Empty(t *testing.T) {
+	m := DisabledBuiltinSet(&PolicyConfig{})
+	if m != nil {
+		t.Errorf("expected nil for empty disabled_builtins, got %v", m)
+	}
+}
+
+// --- EvaluateUserRules edge cases ---
+
+func TestEvaluateUserRules_SkipsNilCompiledRule(t *testing.T) {
+	cfg := &PolicyConfig{
+		Rules: []PolicyRule{
+			{Pattern: "test", Action: "caution", Reason: "test", compiled: nil},
+		},
+	}
+	dec, _ := EvaluateUserRules("test command", cfg)
+	if dec != "" {
+		t.Errorf("expected empty decision for nil compiled rule, got %q", dec)
 	}
 }

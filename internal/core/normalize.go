@@ -7,6 +7,7 @@ import (
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // Compiled regexes for DisplayNormalize.
@@ -133,6 +134,13 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 		return result
 	}
 
+	// Skip leading bare env var assignments (VAR=value before the command).
+	i = skipLeadingEnvAssignments(tokens, i, &result)
+	if i >= len(tokens) {
+		result.Outer = ""
+		return result
+	}
+
 	// Extract basename from first token if it contains '/'.
 	firstToken := tokens[i]
 	if strings.Contains(firstToken, "/") {
@@ -141,36 +149,14 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 
 	// Check for bash -c / sh -c pattern.
 	if (firstToken == "bash" || firstToken == "sh") && i+1 < len(tokens) {
-		innerCmd, ok := extractBashCInner(tokens, i)
-		if ok && !unbalancedQuotes {
-			// The outer command is the full remaining tokens joined.
-			result.Outer = strings.Join(tokens[i:], " ")
-			if depth < maxRecursionDepth {
-				innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
-				result.Inner = append(result.Inner, innerCmd)
-				result.Inner = append(result.Inner, innerResult.Inner...)
-				if innerResult.EscalateClassification {
-					result.EscalateClassification = true
-				}
-			} else {
-				result.Inner = append(result.Inner, innerCmd)
-			}
+		if handleBashC(tokens, i, depth, unbalancedQuotes, &result) {
 			return result
-		}
-		// bash/sh with -c detected but extraction failed: either the tokenizer
-		// extracted ok but quotes were unbalanced (ok==true, unbalancedQuotes==true),
-		// or -c was present but had no argument token (ok==false with -c in tokens).
-		if ok || containsDashC(tokens[i+1:]) {
-			result.ExtractionFailed = true
 		}
 	}
 
 	// Check for ssh pattern.
 	if firstToken == "ssh" && i+1 < len(tokens) {
-		remoteCmd, ok := extractSSHRemoteCommand(tokens, i)
-		if ok {
-			result.Outer = strings.Join(tokens[i:], " ")
-			result.Inner = append(result.Inner, remoteCmd)
+		if handleSSH(tokens, i, &result) {
 			return result
 		}
 	}
@@ -184,58 +170,137 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 	return result
 }
 
+// skipLeadingEnvAssignments skips bare env var assignments (VAR=value) before the command.
+// Must happen before filepath.Base to avoid mangling VAR=/path/value into a basename.
+func skipLeadingEnvAssignments(tokens []string, i int, result *ClassifiedCommand) int {
+	for i < len(tokens) {
+		tok := tokens[i]
+		if !isEnvAssignment(tok) || strings.HasPrefix(tok, "-") {
+			break
+		}
+		if isSensitiveEnvAssignment(tok) {
+			result.SensitiveEnvAssignment = true
+		}
+		i++
+	}
+	return i
+}
+
+// handleBashC processes bash/sh -c inner command extraction. Returns true if
+// the result was fully resolved (caller should return immediately).
+func handleBashC(tokens []string, i, depth int, unbalancedQuotes bool, result *ClassifiedCommand) bool {
+	innerCmd, ok := extractBashCInner(tokens, i)
+	if ok && !unbalancedQuotes {
+		result.Outer = strings.Join(tokens[i:], " ")
+		if depth < maxRecursionDepth {
+			innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
+			result.Inner = append(result.Inner, innerCmd)
+			result.Inner = append(result.Inner, innerResult.Inner...)
+			if innerResult.EscalateClassification {
+				result.EscalateClassification = true
+			}
+		} else {
+			result.Inner = append(result.Inner, innerCmd)
+		}
+		return true
+	}
+	// bash/sh with -c detected but extraction failed: either the tokenizer
+	// extracted ok but quotes were unbalanced (ok==true, unbalancedQuotes==true),
+	// or -c was present but had no argument token (ok==false with -c in tokens).
+	if ok || containsDashC(tokens[i+1:]) {
+		result.ExtractionFailed = true
+	}
+	return false
+}
+
+// handleSSH processes ssh remote command extraction. Returns true if
+// the result was fully resolved (caller should return immediately).
+func handleSSH(tokens []string, i int, result *ClassifiedCommand) bool {
+	remoteCmd, ok := extractSSHRemoteCommand(tokens, i)
+	if !ok {
+		return false
+	}
+	result.Outer = strings.Join(tokens[i:], " ")
+	result.Inner = append(result.Inner, remoteCmd)
+	return true
+}
+
 // tokenizeQuoteAware splits a command string into tokens, respecting single and double quotes. Also
 // reports whether the input had unbalanced (unclosed) quotes.
 func tokenizeQuoteAware(s string) ([]string, bool) {
 	var tokens []string
 	var current strings.Builder
-	inSingle := false
-	inDouble := false
-	escaped := false
+	state := &quoteState{}
 
 	for idx := 0; idx < len(s); idx++ {
 		ch := s[idx]
-
-		if escaped {
+		action := state.processChar(ch)
+		switch action {
+		case charConsumed:
 			current.WriteByte(ch)
-			escaped = false
-			continue
-		}
-
-		if ch == '\\' && !inSingle {
-			escaped = true
-			// In double-quote context, keep the backslash for non-special chars
-			// For simplicity in tokenization, we just skip the backslash
-			continue
-		}
-
-		if ch == '\'' && !inDouble {
-			inSingle = !inSingle
-			continue
-		}
-
-		if ch == '"' && !inSingle {
-			inDouble = !inDouble
-			continue
-		}
-
-		if (ch == ' ' || ch == '\t') && !inSingle && !inDouble {
+		case charToggle:
+			// Quote toggled; character itself is not written.
+		case charWhitespace:
 			if current.Len() > 0 {
 				tokens = append(tokens, current.String())
 				current.Reset()
 			}
-			continue
+		case charEscaped:
+			// Backslash consumed; nothing written yet.
 		}
-
-		current.WriteByte(ch)
 	}
 
 	if current.Len() > 0 {
 		tokens = append(tokens, current.String())
 	}
 
-	unbalanced := inSingle || inDouble
-	return tokens, unbalanced
+	return tokens, state.unbalanced()
+}
+
+// charAction describes what the tokenizer should do after processing a character.
+type charAction int
+
+const (
+	charConsumed   charAction = iota // write the character to the current token
+	charToggle                       // quote toggled; skip the character
+	charWhitespace                   // whitespace outside quotes; flush token
+	charEscaped                      // backslash consumed; skip the character
+)
+
+// quoteState tracks the quoting context during tokenization.
+type quoteState struct {
+	inSingle bool
+	inDouble bool
+	escaped  bool
+}
+
+func (q *quoteState) unbalanced() bool {
+	return q.inSingle || q.inDouble
+}
+
+// processChar evaluates a single character in the current quoting context and
+// returns the action the tokenizer should take.
+func (q *quoteState) processChar(ch byte) charAction {
+	if q.escaped {
+		q.escaped = false
+		return charConsumed
+	}
+	if ch == '\\' && !q.inSingle {
+		q.escaped = true
+		return charEscaped
+	}
+	if ch == '\'' && !q.inDouble {
+		q.inSingle = !q.inSingle
+		return charToggle
+	}
+	if ch == '"' && !q.inSingle {
+		q.inDouble = !q.inDouble
+		return charToggle
+	}
+	if (ch == ' ' || ch == '\t') && !q.inSingle && !q.inDouble {
+		return charWhitespace
+	}
+	return charConsumed
 }
 
 // stripWrappers removes known wrapper prefixes and their flags/arguments
@@ -266,7 +331,7 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 		case "doas":
 			i = skipDoasArgs(tokens, i)
 		case "env":
-			i = skipEnvArgs(tokens, i)
+			i = skipEnvArgs(tokens, i, result)
 		case "nice":
 			i = skipNiceArgs(tokens, i)
 		case "ionice":
@@ -286,6 +351,20 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 		}
 	}
 	return i
+}
+
+// skipCombinedFlag checks if a token is a combined short flag (e.g., -iu, -su).
+// If it contains argFlag, the flag takes an argument so we skip 2 tokens.
+// Otherwise we skip 1 token for the flag alone.
+// Returns 0 if the token is not a combined short flag.
+func skipCombinedFlag(token string, argFlag rune) int {
+	if len(token) > 1 && token[0] == '-' && token[1] != '-' {
+		if strings.ContainsRune(token, argFlag) {
+			return 2 // skip flag + argument
+		}
+		return 1 // skip flag only
+	}
+	return 0 // not a combined flag
 }
 
 // skipSudoArgs skips sudo's flags and their arguments.
@@ -312,13 +391,8 @@ func skipSudoArgs(tokens []string, i int) int {
 			continue
 		}
 		// Combined short flags like -iu, -su, etc.
-		if len(t) > 1 && t[0] == '-' && t[1] != '-' {
-			// Check if 'u' is in the combined flags (requires next arg)
-			if strings.ContainsRune(t, 'u') {
-				i += 2 // skip combined flag + user arg
-			} else {
-				i++
-			}
+		if skip := skipCombinedFlag(t, 'u'); skip > 0 {
+			i += skip
 			continue
 		}
 		break
@@ -346,12 +420,8 @@ func skipDoasArgs(tokens []string, i int) int {
 			continue
 		}
 		// Combined flags
-		if len(t) > 1 && t[0] == '-' && t[1] != '-' {
-			if strings.ContainsRune(t, 'u') {
-				i += 2
-			} else {
-				i++
-			}
+		if skip := skipCombinedFlag(t, 'u'); skip > 0 {
+			i += skip
 			continue
 		}
 		break
@@ -359,24 +429,30 @@ func skipDoasArgs(tokens []string, i int) int {
 	return i
 }
 
+// envFlagSkipCount maps env flags to how many tokens to skip (flag + arguments).
+var envFlagSkipCount = map[string]int{
+	"-i":                   1,
+	"--ignore-environment": 1,
+	"-0":                   1,
+	"--null":               1,
+	"-u":                   2,
+	"--unset":              2,
+}
+
 // skipEnvArgs skips env flags and VAR=val assignments.
-func skipEnvArgs(tokens []string, i int) int {
+// Sets result.SensitiveEnvAssignment if any skipped assignment is security-sensitive.
+func skipEnvArgs(tokens []string, i int, result *ClassifiedCommand) int {
 	for i < len(tokens) {
 		t := tokens[i]
 		if t == "--" {
 			i++
 			break
 		}
-		if t == "-i" || t == "--ignore-environment" || t == "-0" || t == "--null" {
-			i++
+		if skip, ok := envFlagSkipCount[t]; ok {
+			i += skip
 			continue
 		}
-		if t == "-u" || t == "--unset" {
-			i += 2
-			continue
-		}
-		// Skip VAR=val assignments (before the command)
-		if strings.Contains(t, "=") && !strings.HasPrefix(t, "-") && isEnvAssignment(t) {
+		if skipEnvVarAssignment(t, result) {
 			i++
 			continue
 		}
@@ -387,6 +463,28 @@ func skipEnvArgs(tokens []string, i int) int {
 		break
 	}
 	return i
+}
+
+// skipEnvVarAssignment checks if a token is a VAR=val assignment and records
+// sensitivity. Returns true if the token was consumed.
+func skipEnvVarAssignment(t string, result *ClassifiedCommand) bool {
+	if !strings.Contains(t, "=") || strings.HasPrefix(t, "-") || !isEnvAssignment(t) {
+		return false
+	}
+	if isSensitiveEnvAssignment(t) {
+		result.SensitiveEnvAssignment = true
+	}
+	return true
+}
+
+// isSensitiveEnvAssignment checks if a VAR=value token sets a security-sensitive variable.
+func isSensitiveEnvAssignment(token string) bool {
+	for _, prefix := range sensitiveEnvPrefixes {
+		if strings.HasPrefix(token, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // isEnvAssignment checks if a token looks like a VAR=value assignment.
@@ -461,6 +559,21 @@ func skipIoniceArgs(tokens []string, i int) int {
 	return i
 }
 
+// timeoutFlagsWithArg are timeout flags that consume the next token as an argument.
+var timeoutFlagsWithArg = map[string]bool{
+	"-s": true, "--signal": true,
+	"-k": true, "--kill-after": true,
+}
+
+// timeoutFlagsNoArg are timeout flags that don't consume an additional token.
+var timeoutFlagsNoArg = map[string]bool{
+	"--foreground": true, "--preserve-status": true,
+	"-v": true, "--verbose": true,
+}
+
+// timeoutCombinedPrefixes are prefix patterns for combined/inline timeout flags.
+var timeoutCombinedPrefixes = []string{"-s", "-k", "--signal=", "--kill-after="}
+
 // skipTimeoutArgs skips timeout flags and the duration argument.
 func skipTimeoutArgs(tokens []string, i int) int {
 	for i < len(tokens) {
@@ -469,20 +582,15 @@ func skipTimeoutArgs(tokens []string, i int) int {
 			i++
 			break
 		}
-		if t == "-s" || t == "--signal" {
+		if timeoutFlagsWithArg[t] {
 			i += 2
 			continue
 		}
-		if t == "-k" || t == "--kill-after" {
-			i += 2
-			continue
-		}
-		if t == "--foreground" || t == "--preserve-status" || t == "-v" || t == "--verbose" {
+		if timeoutFlagsNoArg[t] {
 			i++
 			continue
 		}
-		if strings.HasPrefix(t, "-s") || strings.HasPrefix(t, "-k") ||
-			strings.HasPrefix(t, "--signal=") || strings.HasPrefix(t, "--kill-after=") {
+		if isTimeoutCombinedFlag(t) {
 			i++
 			continue
 		}
@@ -494,6 +602,16 @@ func skipTimeoutArgs(tokens []string, i int) int {
 		break
 	}
 	return i
+}
+
+// isTimeoutCombinedFlag checks if a token is a combined/inline timeout flag.
+func isTimeoutCombinedFlag(t string) bool {
+	for _, prefix := range timeoutCombinedPrefixes {
+		if strings.HasPrefix(t, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // skipTraceArgs skips strace/ltrace flags.
@@ -625,6 +743,175 @@ func extractBashCInner(tokens []string, i int) (string, bool) {
 		break
 	}
 	return "", false
+}
+
+// --- Inline script extraction (v2 classification pipeline) ---
+
+// maxInlineBodyBytes is the maximum size for extracted inline script bodies (50KB).
+const maxInlineBodyBytes = 50 * 1024
+
+// heredocCollector accumulates heredoc body parts during a syntax.Walk,
+// truncating when the total size exceeds maxInlineBodyBytes.
+type heredocCollector struct {
+	parts     []string
+	totalSize int
+	truncated bool
+}
+
+// visit is the syntax.Walk callback for heredoc extraction.
+func (c *heredocCollector) visit(node syntax.Node) bool {
+	stmt, ok := node.(*syntax.Stmt)
+	if !ok {
+		return true
+	}
+	for _, redir := range stmt.Redirs {
+		c.collectRedir(redir)
+	}
+	return true
+}
+
+// collectRedir processes a single redirect, extracting heredoc content if applicable.
+func (c *heredocCollector) collectRedir(redir *syntax.Redirect) {
+	if redir.Op != syntax.Hdoc && redir.Op != syntax.DashHdoc {
+		return
+	}
+	if redir.Hdoc == nil {
+		return
+	}
+	part := printNode(redir.Hdoc)
+	c.totalSize += len(part)
+	if c.totalSize > maxInlineBodyBytes {
+		excess := c.totalSize - maxInlineBodyBytes
+		if len(part) > excess {
+			part = part[:len(part)-excess]
+		} else {
+			part = ""
+		}
+		c.truncated = true
+	}
+	if part != "" {
+		c.parts = append(c.parts, part)
+	}
+}
+
+// extractHeredocBody uses the mvdan.cc/sh parser to extract heredoc bodies.
+// Returns (body, complete). When body > maxInlineBodyBytes, truncates and returns
+// complete=false. Skips heredocs attached to cat commands (string quoting, not
+// code execution). On parse error or panic, returns ("", false) — fail-closed (SEC-008).
+func extractHeredocBody(cmd string) (body string, complete bool) {
+	complete = true
+	if len(cmd) > maxInputSize {
+		return "", false
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			body = ""
+			complete = false
+		}
+	}()
+
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	prog, err := parser.Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return "", false
+	}
+
+	collector := &heredocCollector{}
+	syntax.Walk(prog, collector.visit)
+
+	body = strings.Join(collector.parts, "\n")
+	complete = !collector.truncated
+	return body, complete
+}
+
+// extractCommandSubstitutions uses the mvdan.cc/sh parser to extract $() contents.
+// Skips $(cat <<...) patterns (string quoting, not code execution).
+// Returns (results, complete). On parse error or panic, returns (nil, false) — fail-closed (SEC-008).
+// maxCmdSubstitutions limits extracted $() count for defense-in-depth.
+const maxCmdSubstitutions = 50
+
+func extractCommandSubstitutions(cmd string) (results []string, complete bool) {
+	complete = true
+	if len(cmd) > maxInputSize {
+		return nil, false
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			results = nil
+			complete = false
+		}
+	}()
+
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
+	prog, err := parser.Parse(strings.NewReader(cmd), "")
+	if err != nil {
+		return nil, false
+	}
+
+	syntax.Walk(prog, func(node syntax.Node) bool {
+		if len(results) >= maxCmdSubstitutions {
+			complete = false
+			return false // stop walking
+		}
+		cs, ok := node.(*syntax.CmdSubst)
+		if !ok {
+			return true
+		}
+		content := extractCmdSubstContent(cs)
+		if content != "" {
+			results = append(results, content)
+		}
+		return false // don't recurse into nested CmdSubst
+	})
+
+	return results, complete
+}
+
+// isStmtCatCommand returns true if the statement's command is "cat".
+func isStmtCatCommand(stmt *syntax.Stmt) bool {
+	if stmt == nil || stmt.Cmd == nil {
+		return false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Args) == 0 {
+		return false
+	}
+	name := printNode(call.Args[0])
+	return filepath.Base(name) == "cat"
+}
+
+// extractCmdSubstContent extracts the textual content from a command substitution.
+// Returns "" for $(cat <<...) patterns (string quoting, not code execution).
+func extractCmdSubstContent(cs *syntax.CmdSubst) string {
+	if isCmdSubstCat(cs) {
+		return ""
+	}
+	var parts []string
+	for _, stmt := range cs.Stmts {
+		if part := printNode(stmt); part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// isCmdSubstCat returns true if the command substitution is a $(cat <<...) pattern.
+func isCmdSubstCat(cs *syntax.CmdSubst) bool {
+	if len(cs.Stmts) != 1 {
+		return false
+	}
+	stmt := cs.Stmts[0]
+	if !isStmtCatCommand(stmt) {
+		return false
+	}
+	for _, redir := range stmt.Redirs {
+		if redir.Op == syntax.Hdoc || redir.Op == syntax.DashHdoc {
+			return true
+		}
+	}
+	return false
 }
 
 // extractSSHRemoteCommand extracts the remote command from an ssh invocation.

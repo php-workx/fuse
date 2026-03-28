@@ -40,17 +40,29 @@ func ClassifyMCPTool(toolName string, args map[string]interface{}) Decision {
 	// Layer 2: Argument content scanning.
 	argsDecision := DecisionSafe
 	if args != nil {
-		values := flattenStringValues(args)
+		values, complete := flattenStringValues(args)
 		for _, v := range values {
 			if matchesDestructivePattern(v) {
 				argsDecision = DecisionApproval
 				break
 			}
 		}
+		// Depth exhaustion: incomplete extraction gets at least CAUTION.
+		if !complete && argsDecision == DecisionSafe {
+			argsDecision = DecisionCaution
+		}
+	}
+
+	// Layer 3: URL inspection in arguments (SEC-006).
+	urlDecision := DecisionSafe
+	if args != nil {
+		if d, _ := InspectURLsInArgs(args); d != "" {
+			urlDecision = d
+		}
 	}
 
 	// Most restrictive wins.
-	return MaxDecision(nameDecision, argsDecision)
+	return MaxDecision(MaxDecision(nameDecision, argsDecision), urlDecision)
 }
 
 // classifyMCPByName classifies an MCP tool by its name prefix.
@@ -58,86 +70,91 @@ func ClassifyMCPTool(toolName string, args map[string]interface{}) Decision {
 func classifyMCPByName(toolName string) Decision {
 	lower := strings.ToLower(toolName)
 
-	// Check all prefix sets and take the most restrictive match.
-	bestDecision := Decision("")
-
-	for _, prefix := range mcpSafePrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			if bestDecision == "" {
-				bestDecision = DecisionSafe
-			}
-			break
+	// Defense-in-depth: strip mcp__<server>__ prefix if present.
+	if strings.HasPrefix(lower, "mcp__") {
+		if parts := strings.SplitN(lower, "__", 3); len(parts) == 3 {
+			lower = parts[2]
 		}
 	}
 
-	for _, prefix := range mcpCautionPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			if bestDecision == "" {
-				bestDecision = DecisionCaution
-			} else {
-				bestDecision = MaxDecision(bestDecision, DecisionCaution)
-			}
-			break
+	// Check all prefix sets. Most restrictive match wins.
+	best := matchPrefixDecision(lower, mcpSafePrefixes, DecisionSafe)
+	best = MaxDecision(best, matchPrefixDecision(lower, mcpCautionPrefixes, DecisionCaution))
+	best = MaxDecision(best, matchPrefixDecision(lower, mcpApprovalPrefixes, DecisionApproval))
+
+	if best == "" {
+		return DecisionCaution // fallback for unmatched tool names
+	}
+	return best
+}
+
+// matchPrefixDecision returns decision if name matches any prefix, or empty Decision if none match.
+func matchPrefixDecision(name string, prefixes []string, decision Decision) Decision {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(name, prefix) {
+			return decision
 		}
 	}
-
-	for _, prefix := range mcpApprovalPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			if bestDecision == "" {
-				bestDecision = DecisionApproval
-			} else {
-				bestDecision = MaxDecision(bestDecision, DecisionApproval)
-			}
-			break
-		}
-	}
-
-	// Fallback: CAUTION for unmatched tool names.
-	if bestDecision == "" {
-		return DecisionCaution
-	}
-
-	return bestDecision
+	return ""
 }
 
 // flattenStringValues recursively extracts all string values from a map,
-// including values nested in maps and slices.
-func flattenStringValues(m map[string]interface{}) []string {
+// including values nested in maps and slices. Returns (values, complete).
+// complete is false when maxExtractDepth was reached and content was skipped.
+func flattenStringValues(m map[string]interface{}) ([]string, bool) {
 	var result []string
+	complete := true
 	for _, v := range m {
-		result = append(result, extractStrings(v)...)
+		strs, c := extractStringsWithFlag(v, 0)
+		result = append(result, strs...)
+		if !c {
+			complete = false
+		}
 	}
-	return result
+	return result, complete
 }
 
-// extractStrings recursively extracts string values from an arbitrary value.
-func extractStrings(v interface{}) []string {
+// maxExtractDepth limits recursion into nested JSON structures.
+const maxExtractDepth = 32
+
+func extractStringsWithFlag(v interface{}, depth int) ([]string, bool) {
 	if v == nil {
-		return nil
+		return nil, true
+	}
+	if depth > maxExtractDepth {
+		return nil, false // depth exhausted, extraction incomplete
 	}
 
+	complete := true
 	switch val := v.(type) {
 	case string:
-		return []string{val}
+		return []string{val}, true
 	case map[string]interface{}:
 		var result []string
 		for _, mv := range val {
-			result = append(result, extractStrings(mv)...)
+			strs, c := extractStringsWithFlag(mv, depth+1)
+			result = append(result, strs...)
+			if !c {
+				complete = false
+			}
 		}
-		return result
+		return result, complete
 	case []interface{}:
 		var result []string
 		for _, av := range val {
-			result = append(result, extractStrings(av)...)
+			strs, c := extractStringsWithFlag(av, depth+1)
+			result = append(result, strs...)
+			if !c {
+				complete = false
+			}
 		}
-		return result
+		return result, complete
 	default:
-		// Convert other types to string representation for scanning.
 		s := fmt.Sprintf("%v", val)
 		if s != "" {
-			return []string{s}
+			return []string{s}, true
 		}
-		return nil
+		return nil, true
 	}
 }
 

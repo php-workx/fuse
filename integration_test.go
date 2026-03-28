@@ -690,3 +690,264 @@ func TestIntegration_NonBashToolAllowed(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// V2 Pipeline Integration Tests
+// ---------------------------------------------------------------------------
+
+func TestIntegration_V2_HeredocWithMetadataURL(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	// Heredoc containing a curl to AWS metadata endpoint.
+	// Should be BLOCKED via: heredoc extraction → inline body URL scan → blocked hostname.
+	input := `{"tool_name":"Bash","tool_input":{"command":"bash <<EOF\ncurl http://169.254.169.254/latest/meta-data/\nEOF"},"session_id":"integ-v2","cwd":"/tmp"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := adapters.RunHook(stdin, stderr)
+	if exitCode != 2 {
+		t.Errorf("expected exit code 2 (BLOCKED) for heredoc with metadata URL, got %d; stderr: %s",
+			exitCode, stderr.String())
+	}
+}
+
+func TestIntegration_V2_HeredocDangerousCommand(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	// Heredoc containing rm -rf / — should be BLOCKED via extracted body classification.
+	input := `{"tool_name":"Bash","tool_input":{"command":"bash <<EOF\nrm -rf /\nEOF"},"session_id":"integ-v2","cwd":"/tmp"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := adapters.RunHook(stdin, stderr)
+	if exitCode != 2 {
+		t.Errorf("expected exit code 2 (BLOCKED) for heredoc with rm -rf /, got %d; stderr: %s",
+			exitCode, stderr.String())
+	}
+}
+
+func TestIntegration_V2_InlineBodyPopulated(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	// Classify a heredoc and verify InlineBody is populated.
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\necho hello\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.InlineBody == "" {
+		t.Error("expected InlineBody to be populated for heredoc command")
+	}
+}
+
+func TestIntegration_V2_SSRFMetadataBlocked(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	// Direct SSRF — curl to cloud metadata.
+	input := `{"tool_name":"Bash","tool_input":{"command":"curl http://169.254.169.254/latest/meta-data/"},"session_id":"integ-v2","cwd":"/tmp"}`
+	stdin := strings.NewReader(input)
+	stderr := &bytes.Buffer{}
+
+	exitCode := adapters.RunHook(stdin, stderr)
+	if exitCode != 2 {
+		t.Errorf("expected exit code 2 (BLOCKED) for SSRF metadata URL, got %d; stderr: %s",
+			exitCode, stderr.String())
+	}
+}
+
+func TestIntegration_V2_DestructiveHTTPMethodApproval(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	// curl -X DELETE should require APPROVAL (L7 progressive enforcement).
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "curl -X DELETE https://api.example.com/users/123",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionApproval {
+		t.Errorf("expected APPROVAL for curl -X DELETE, got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestIntegration_V2_HeredocContainingBashC(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\nbash -c 'rm -rf /'\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	// Nested bash -c inside heredoc hits extraction failure and fail-closes to APPROVAL.
+	// This still gates execution (user must approve), just doesn't hard-block.
+	if result.Decision != core.DecisionApproval && result.Decision != core.DecisionBlocked {
+		t.Errorf("expected APPROVAL or BLOCKED for heredoc with bash -c rm -rf /, got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestIntegration_V2_MultipleHeredocs(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "cat <<A\nhello\nA\nbash <<B\ncurl http://169.254.169.254/\nB",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Errorf("expected BLOCKED for multi-heredoc with metadata URL, got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestIntegration_V2_HeredocWithCommandSubstitution(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\nresult=$(curl http://169.254.169.254/latest/meta-data/)\necho $result\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Errorf("expected BLOCKED for heredoc with metadata $(), got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+}
+
+func TestIntegration_V2_HeredocVariableAssembly(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+
+	// Known limitation: variable assembly evades line-by-line detection.
+	// This test documents the current behavior.
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\nCMD=rm\nARGS='-rf /'\n$CMD $ARGS\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "integ-v2",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	t.Skipf("known limitation: variable assembly still evades line-by-line classification; observed %s (%s)", result.Decision, result.Reason)
+}
+
+// ---------------------------------------------------------------------------
+// Env Var Injection Tests
+// ---------------------------------------------------------------------------
+
+func TestIntegration_EnvWrapperSensitiveVarDetected(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"env LD_PRELOAD", "env LD_PRELOAD=/evil/lib.so ls"},
+		{"env DYLD_INSERT", "env DYLD_INSERT_LIBRARIES=/evil.dylib python"},
+		{"env PATH override", "env PATH=/evil:$PATH command_here"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{RawCommand: tt.cmd, Cwd: "/tmp", Source: "test", SessionID: "integ-env"}
+			result, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision == core.DecisionSafe {
+				t.Errorf("%s should not be SAFE, got %s (reason: %s)", tt.cmd, result.Decision, result.Reason)
+			}
+		})
+	}
+}
+
+func TestIntegration_BareEnvVarPathBypass(t *testing.T) {
+	skipIfShort(t)
+	withIsolatedHome(t)
+	core.ResetBinaryTOFU()
+	t.Cleanup(core.ResetBinaryTOFU)
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name string
+		cmd  string
+	}{
+		{"LD_PRELOAD with path", "LD_PRELOAD=/tmp/evil.so ls"},
+		{"DYLD with path", "DYLD_INSERT_LIBRARIES=/evil/lib.dylib python script.py"},
+		{"LD_PRELOAD no path", "LD_PRELOAD=evil.so ls"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{RawCommand: tt.cmd, Cwd: "/tmp", Source: "test", SessionID: "integ-env"}
+			result, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision == core.DecisionSafe {
+				t.Errorf("%s should not be SAFE, got %s (reason: %s)", tt.cmd, result.Decision, result.Reason)
+			}
+		})
+	}
+}

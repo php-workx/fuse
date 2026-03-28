@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -320,7 +321,7 @@ func TestCredentialScrubbing(t *testing.T) {
 		{
 			name:  "Bearer token",
 			input: "curl -H Authorization: Bearer eyJhbGciOiJIUzI1NiJ9 https://api.example.com",
-			want:  "curl -H Authorization: [REDACTED] [REDACTED] https://api.example.com",
+			want:  "curl -H Authorization: [REDACTED] https://api.example.com",
 		},
 		{
 			name:  "no credentials",
@@ -346,6 +347,106 @@ func TestCredentialScrubbing(t *testing.T) {
 				t.Errorf("ScrubCredentials(%q)\n  got  = %q\n  want = %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCredentialScrubbing_NewPatterns(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		shouldMatch string // substring that should be redacted
+	}{
+		{
+			name:        "JSON password key-value",
+			input:       `{"password":"hunter2","name":"test"}`,
+			shouldMatch: "hunter2",
+		},
+		{
+			name:        "JSON token key-value",
+			input:       `{"token":"abc123secret","count":42}`,
+			shouldMatch: "abc123secret",
+		},
+		{
+			name:        "Authorization Basic",
+			input:       "Authorization: Basic dXNlcjpwYXNz",
+			shouldMatch: "dXNlcjpwYXNz",
+		},
+		{
+			name:        "Cookie header",
+			input:       "Cookie: session=abc123",
+			shouldMatch: "session=abc123",
+		},
+		{
+			name:        "Cookie header with multiple values",
+			input:       "Cookie: a=1; b=2",
+			shouldMatch: "a=1; b=2",
+		},
+		{
+			name:        "JWT token",
+			input:       "token eyJhbGciOiJIUzI1NiJ9.eyJ0ZXN0IjoiZGF0YSJ9.signature",
+			shouldMatch: "eyJhbGciOiJIUzI1NiJ9.eyJ0ZXN0IjoiZGF0YSJ9.signature",
+		},
+		{
+			name:        "AWS ASIA temp cred",
+			input:       "aws sts ASIA1234567890ABCDEF",
+			shouldMatch: "ASIA1234567890ABCDEF",
+		},
+		{
+			name:        "Google API key",
+			input:       "AIzaSyA1234567890_bcdefghijklmnop",
+			shouldMatch: "AIzaSyA1234567890_bcdefghijklmnop",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ScrubCredentials(tt.input)
+			if strings.Contains(got, tt.shouldMatch) {
+				t.Errorf("ScrubCredentials(%q) should have scrubbed %q but got %q",
+					tt.input, tt.shouldMatch, got)
+			}
+			if !strings.Contains(got, "[REDACTED") {
+				t.Errorf("ScrubCredentials(%q) should contain [REDACTED, got %q", tt.input, got)
+			}
+		})
+	}
+}
+
+func TestLogEvent_ScrubsAllTextFields(t *testing.T) {
+	d := openTestDB(t)
+
+	record := &EventRecord{
+		SessionID:      "test-session",
+		Command:        "some command",
+		Decision:       "BLOCKED",
+		Reason:         "blocked: found api_key=TESTVALUE123",
+		Metadata:       `{"token":"secret-value-here"}`,
+		JudgeReasoning: "The command contains Bearer supersecrettoken123 which is risky",
+		JudgeError:     "Cookie: session=abc123",
+	}
+	if err := d.LogEvent(record); err != nil {
+		t.Fatalf("LogEvent failed: %v", err)
+	}
+
+	events, err := d.ListEvents(&EventFilter{Limit: 1})
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
+	}
+	e := events[0]
+	if strings.Contains(e.Reason, "TESTVALUE123") {
+		t.Error("Reason field should have credential scrubbed")
+	}
+	if strings.Contains(e.Metadata, "secret-value-here") {
+		t.Error("Metadata field should have credential scrubbed")
+	}
+	if strings.Contains(e.JudgeReasoning, "supersecrettoken123") {
+		t.Error("JudgeReasoning field should have credential scrubbed")
+	}
+	if strings.Contains(e.JudgeError, "session=abc123") {
+		t.Error("JudgeError field should have credential scrubbed")
 	}
 }
 

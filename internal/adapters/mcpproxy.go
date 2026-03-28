@@ -115,61 +115,83 @@ func proxyAgentToDownstream(stdin io.Reader, downstream, agent io.Writer, reques
 	for {
 		payload, err := readMCPFrame(reader)
 		if err != nil {
-			var frameErr *mcpFrameTooLargeError
-			if errors.As(err, &frameErr) {
-				slog.Warn("rejecting oversized MCP agent request", "content_length", frameErr.contentLength)
-				data, encodeErr := encodeJSONRPC(jsonRPCErrorResponse(nil, -32600, frameErr.Error()))
-				if encodeErr != nil {
-					return encodeErr
-				}
-				if writeErr := writeMCPFrame(agent, data); writeErr != nil {
-					return writeErr
-				}
-				return nil
-			}
-			if errors.Is(err, io.EOF) {
-				return nil
-			}
-			return err
+			return handleAgentFrameError(err, agent)
 		}
 
 		msg, err := decodeJSONRPC(payload)
 		if err != nil {
-			slog.Warn("rejecting malformed MCP agent request", "error", err)
-			data, encodeErr := encodeJSONRPC(jsonRPCErrorResponse(nil, -32700, fmt.Sprintf("invalid JSON-RPC request: %v", err)))
-			if encodeErr != nil {
-				return encodeErr
-			}
-			if writeErr := writeMCPFrame(agent, data); writeErr != nil {
+			if writeErr := sendAgentError(agent, -32700, fmt.Sprintf("invalid JSON-RPC request: %v", err)); writeErr != nil {
 				return writeErr
 			}
 			continue
 		}
 
-		if method, _ := msg["method"].(string); method != "" {
-			allowed, response, err := interceptProxyRequest(msg)
-			if err != nil {
-				return err
-			}
-			if !allowed {
-				if response != nil {
-					data, err := encodeJSONRPC(response)
-					if err != nil {
-						return err
-					}
-					if err := writeMCPFrame(agent, data); err != nil {
-						return err
-					}
-				}
-				continue
-			}
-			requests.add(msg["id"], method)
+		if forwarded, err := handleAgentMethod(msg, agent, requests); err != nil {
+			return err
+		} else if !forwarded {
+			continue
 		}
 
 		if err := writeMCPFrame(downstream, payload); err != nil {
 			return err
 		}
 	}
+}
+
+// handleAgentFrameError processes frame-level read errors from the agent side.
+// Returns nil for EOF and oversized-frame errors (after sending an error response),
+// or the original error for unrecoverable conditions.
+func handleAgentFrameError(err error, agent io.Writer) error {
+	var frameErr *mcpFrameTooLargeError
+	if errors.As(err, &frameErr) {
+		slog.Warn("rejecting oversized MCP agent request", "content_length", frameErr.contentLength)
+		return sendAgentError(agent, -32600, frameErr.Error())
+	}
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	return err
+}
+
+// sendAgentError encodes and writes a JSON-RPC error response to the agent.
+func sendAgentError(agent io.Writer, code int, message string) error {
+	data, err := encodeJSONRPC(jsonRPCErrorResponse(nil, code, message))
+	if err != nil {
+		return err
+	}
+	return writeMCPFrame(agent, data)
+}
+
+// handleAgentMethod intercepts a JSON-RPC method call from the agent. Returns
+// (true, nil) if the message should be forwarded downstream, (false, nil) if it
+// was handled (blocked/rejected), or (false, err) on failure.
+func handleAgentMethod(msg jsonRPCMessage, agent io.Writer, requests *inFlightRequests) (bool, error) {
+	method, _ := msg["method"].(string)
+	if method == "" {
+		return true, nil
+	}
+
+	allowed, response, err := interceptProxyRequest(msg)
+	if err != nil {
+		return false, err
+	}
+	if !allowed {
+		if response != nil {
+			if _, hasID := response["id"]; !hasID || response["id"] == nil {
+				return false, nil
+			}
+			data, encErr := encodeJSONRPC(response)
+			if encErr != nil {
+				return false, encErr
+			}
+			if writeErr := writeMCPFrame(agent, data); writeErr != nil {
+				return false, writeErr
+			}
+		}
+		return false, nil
+	}
+	requests.add(msg["id"], method)
+	return true, nil
 }
 
 func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inFlightRequests) error {
@@ -184,29 +206,11 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 			return err
 		}
 
-		msg, err := decodeJSONRPC(payload)
+		forward, err := processDownstreamMessage(payload, requests)
 		if err != nil {
-			slog.Warn("forwarding malformed downstream payload", "error", err)
-			if writeErr := writeMCPFrame(agent, payload); writeErr != nil {
-				return writeErr
-			}
-			continue
+			return err
 		}
-		if !isJSONRPCResponseEnvelope(msg) {
-			slog.Warn("forwarding malformed downstream JSON-RPC envelope", "message", msg)
-		}
-
-		if _, hasID := msg["id"]; hasID {
-			method, ok := requests.pop(msg["id"])
-			if !ok {
-				slog.Warn("dropping unsolicited downstream response", "id", msg["id"])
-				continue
-			}
-			if method == "tools/list" {
-				logToolNames(msg)
-			}
-		} else {
-			slog.Warn("dropping downstream notification without matching request")
+		if !forward {
 			continue
 		}
 
@@ -214,6 +218,40 @@ func proxyDownstreamToAgent(downstream io.Reader, agent io.Writer, requests *inF
 			return err
 		}
 	}
+}
+
+// processDownstreamMessage decodes and validates a downstream JSON-RPC message.
+// Returns true if the payload should be forwarded to the agent, false if it
+// should be dropped (unsolicited response or notification without ID).
+func processDownstreamMessage(payload []byte, requests *inFlightRequests) (bool, error) {
+	msg, err := decodeJSONRPC(payload)
+	if err != nil {
+		slog.Warn("forwarding malformed downstream payload", "error", err)
+		return true, nil // forward raw payload
+	}
+	if !isJSONRPCResponseEnvelope(msg) {
+		slog.Warn("received malformed downstream JSON-RPC envelope", "message", msg)
+	}
+
+	if _, hasMethod := msg["method"]; hasMethod {
+		return true, nil
+	}
+
+	_, hasID := msg["id"]
+	if !hasID {
+		slog.Warn("dropping downstream notification without matching request")
+		return false, nil
+	}
+
+	method, ok := requests.pop(msg["id"])
+	if !ok {
+		slog.Warn("dropping unsolicited downstream response", "id", msg["id"])
+		return false, nil
+	}
+	if method == "tools/list" {
+		logToolNames(msg)
+	}
+	return true, nil
 }
 
 func interceptProxyRequest(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {

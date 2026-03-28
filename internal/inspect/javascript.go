@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+type jsScanState struct {
+	inBlock           bool
+	inSingle          bool
+	inDouble          bool
+	inTemplate        bool
+	templateExprDepth int
+	escaped           bool
+}
+
 // jsPattern pairs a compiled regex with its signal category and raw pattern string.
 type jsPattern struct {
 	re       *regexp.Regexp
@@ -53,67 +62,147 @@ func init() {
 	}
 }
 
+// stripBlockComment handles block comment state for a single line.
+// If inBlock is true, we are inside a /* ... */ block comment from a previous line.
+// It returns the effective line content after stripping commented portions,
+// and whether we are still inside a block comment.
+func stripBlockComment(line string, inBlock bool) (string, bool) {
+	var out strings.Builder
+	out.Grow(len(line))
+	state := jsScanState{inBlock: inBlock}
+
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+
+		if state.inBlock {
+			if ch == '*' && i+1 < len(line) && line[i+1] == '/' {
+				state.inBlock = false
+				i++
+			}
+			continue
+		}
+
+		if scanQuotedLiteral(&state, &out, ch) {
+			continue
+		}
+
+		if scanTemplateLiteral(&state, &out, ch, line, &i) {
+			continue
+		}
+
+		if beginBlockComment(&state, ch, line, &i) {
+			continue
+		}
+		beginLiteral(&state, ch)
+		out.WriteByte(ch)
+	}
+
+	return out.String(), state.inBlock
+}
+
+func scanQuotedLiteral(state *jsScanState, out *strings.Builder, ch byte) bool {
+	if !state.inSingle && !state.inDouble {
+		return false
+	}
+	out.WriteByte(ch)
+	if state.escaped {
+		state.escaped = false
+		return true
+	}
+	if ch == '\\' {
+		state.escaped = true
+		return true
+	}
+	if state.inSingle && ch == '\'' {
+		state.inSingle = false
+	}
+	if state.inDouble && ch == '"' {
+		state.inDouble = false
+	}
+	return true
+}
+
+func scanTemplateLiteral(state *jsScanState, out *strings.Builder, ch byte, line string, i *int) bool {
+	if !state.inTemplate {
+		return false
+	}
+	out.WriteByte(ch)
+	if state.escaped {
+		state.escaped = false
+		return true
+	}
+	if ch == '\\' {
+		state.escaped = true
+		return true
+	}
+	if state.templateExprDepth == 0 {
+		if ch == '`' {
+			state.inTemplate = false
+			return true
+		}
+		if ch == '$' && *i+1 < len(line) && line[*i+1] == '{' {
+			state.templateExprDepth = 1
+			out.WriteByte(line[*i+1])
+			*i++
+		}
+		return true
+	}
+	switch ch {
+	case '{':
+		state.templateExprDepth++
+	case '}':
+		state.templateExprDepth--
+	case '\'':
+		state.inSingle = true
+	case '"':
+		state.inDouble = true
+	}
+	return true
+}
+
+func beginBlockComment(state *jsScanState, ch byte, line string, i *int) bool {
+	if ch == '/' && *i+1 < len(line) && line[*i+1] == '*' {
+		state.inBlock = true
+		*i++
+		return true
+	}
+	return false
+}
+
+func beginLiteral(state *jsScanState, ch byte) {
+	switch ch {
+	case '\'':
+		state.inSingle = true
+	case '"':
+		state.inDouble = true
+	case '`':
+		state.inTemplate = true
+	}
+}
+
 // ScanJavaScript scans JavaScript/TypeScript source content for dangerous patterns.
 // It performs a line-by-line regex scan, skipping single-line comment lines
 // (starting with //) and best-effort skipping of /* */ block comments.
 func ScanJavaScript(content []byte) []Signal {
 	var signals []Signal
-	lines := bytes.Split(content, []byte("\n"))
-
 	inBlockComment := false
 
-	for i, line := range lines {
-		lineStr := string(line)
-		trimmed := strings.TrimSpace(lineStr)
+	for i, rawLine := range bytes.Split(content, []byte("\n")) {
+		trimmed := strings.TrimSpace(string(rawLine))
 
-		// Handle block comments (best-effort).
-		if inBlockComment {
-			if idx := strings.Index(trimmed, "*/"); idx >= 0 {
-				inBlockComment = false
-				// Keep the remainder after the block comment close for scanning.
-				lineStr = trimmed[idx+2:]
-				trimmed = strings.TrimSpace(lineStr)
-			} else {
-				continue
-			}
-		}
+		trimmed, inBlockComment = stripBlockComment(trimmed, inBlockComment)
+		trimmed = strings.TrimSpace(trimmed)
 
-		// Check for block comment start.
-		if strings.Contains(trimmed, "/*") {
-			if strings.Contains(trimmed, "*/") {
-				// Single-line block comment: remove the commented portion
-				// and scan what remains.
-				start := strings.Index(trimmed, "/*")
-				end := strings.Index(trimmed, "*/")
-				if end > start {
-					lineStr = trimmed[:start] + trimmed[end+2:]
-					trimmed = strings.TrimSpace(lineStr)
-				}
-			} else {
-				// Multi-line block comment starts here.
-				// Scan only the part before the comment start.
-				start := strings.Index(trimmed, "/*")
-				if start < 0 {
-					start = 0
-				}
-				lineStr = trimmed[:start]
-				trimmed = strings.TrimSpace(lineStr)
-				inBlockComment = true
-			}
-		}
-
-		// Skip single-line comment lines.
-		if strings.HasPrefix(trimmed, "//") {
-			continue
-		}
-
-		// Skip empty lines.
-		if trimmed == "" {
+		// Skip empty lines and pure single-line comments.
+		// Note: check trimmed content BEFORE inBlockComment — if stripBlockComment
+		// returned code before a block comment start, we must scan it even though
+		// inBlockComment is now true for the NEXT line.
+		if trimmed == "" || strings.HasPrefix(trimmed, "//") {
 			continue
 		}
 
 		for _, p := range jsPatterns {
-			match := p.re.FindString(lineStr)
+			match := p.re.FindString(trimmed)
 			if match != "" {
 				signals = append(signals, Signal{
 					Category: p.category,

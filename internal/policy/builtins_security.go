@@ -166,6 +166,53 @@ func init() {
 		},
 
 		// ---------------------------------------------------------------
+		// §6.3.15b Sensitive local files (shell-level path protection)
+		// ---------------------------------------------------------------
+		{
+			ID:      "builtin:cred:cat-env",
+			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail|grep|strings)\s+.*\.env\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Reads .env file (may contain secrets)",
+			Predicate: func(cmd string) bool {
+				// Avoid matching .envrc (direnv), .env.example, or .env.template
+				return !strings.Contains(cmd, ".envrc") &&
+					!strings.Contains(cmd, ".env.example") &&
+					!strings.Contains(cmd, ".env.template") &&
+					!strings.Contains(cmd, ".env.sample")
+			},
+		},
+		{
+			ID:      "builtin:cred:cp-env",
+			Pattern: regexp.MustCompile(`\b(cp|mv|scp)\s+.*\.env\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Copies/moves .env file (may expose secrets)",
+		},
+		{
+			ID:      "builtin:cred:edit-git-hooks",
+			Pattern: regexp.MustCompile(`\b(sed\s+-i|tee|cat\s+.*>)\s*.*\.git/hooks/`),
+			Action:  core.DecisionCaution,
+			Reason:  "Edits git hooks (potential persistence mechanism)",
+		},
+		{
+			ID:      "builtin:cred:chmod-git-hooks",
+			Pattern: regexp.MustCompile(`\bchmod\s+.*\.git/hooks/`),
+			Action:  core.DecisionCaution,
+			Reason:  "Changes git hook permissions",
+		},
+		{
+			ID:      "builtin:cred:cat-gpg-key",
+			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*\.gnupg/`),
+			Action:  core.DecisionApproval,
+			Reason:  "Reads GPG key material - requires approval (native file path classification will be tightened separately)",
+		},
+		{
+			ID:      "builtin:cred:cat-pypirc",
+			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*\.pypirc\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Reads PyPI credentials - requires approval (native file path classification will be tightened separately)",
+		},
+
+		// ---------------------------------------------------------------
 		// §6.3.16 Data exfiltration & staging
 		// ---------------------------------------------------------------
 		{
@@ -222,7 +269,7 @@ func init() {
 		{
 			ID:      "builtin:exfil:redirect-tcp",
 			Pattern: regexp.MustCompile(`>\s*/dev/tcp/`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Redirect to /dev/tcp (network exfiltration)",
 		},
 
@@ -232,25 +279,25 @@ func init() {
 		{
 			ID:      "builtin:revshell:bash-tcp",
 			Pattern: regexp.MustCompile(`\bbash\s+.*-i\s+.*>/dev/tcp/`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Bash reverse shell via /dev/tcp",
 		},
 		{
 			ID:      "builtin:revshell:python",
 			Pattern: regexp.MustCompile(`\bpython[23]?\s+.*socket\..*connect\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionApproval, // kept: socket.connect appears in legitimate client code
 			Reason:  "Python reverse shell",
 		},
 		{
 			ID:      "builtin:revshell:nc-exec",
 			Pattern: regexp.MustCompile(`\b(nc|ncat|netcat)\s+.*-e\s+`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Netcat with exec (reverse shell)",
 		},
 		{
 			ID:      "builtin:revshell:mkfifo",
 			Pattern: regexp.MustCompile(`\bmkfifo\s+.*\b(nc|ncat|netcat)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Named pipe reverse shell",
 		},
 		{
@@ -286,19 +333,19 @@ func init() {
 		{
 			ID:      "builtin:persist:profile-write",
 			Pattern: regexp.MustCompile(`(>|>>)\s*.*(/etc/profile|/etc/bashrc|/etc/zshrc)`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Writes to system-wide shell profiles",
 		},
 		{
 			ID:      "builtin:persist:sudoers-write",
 			Pattern: regexp.MustCompile(`(>|>>|tee\s+(-a\s+)?|visudo).*(/etc/sudoers|/etc/sudoers\.d/)`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Modifies sudoers configuration",
 		},
 		{
 			ID:      "builtin:persist:authorized-keys",
 			Pattern: regexp.MustCompile(`(>|>>)\s*.*\.ssh/authorized_keys`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Writes to SSH authorized_keys",
 		},
 
@@ -326,13 +373,13 @@ func init() {
 		{
 			ID:      "builtin:container:mount-sock",
 			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*-v\s+/var/run/docker\.sock`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Mounts Docker socket (container escape)",
 		},
 		{
 			ID:      "builtin:container:mount-root",
 			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*-v\s+/:/`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Mounts host root filesystem",
 		},
 		{
@@ -366,37 +413,37 @@ func init() {
 		{
 			ID:      "builtin:obfusc:base64-exec",
 			Pattern: regexp.MustCompile(`\bbase64\s+(-d|--decode).*\|\s*(ba)?sh\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Base64 decode piped to shell",
 		},
 		{
 			ID:      "builtin:obfusc:xxd-exec",
 			Pattern: regexp.MustCompile(`\bxxd\s+.*-r.*\|\s*(ba)?sh\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Hex decode piped to shell",
 		},
 		{
 			ID:      "builtin:obfusc:printf-exec",
 			Pattern: regexp.MustCompile(`\bprintf\s+.*\\\\x.*\|\s*(ba)?sh\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Printf hex escape piped to shell",
 		},
 		{
 			ID:      "builtin:obfusc:rev-exec",
 			Pattern: regexp.MustCompile(`\brev\b.*\|\s*(ba)?sh\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "String reversal piped to shell",
 		},
 		{
 			ID:      "builtin:obfusc:curl-exec",
 			Pattern: regexp.MustCompile(`\bcurl\s+.*\|\s*(ba)?sh\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionApproval, // kept: curl | bash is a common install pattern
 			Reason:  "curl piped to shell",
 		},
 		{
 			ID:      "builtin:obfusc:wget-exec",
 			Pattern: regexp.MustCompile(`\bwget\s+.*-O\s*-.*\|\s*(ba)?sh\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionApproval, // kept: wget | bash is a common install pattern
 			Reason:  "wget piped to shell",
 		},
 		{

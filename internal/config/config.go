@@ -8,10 +8,24 @@ import (
 
 // Config represents the fuse configuration from config.yaml.
 type Config struct {
-	LogLevel        string         `yaml:"log_level"`
-	MaxEventLogRows int            `yaml:"max_event_log_rows"`
-	MCPProxies      []MCPProxy     `yaml:"mcp_proxies"`
-	LLMJudge        LLMJudgeConfig `yaml:"llm_judge"`
+	LogLevel        string               `yaml:"log_level"`
+	MaxEventLogRows int                  `yaml:"max_event_log_rows"`
+	MCPProxies      []MCPProxy           `yaml:"mcp_proxies"`
+	LLMJudge        LLMJudgeConfig       `yaml:"llm_judge"`
+	URLTrustPolicy  URLTrustPolicyConfig `yaml:"url_trust_policy"`
+	PolicyLKG       PolicyLKGConfig      `yaml:"policy_lkg"`
+}
+
+// URLTrustPolicyConfig controls URL inspection behavior.
+type URLTrustPolicyConfig struct {
+	TrustedDomains []string `yaml:"trusted_domains"` // empty = no domain trust enforcement
+	BlockSchemes   []string `yaml:"block_schemes"`   // additional blocked schemes
+}
+
+// PolicyLKGConfig controls last-known-good policy fallback.
+type PolicyLKGConfig struct {
+	Enabled    bool `yaml:"enabled"`      // default true
+	MaxAgeDays int  `yaml:"max_age_days"` // default 7
 }
 
 // LLMJudgeConfig controls the optional LLM judge that provides a second opinion
@@ -48,6 +62,10 @@ func DefaultConfig() *Config {
 			DowngradeThreshold: 0.95,
 			TriggerDecisions:   []string{"approval", "caution"},
 			MaxCallsPerMinute:  30,
+		},
+		PolicyLKG: PolicyLKGConfig{
+			Enabled:    true,
+			MaxAgeDays: 7,
 		},
 	}
 }

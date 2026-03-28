@@ -164,37 +164,53 @@ func groupedHelp(cmd *cobra.Command) string {
 	var b strings.Builder
 
 	for _, group := range groups {
-		var cmds []*cobra.Command
-		for _, c := range cmd.Commands() {
-			if c.GroupID == group.ID && c.IsAvailableCommand() {
-				cmds = append(cmds, c)
-			}
-		}
+		cmds := commandsForGroup(cmd, group.ID)
 		if len(cmds) == 0 {
 			continue
 		}
 		sortByGroupOrder(cmds, group.ID)
-
-		if w < minBoxWidth {
-			b.WriteString(r.titleStyle(group.Title) + ":\n")
-			for _, c := range cmds {
-				nameField := fmt.Sprintf("%-*s", namePad, c.Name())
-				fmt.Fprintf(&b, "  %s %s\n", r.bold(nameField), r.dim(c.Short))
-			}
-			b.WriteByte('\n')
-		} else {
-			b.WriteString(r.top(group.Title, w))
-			b.WriteByte('\n')
-			for _, c := range cmds {
-				b.WriteString(r.row(c.Name(), c.Short, namePad, w))
-				b.WriteByte('\n')
-			}
-			b.WriteString(r.bottom(w))
-			b.WriteByte('\n')
-		}
+		renderGroupSection(&b, r, group.Title, cmds, namePad, w)
 	}
 
-	// Ungrouped commands.
+	renderUngroupedSection(&b, r, cmd, namePad)
+
+	return b.String()
+}
+
+// commandsForGroup returns the available commands belonging to the given group.
+func commandsForGroup(cmd *cobra.Command, groupID string) []*cobra.Command {
+	var cmds []*cobra.Command
+	for _, c := range cmd.Commands() {
+		if c.GroupID == groupID && c.IsAvailableCommand() {
+			cmds = append(cmds, c)
+		}
+	}
+	return cmds
+}
+
+// renderGroupSection writes a single command group section to the builder.
+func renderGroupSection(b *strings.Builder, r helpRenderer, title string, cmds []*cobra.Command, namePad, w int) {
+	if w < minBoxWidth {
+		b.WriteString(r.titleStyle(title) + ":\n")
+		for _, c := range cmds {
+			nameField := fmt.Sprintf("%-*s", namePad, c.Name())
+			fmt.Fprintf(b, "  %s %s\n", r.bold(nameField), r.dim(c.Short))
+		}
+		b.WriteByte('\n')
+	} else {
+		b.WriteString(r.top(title, w))
+		b.WriteByte('\n')
+		for _, c := range cmds {
+			b.WriteString(r.row(c.Name(), c.Short, namePad, w))
+			b.WriteByte('\n')
+		}
+		b.WriteString(r.bottom(w))
+		b.WriteByte('\n')
+	}
+}
+
+// renderUngroupedSection writes the "Additional Commands" section for commands without a group.
+func renderUngroupedSection(b *strings.Builder, r helpRenderer, cmd *cobra.Command, namePad int) {
 	var ungrouped []*cobra.Command
 	for _, c := range cmd.Commands() {
 		if c.GroupID == "" && (c.IsAvailableCommand() || c.Name() == "help") {
@@ -205,11 +221,9 @@ func groupedHelp(cmd *cobra.Command) string {
 		b.WriteString("\n" + r.dim("Additional Commands:") + "\n")
 		for _, c := range ungrouped {
 			nameField := fmt.Sprintf("%-*s", namePad, c.Name())
-			fmt.Fprintf(&b, "  %s %s\n", r.bold(nameField), r.dim(c.Short))
+			fmt.Fprintf(b, "  %s %s\n", r.bold(nameField), r.dim(c.Short))
 		}
 	}
-
-	return b.String()
 }
 
 // boxTop, boxRow, boxBottom are the plain (no-color) structural helpers.

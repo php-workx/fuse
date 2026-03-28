@@ -81,8 +81,53 @@ var credentialPatterns = []struct {
 		replacement: "${1}[REDACTED]",
 	},
 	{
-		re:          regexp.MustCompile(`(?i)Authorization:\s*\S+`),
+		// Authorization header — captures scheme + credential value.
+		re:          regexp.MustCompile(`(?i)Authorization:\s*\S+\s+\S+`),
 		replacement: "Authorization: [REDACTED]",
+	},
+	// SEC-010: Expanded patterns for inline body scrubbing.
+	{
+		// PEM-encoded keys/certificates
+		re:          regexp.MustCompile(`-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----`),
+		replacement: "[REDACTED PEM BLOCK]",
+	},
+	{
+		// GitHub fine-grained PATs (ghp_), OAuth tokens (gho_), etc.
+		re:          regexp.MustCompile(`\b(?:AIza[A-Za-z0-9_-]{16,}|(?:ghp|gho|ghu|ghs|ghr|glpat|xoxb|xoxp|xoxa|xoxr|sk-|rk-|whsec_)[A-Za-z0-9_-]{16,})\b`),
+		replacement: "[REDACTED VENDOR TOKEN]",
+	},
+	{
+		// URL userinfo (user:pass@host)
+		re:          regexp.MustCompile(`://[^:/?#]+:[^@/?#]+@`),
+		replacement: "://[REDACTED]@",
+	},
+	{
+		// JSON key-value secrets (quoted keys with secret-related names)
+		re:          regexp.MustCompile(`(?i)"(password|secret|token|key|credential|auth|apikey|api_key|access_key|private_key)"\s*:\s*"[^"]*"`),
+		replacement: `"${1}":"[REDACTED]"`,
+	},
+	// Authorization: Basic/Digest now covered by the generic Authorization pattern above.
+	{
+		// Cookie header values
+		re:          regexp.MustCompile(`(?im)(Cookie|Set-Cookie):\s*.*$`),
+		replacement: "${1}: [REDACTED]",
+	},
+	{
+		// JWT tokens (three base64url-encoded segments)
+		re:          regexp.MustCompile(`\beyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`),
+		replacement: "[REDACTED JWT]",
+	},
+	{
+		// AWS temporary credentials (STS) — extends existing AKIA pattern
+		re:          regexp.MustCompile(`ASIA[0-9A-Z]{16}`),
+		replacement: "[REDACTED]",
+	},
+	{
+		// High-entropy base64 blobs (64+ chars, likely keys/secrets).
+		// Raised from 40 to 64 to avoid redacting SHA-256 hashes, long paths,
+		// and Go module names. Vendor-specific patterns above catch shorter secrets.
+		re:          regexp.MustCompile(`\b[A-Za-z0-9+/]{64,}={0,3}\b`),
+		replacement: "[REDACTED BASE64]",
 	},
 }
 
@@ -97,6 +142,10 @@ func ScrubCredentials(command string) string {
 // LogEvent inserts an event record with credential scrubbing and normalized path metadata.
 func (d *DB) LogEvent(record *EventRecord) error {
 	record.Command = ScrubCredentials(record.Command)
+	record.Reason = ScrubCredentials(record.Reason)
+	record.Metadata = ScrubCredentials(record.Metadata)
+	record.JudgeReasoning = ScrubCredentials(record.JudgeReasoning)
+	record.JudgeError = ScrubCredentials(record.JudgeError)
 	record.Cwd = normalizeEventPath(record.Cwd)
 	if record.WorkspaceRoot == "" {
 		record.WorkspaceRoot = detectWorkspaceRoot(record.Cwd)
@@ -336,6 +385,50 @@ func (d *DB) PruneEvents(maxRows int) (int64, error) {
 		return 0, fmt.Errorf("prune events: %w", err)
 	}
 	return result.RowsAffected()
+}
+
+// PolicyRecommendation represents a frequently-approved command pattern.
+type PolicyRecommendation struct {
+	Command   string `json:"command"`
+	Count     int    `json:"count"`
+	Decision  string `json:"decision"`
+	Reason    string `json:"reason"`
+	Suggested string `json:"suggested"` // suggested policy.yaml rule
+}
+
+// FrequentApprovals returns commands that were classified as APPROVAL and approved
+// by the user multiple times. These are candidates for policy rules.
+func (d *DB) FrequentApprovals(minCount int) ([]PolicyRecommendation, error) {
+	if minCount <= 0 {
+		minCount = 3
+	}
+	rows, err := d.db.Query(`
+		SELECT command, COUNT(*) as cnt, decision, reason
+		FROM events
+		WHERE decision = 'APPROVAL'
+		GROUP BY command
+		HAVING cnt >= ?
+		ORDER BY cnt DESC
+		LIMIT 20
+	`, minCount)
+	if err != nil {
+		return nil, fmt.Errorf("query frequent approvals: %w", err)
+	}
+	defer rows.Close()
+
+	var recs []PolicyRecommendation
+	for rows.Next() {
+		var r PolicyRecommendation
+		if err := rows.Scan(&r.Command, &r.Count, &r.Decision, &r.Reason); err != nil {
+			continue
+		}
+		// Generate suggested policy rule
+		escaped := regexp.QuoteMeta(r.Command)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+		r.Suggested = fmt.Sprintf(`- pattern: "^%s$"\n  action: "allow"\n  reason: "approved %d times"`, escaped, r.Count)
+		recs = append(recs, r)
+	}
+	return recs, rows.Err()
 }
 
 func boolToInt(v bool) int {

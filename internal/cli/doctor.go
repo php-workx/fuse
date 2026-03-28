@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -8,8 +9,10 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 
@@ -19,6 +22,23 @@ import (
 	"github.com/php-workx/fuse/internal/config"
 	"github.com/php-workx/fuse/internal/db"
 	"github.com/php-workx/fuse/internal/policy"
+)
+
+const (
+	checkNameDirStructure          = "Directory structure"
+	checkNameLiveRawMode           = "Live terminal raw mode"
+	checkNameConfiguration         = "Configuration (config.yaml)"
+	checkNameClaudeCodeHook        = "Claude Code hook"
+	checkNameClaudeSecurityPosture = "Claude security posture"
+	checkNameSQLiteDatabase        = "SQLite database"
+	checkNameMCPProxyConfig        = "MCP proxy configuration"
+	checkNameCodexSecurityPosture  = "Codex security posture"
+	checkNameApprovalTerminalTrust = "Approval terminal trust"
+	checkNameLiveForegroundHandoff = "Live foreground process-group handoff"
+	checkNameFuseInPath            = "fuse binary in PATH"
+	checkNamePolicyYAML            = "Policy (policy.yaml)"
+	checkNameMCPMediationPosture   = "MCP mediation posture"
+	checkNameTagOverrides          = "Tag overrides"
 )
 
 var (
@@ -58,6 +78,31 @@ type checkResult struct {
 }
 
 func runDoctor(live, security bool) error {
+	results := gatherDoctorChecks(live, security)
+
+	fmt.Println("fuse doctor")
+	fmt.Println("===========")
+	fmt.Println()
+
+	passes, warns, fails, fixed := printDoctorResults(results)
+
+	fmt.Println()
+	summary := fmt.Sprintf("Results: %d passed, %d warnings, %d failed", passes, warns, fails)
+	if fixed > 0 {
+		summary += fmt.Sprintf(", %d auto-fixed", fixed)
+	}
+	fmt.Println(summary)
+
+	printPolicyRecommendations()
+
+	if fails > 0 {
+		return fmt.Errorf("%d check(s) failed", fails)
+	}
+	return nil
+}
+
+// gatherDoctorChecks collects all diagnostic check results.
+func gatherDoctorChecks(live, security bool) []checkResult {
 	var results []checkResult
 
 	results = append(results, checkGoVersion())
@@ -82,17 +127,14 @@ func runDoctor(live, security bool) error {
 		results = append(results, checkLiveRawMode())
 		results = append(results, checkLiveForegroundProcessGroup())
 	}
+	return results
+}
 
-	// Print results.
-	fmt.Println("fuse doctor")
-	fmt.Println("===========")
-	fmt.Println()
+// printDoctorResults prints each check result and applies auto-fixes.
+// Returns (passes, warns, fails, fixed) counts.
+func printDoctorResults(results []checkResult) (int, int, int, int) {
+	var passes, fails, warns, fixed int
 
-	passes := 0
-	fails := 0
-	warns := 0
-
-	var fixed int
 	for _, r := range results {
 		icon := "[ PASS ]"
 		switch r.status {
@@ -106,45 +148,91 @@ func runDoctor(live, security bool) error {
 			passes++
 		}
 		fmt.Printf("  %s  %s\n", icon, r.name)
-		if r.detail != "" {
-			detail := r.detail
-			if !doctorVerbose && len(detail) > 120 {
-				// Count semicolons as a proxy for number of items.
-				items := strings.Count(detail, ";") + 1
-				if items > 2 {
-					// Truncate: show first item + count.
-					first := strings.SplitN(detail, ";", 2)[0]
-					detail = fmt.Sprintf("%s (and %d more — use --verbose for full list)", strings.TrimSpace(first), items-1)
-				}
-			}
-			fmt.Printf("           %s\n", detail)
+		printResultDetail(r)
+		fixed += applyResultFix(r)
+	}
+	return passes, warns, fails, fixed
+}
+
+// printResultDetail prints the detail line for a check result, truncating if needed.
+func printResultDetail(r checkResult) {
+	if r.detail == "" {
+		return
+	}
+	detail := r.detail
+	if !doctorVerbose && len(detail) > 120 {
+		items := strings.Count(detail, ";") + 1
+		if items > 2 {
+			first := strings.SplitN(detail, ";", 2)[0]
+			detail = fmt.Sprintf("%s (and %d more — use --verbose for full list)", strings.TrimSpace(first), items-1)
 		}
-		if r.fixHint != "" && r.status == "WARN" {
-			if doctorFix && r.fixFunc != nil {
-				fmt.Printf("           fixing: %s\n", r.fixHint)
-				if err := r.fixFunc(); err != nil {
-					fmt.Printf("           fix failed: %v\n", err)
-				} else {
-					fmt.Printf("           fixed.\n")
-					fixed++
-				}
-			} else if !doctorFix {
-				fmt.Printf("           fix: %s\n", r.fixHint)
-			}
+	}
+	fmt.Printf("           %s\n", detail)
+}
+
+// applyResultFix attempts to auto-fix a warning if --fix is set. Returns 1 if fixed, 0 otherwise.
+func applyResultFix(r checkResult) int {
+	if r.fixHint == "" || r.status != "WARN" {
+		return 0
+	}
+	if doctorFix && r.fixFunc != nil {
+		fmt.Printf("           fixing: %s\n", r.fixHint)
+		if err := r.fixFunc(); err != nil {
+			fmt.Printf("           fix failed: %v\n", err)
+		} else {
+			fmt.Printf("           fixed.\n")
+			return 1
 		}
+	} else if !doctorFix {
+		fmt.Printf("           fix: %s\n", r.fixHint)
+	}
+	return 0
+}
+
+// printPolicyRecommendations queries the event database for frequently-approved
+// commands and suggests policy rules.
+func printPolicyRecommendations() {
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		return // best-effort
+	}
+	defer func() { _ = database.Close() }()
+
+	recs, err := database.FrequentApprovals(3)
+	if err != nil || len(recs) == 0 {
+		return
 	}
 
 	fmt.Println()
-	summary := fmt.Sprintf("Results: %d passed, %d warnings, %d failed", passes, warns, fails)
-	if fixed > 0 {
-		summary += fmt.Sprintf(", %d auto-fixed", fixed)
+	fmt.Println("Policy Recommendations")
+	fmt.Println("----------------------")
+	fmt.Printf("Based on your approval history, consider adding these rules to policy.yaml:\n\n")
+	for _, r := range recs {
+		regexVal := "^" + escapePattern(r.Command) + "$"
+		comment := strings.NewReplacer("\n", `\n`, "\r", `\r`).Replace(r.Command)
+		fmt.Printf("  # Approved %d times: %s\n", r.Count, truncateCmd(comment, 60))
+		fmt.Printf("  - pattern: %s\n", strconv.Quote(regexVal))
+		fmt.Printf("    action: %s\n", strconv.Quote("allow"))
+		fmt.Printf("    reason: %s\n\n", strconv.Quote(fmt.Sprintf("approved %d times", r.Count)))
 	}
-	fmt.Println(summary)
+}
 
-	if fails > 0 {
-		return fmt.Errorf("%d check(s) failed", fails)
+func truncateCmd(cmd string, maxLen int) string {
+	if len(cmd) <= maxLen {
+		return cmd
 	}
-	return nil
+	return cmd[:maxLen-3] + "..."
+}
+
+func escapePattern(cmd string) string {
+	// Escape regex metacharacters for use in a pattern.
+	replacer := strings.NewReplacer(
+		`\`, `\\`, `.`, `\.`, `*`, `\*`, `+`, `\+`,
+		`?`, `\?`, `(`, `\(`, `)`, `\)`, `[`, `\[`,
+		`]`, `\]`, `{`, `\{`, `}`, `\}`, `^`, `\^`,
+		`$`, `\$`, `|`, `\|`, `-`, `\-`,
+	)
+	return replacer.Replace(cmd)
 }
 
 // checkGoVersion checks that Go is available and reports the version.
@@ -176,20 +264,20 @@ func checkDirectoryStructure() checkResult {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return checkResult{
-					name:   "Directory structure",
+					name:   checkNameDirStructure,
 					status: "WARN",
 					detail: fmt.Sprintf("%s does not exist (will be created on first use)", d.path),
 				}
 			}
 			return checkResult{
-				name:   "Directory structure",
+				name:   checkNameDirStructure,
 				status: "FAIL",
 				detail: fmt.Sprintf("cannot stat %s: %v", d.path, err),
 			}
 		}
 		if !info.IsDir() {
 			return checkResult{
-				name:   "Directory structure",
+				name:   checkNameDirStructure,
 				status: "FAIL",
 				detail: fmt.Sprintf("%s exists but is not a directory", d.path),
 			}
@@ -198,7 +286,7 @@ func checkDirectoryStructure() checkResult {
 			actual := info.Mode().Perm()
 			if actual != d.perm {
 				return checkResult{
-					name:   "Directory structure",
+					name:   checkNameDirStructure,
 					status: "WARN",
 					detail: fmt.Sprintf("%s has permissions %o (expected %o)", d.path, actual, d.perm),
 				}
@@ -207,7 +295,7 @@ func checkDirectoryStructure() checkResult {
 	}
 
 	return checkResult{
-		name:   "Directory structure",
+		name:   checkNameDirStructure,
 		status: "PASS",
 		detail: baseDir,
 	}
@@ -220,7 +308,7 @@ func checkConfigYAML() checkResult {
 	_, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		return checkResult{
-			name:   "Configuration (config.yaml)",
+			name:   checkNameConfiguration,
 			status: "FAIL",
 			detail: fmt.Sprintf("error loading config: %v", err),
 		}
@@ -228,45 +316,70 @@ func checkConfigYAML() checkResult {
 
 	if _, statErr := os.Stat(cfgPath); os.IsNotExist(statErr) {
 		return checkResult{
-			name:   "Configuration (config.yaml)",
+			name:   checkNameConfiguration,
 			status: "PASS",
 			detail: "not present (using defaults)",
 		}
 	}
 
 	return checkResult{
-		name:   "Configuration (config.yaml)",
+		name:   checkNameConfiguration,
 		status: "PASS",
 		detail: cfgPath,
 	}
 }
 
-// checkPolicyYAML checks that policy.yaml is valid if present.
+// checkPolicyYAML checks that policy.yaml is valid if present. Uses LKG fallback
+// and reports when the fallback is active (ECO-009: loud LKG warning).
 func checkPolicyYAML() checkResult {
 	policyPath := config.PolicyPath()
 
 	if _, err := os.Stat(policyPath); os.IsNotExist(err) {
 		return checkResult{
-			name:   "Policy (policy.yaml)",
+			name:   checkNamePolicyYAML,
 			status: "PASS",
 			detail: "not present (using built-in rules only)",
 		}
 	}
 
+	// Try primary policy first.
 	pol, err := policy.LoadPolicy(policyPath)
-	if err != nil {
+	if err == nil {
+		policyHash := computePolicyHash(policyPath)
 		return checkResult{
-			name:   "Policy (policy.yaml)",
-			status: "FAIL",
-			detail: fmt.Sprintf("error loading policy: %v", err),
+			name:   checkNamePolicyYAML,
+			status: "PASS",
+			detail: fmt.Sprintf("%d rules loaded (version: %s, hash: %s)", len(pol.Rules), pol.Version, policyHash),
 		}
 	}
 
-	return checkResult{
-		name:   "Policy (policy.yaml)",
-		status: "PASS",
-		detail: fmt.Sprintf("%d rules loaded (version: %s)", len(pol.Rules), pol.Version),
+	// Primary failed — try loading LKG with the same validation used at runtime.
+	lkgCfg, lkgErr := policy.LoadLKG(policyPath+".lkg", 7*24*time.Hour)
+	if lkgErr != nil {
+		return checkResult{
+			name:   checkNamePolicyYAML,
+			status: "FAIL",
+			detail: fmt.Sprintf("error loading policy: %v (LKG fallback unavailable: %v)", err, lkgErr),
+		}
 	}
+
+	// LKG is valid and loadable — report warning with active policy hash.
+	lkgHash := computePolicyHash(policyPath + ".lkg")
+	return checkResult{
+		name:   checkNamePolicyYAML,
+		status: "WARN",
+		detail: fmt.Sprintf("WARNING: using fallback policy (policy.yaml has errors: %v). Active LKG hash: %s, %d rules", err, lkgHash, len(lkgCfg.Rules)),
+	}
+}
+
+// computePolicyHash returns a short SHA-256 hash of a policy file for identification.
+func computePolicyHash(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "unknown"
+	}
+	h := sha256.Sum256(data)
+	return fmt.Sprintf("%x", h[:4]) // 4 bytes = 8 hex chars
 }
 
 // checkClaudeSettings checks that Claude Code's settings.json has the fuse hook.
@@ -277,13 +390,13 @@ func checkClaudeSettings() checkResult {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return checkResult{
-				name:   "Claude Code hook",
+				name:   checkNameClaudeCodeHook,
 				status: "WARN",
 				detail: fmt.Sprintf("%s not found (run 'fuse install claude')", settingsPath),
 			}
 		}
 		return checkResult{
-			name:   "Claude Code hook",
+			name:   checkNameClaudeCodeHook,
 			status: "FAIL",
 			detail: fmt.Sprintf("error reading settings: %v", err),
 		}
@@ -291,14 +404,14 @@ func checkClaudeSettings() checkResult {
 
 	if hasFuseHook(settings) {
 		return checkResult{
-			name:   "Claude Code hook",
+			name:   checkNameClaudeCodeHook,
 			status: "PASS",
 			detail: "fuse hook found in PreToolUse",
 		}
 	}
 
 	return checkResult{
-		name:   "Claude Code hook",
+		name:   checkNameClaudeCodeHook,
 		status: "WARN",
 		detail: fmt.Sprintf("fuse hook not found in %s (run 'fuse install claude')", settingsPath),
 	}
@@ -308,7 +421,7 @@ func checkTagOverrides() checkResult {
 	policyPath := config.PolicyPath()
 	if _, statErr := os.Stat(policyPath); os.IsNotExist(statErr) {
 		return checkResult{
-			name:   "Tag overrides",
+			name:   checkNameTagOverrides,
 			status: "PASS",
 			detail: "no policy file (no tag overrides configured)",
 		}
@@ -316,7 +429,7 @@ func checkTagOverrides() checkResult {
 	policyCfg, err := policy.LoadPolicy(policyPath)
 	if err != nil {
 		return checkResult{
-			name:   "Tag overrides",
+			name:   checkNameTagOverrides,
 			status: "FAIL",
 			detail: fmt.Sprintf("cannot load policy.yaml: %v", err),
 		}
@@ -325,7 +438,7 @@ func checkTagOverrides() checkResult {
 	overrides, parseErr := policy.ParseTagOverrides(policyCfg)
 	if parseErr != nil {
 		return checkResult{
-			name:   "Tag overrides",
+			name:   checkNameTagOverrides,
 			status: "FAIL",
 			detail: fmt.Sprintf("invalid tag_overrides in policy.yaml: %v", parseErr),
 		}
@@ -333,7 +446,7 @@ func checkTagOverrides() checkResult {
 
 	if len(overrides) == 0 {
 		return checkResult{
-			name:   "Tag overrides",
+			name:   checkNameTagOverrides,
 			status: "PASS",
 			detail: "no tag overrides configured (all rules follow global mode)",
 		}
@@ -345,7 +458,7 @@ func checkTagOverrides() checkResult {
 	}
 	sort.Strings(details)
 	return checkResult{
-		name:   "Tag overrides",
+		name:   checkNameTagOverrides,
 		status: "PASS",
 		detail: fmt.Sprintf("%d tag override(s): %s", len(details), strings.Join(details, ", ")),
 	}
@@ -357,13 +470,13 @@ func checkClaudeSecurityPosture() checkResult {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return checkResult{
-				name:   "Claude security posture",
+				name:   checkNameClaudeSecurityPosture,
 				status: "WARN",
 				detail: "Claude settings not found; security posture not evaluated",
 			}
 		}
 		return checkResult{
-			name:   "Claude security posture",
+			name:   checkNameClaudeSecurityPosture,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot inspect Claude settings: %v", err),
 		}
@@ -371,7 +484,7 @@ func checkClaudeSecurityPosture() checkResult {
 
 	if !hasFuseHook(settings) {
 		return checkResult{
-			name:   "Claude security posture",
+			name:   checkNameClaudeSecurityPosture,
 			status: "WARN",
 			detail: "fuse hook missing; secure Claude settings not evaluated",
 		}
@@ -380,14 +493,14 @@ func checkClaudeSecurityPosture() checkResult {
 	warnings, err := claudeSecurityWarnings(settings)
 	if err != nil {
 		return checkResult{
-			name:   "Claude security posture",
+			name:   checkNameClaudeSecurityPosture,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot validate secure Claude settings safely: %v", err),
 		}
 	}
 	if len(warnings) > 0 {
 		return checkResult{
-			name:    "Claude security posture",
+			name:    checkNameClaudeSecurityPosture,
 			status:  "WARN",
 			detail:  "missing or weaker secure settings: " + strings.Join(warnings, "; "),
 			fixHint: "fuse install claude --secure",
@@ -395,7 +508,7 @@ func checkClaudeSecurityPosture() checkResult {
 		}
 	}
 	return checkResult{
-		name:   "Claude security posture",
+		name:   checkNameClaudeSecurityPosture,
 		status: "PASS",
 		detail: "secure Claude settings present",
 	}
@@ -408,12 +521,7 @@ func hasFuseHook(settings map[string]interface{}) bool {
 		return false
 	}
 
-	preToolUseRaw, ok := hooksObj["PreToolUse"]
-	if !ok {
-		return false
-	}
-
-	preToolUse, ok := preToolUseRaw.([]interface{})
+	preToolUse, ok := hooksObj["PreToolUse"].([]interface{})
 	if !ok {
 		return false
 	}
@@ -429,26 +537,9 @@ func hasFuseHook(settings map[string]interface{}) bool {
 			continue
 		}
 		matcher, _ := entryMap["matcher"].(string)
-		hooksRaw, ok := entryMap["hooks"]
-		if !ok {
-			continue
-		}
-		hooks, ok := hooksRaw.([]interface{})
-		if !ok {
-			continue
-		}
-		for _, h := range hooks {
-			hMap, ok := h.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			hookType, _ := hMap["type"].(string)
-			cmd, _ := hMap["command"].(string)
-			timeout, _ := hMap["timeout"].(float64)
-			if cmd == "fuse hook evaluate" && hookType == "command" && timeout == 30 {
-				if _, wanted := requiredMatchers[matcher]; wanted {
-					requiredMatchers[matcher] = true
-				}
+		if hasFuseHookInEntry(entryMap) {
+			if _, wanted := requiredMatchers[matcher]; wanted {
+				requiredMatchers[matcher] = true
 			}
 		}
 	}
@@ -461,13 +552,41 @@ func hasFuseHook(settings map[string]interface{}) bool {
 	return true
 }
 
+// hasFuseHookInEntry checks whether a single PreToolUse entry contains
+// the expected fuse hook configuration (command, type, and timeout).
+func hasFuseHookInEntry(entryMap map[string]interface{}) bool {
+	hooks, ok := entryMap["hooks"].([]interface{})
+	if !ok {
+		return false
+	}
+	for _, h := range hooks {
+		if isFuseHookDef(h) {
+			return true
+		}
+	}
+	return false
+}
+
+// isFuseHookDef returns true if the hook definition matches the expected
+// fuse hook configuration: command="fuse hook evaluate", type="command", timeout=300.
+func isFuseHookDef(h interface{}) bool {
+	hMap, ok := h.(map[string]interface{})
+	if !ok {
+		return false
+	}
+	hookType, _ := hMap["type"].(string)
+	cmd, _ := hMap["command"].(string)
+	timeout, _ := hMap["timeout"].(float64)
+	return cmd == fuseHookCommand && hookType == "command" && (timeout == 30 || timeout == 300)
+}
+
 // checkSQLiteDB checks that the SQLite database is accessible if it exists.
 func checkSQLiteDB() checkResult {
 	dbPath := config.DBPath()
 
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		return checkResult{
-			name:   "SQLite database",
+			name:   checkNameSQLiteDatabase,
 			status: "PASS",
 			detail: "not yet created (will be created on first use)",
 		}
@@ -476,7 +595,7 @@ func checkSQLiteDB() checkResult {
 	database, err := db.OpenDB(dbPath)
 	if err != nil {
 		return checkResult{
-			name:   "SQLite database",
+			name:   checkNameSQLiteDatabase,
 			status: "FAIL",
 			detail: fmt.Sprintf("error opening database: %v", err),
 		}
@@ -484,7 +603,7 @@ func checkSQLiteDB() checkResult {
 	_ = database.Close()
 
 	return checkResult{
-		name:   "SQLite database",
+		name:   checkNameSQLiteDatabase,
 		status: "PASS",
 		detail: dbPath,
 	}
@@ -500,21 +619,21 @@ func checkFuseInPath() checkResult {
 			base := filepath.Base(selfPath)
 			if foundPath, lookErr := exec.LookPath(base); lookErr == nil {
 				return checkResult{
-					name:   "fuse binary in PATH",
+					name:   checkNameFuseInPath,
 					status: "PASS",
 					detail: foundPath,
 				}
 			}
 		}
 		return checkResult{
-			name:   "fuse binary in PATH",
+			name:   checkNameFuseInPath,
 			status: "WARN",
 			detail: "fuse not found in PATH (hooks may not work)",
 		}
 	}
 
 	return checkResult{
-		name:   "fuse binary in PATH",
+		name:   checkNameFuseInPath,
 		status: "PASS",
 		detail: fusePath,
 	}
@@ -525,14 +644,14 @@ func checkMCPProxyConfiguration() checkResult {
 	cfg, err := config.LoadConfig(config.ConfigPath())
 	if err != nil {
 		return checkResult{
-			name:   "MCP proxy configuration",
+			name:   checkNameMCPProxyConfig,
 			status: "FAIL",
 			detail: fmt.Sprintf("error loading config: %v", err),
 		}
 	}
 	if cfg == nil || len(cfg.MCPProxies) == 0 {
 		return checkResult{
-			name:   "MCP proxy configuration",
+			name:   checkNameMCPProxyConfig,
 			status: "PASS",
 			detail: "no MCP proxies configured",
 		}
@@ -546,13 +665,13 @@ func checkMCPProxyConfiguration() checkResult {
 	}
 	if len(missing) > 0 {
 		return checkResult{
-			name:   "MCP proxy configuration",
+			name:   checkNameMCPProxyConfig,
 			status: "FAIL",
 			detail: "downstream command not found: " + strings.Join(missing, ", "),
 		}
 	}
 	return checkResult{
-		name:   "MCP proxy configuration",
+		name:   checkNameMCPProxyConfig,
 		status: "PASS",
 		detail: fmt.Sprintf("%d proxy command(s) available", len(cfg.MCPProxies)),
 	}
@@ -564,13 +683,13 @@ func checkCodexSecurityPosture() checkResult {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return checkResult{
-				name:   "Codex security posture",
+				name:   checkNameCodexSecurityPosture,
 				status: "WARN",
 				detail: "Codex config not found; skipping Codex security checks",
 			}
 		}
 		return checkResult{
-			name:   "Codex security posture",
+			name:   checkNameCodexSecurityPosture,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot inspect Codex config: %v", err),
 		}
@@ -579,7 +698,7 @@ func checkCodexSecurityPosture() checkResult {
 	warnings := codexSecurityWarnings(string(data))
 	if len(warnings) > 0 {
 		return checkResult{
-			name:    "Codex security posture",
+			name:    checkNameCodexSecurityPosture,
 			status:  "WARN",
 			detail:  strings.Join(warnings, "; "),
 			fixHint: "fuse install codex",
@@ -587,7 +706,7 @@ func checkCodexSecurityPosture() checkResult {
 		}
 	}
 	return checkResult{
-		name:   "Codex security posture",
+		name:   checkNameCodexSecurityPosture,
 		status: "PASS",
 		detail: fmt.Sprintf("Codex shell mediation looks correct in %s", configPath),
 	}
@@ -597,7 +716,7 @@ func checkMCPMediationPosture() checkResult {
 	cfg, err := config.LoadConfig(config.ConfigPath())
 	if err != nil {
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot assess MCP mediation safely: %v", err),
 		}
@@ -607,13 +726,13 @@ func checkMCPMediationPosture() checkResult {
 	if err != nil {
 		if os.IsNotExist(err) {
 			return checkResult{
-				name:   "MCP mediation posture",
+				name:   checkNameMCPMediationPosture,
 				status: "WARN",
 				detail: "no Claude fuse hook detected; MCP mediation risk not assessed",
 			}
 		}
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot assess MCP mediation posture safely because Claude settings could not be read: %v", err),
 		}
@@ -630,7 +749,7 @@ func checkMCPMediationPosture() checkResult {
 	}
 	if len(warnings) > 0 {
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "WARN",
 			detail: strings.Join(warnings, "; "),
 		}
@@ -638,7 +757,7 @@ func checkMCPMediationPosture() checkResult {
 
 	if !hookInstalled && mediatedServers == 0 {
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "WARN",
 			detail: "no Claude fuse hook detected; MCP mediation risk not assessed",
 		}
@@ -646,13 +765,13 @@ func checkMCPMediationPosture() checkResult {
 
 	if mediatedServers > 0 {
 		return checkResult{
-			name:   "MCP mediation posture",
+			name:   checkNameMCPMediationPosture,
 			status: "PASS",
 			detail: fmt.Sprintf("%d Claude MCP server(s) looks mediated through fuse; %d MCP proxy configuration(s) present", mediatedServers, len(cfg.MCPProxies)),
 		}
 	}
 	return checkResult{
-		name:   "MCP mediation posture",
+		name:   checkNameMCPMediationPosture,
 		status: "PASS",
 		detail: fmt.Sprintf("%d MCP proxy configuration(s) present", len(cfg.MCPProxies)),
 	}
@@ -676,25 +795,25 @@ func checkApprovalTerminalTrust() checkResult {
 	switch {
 	case os.Getenv("CI") == "true":
 		return checkResult{
-			name:   "Approval terminal trust",
+			name:   checkNameApprovalTerminalTrust,
 			status: "WARN",
 			detail: "CI environment detected; terminal-based approval trust is lower in non-interactive sessions",
 		}
 	case os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "":
 		return checkResult{
-			name:   "Approval terminal trust",
+			name:   checkNameApprovalTerminalTrust,
 			status: "WARN",
 			detail: "remote SSH terminal detected; verify approval prompts are trusted in this session",
 		}
 	case os.Getenv("TERM") == "dumb":
 		return checkResult{
-			name:   "Approval terminal trust",
+			name:   checkNameApprovalTerminalTrust,
 			status: "WARN",
 			detail: "TERM=dumb; approval prompt rendering or trust may be degraded",
 		}
 	default:
 		return checkResult{
-			name:   "Approval terminal trust",
+			name:   checkNameApprovalTerminalTrust,
 			status: "PASS",
 			detail: "no obvious terminal trust warnings detected",
 		}
@@ -722,7 +841,7 @@ func checkLiveRawMode() checkResult {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return checkResult{
-			name:   "Live terminal raw mode",
+			name:   checkNameLiveRawMode,
 			status: "WARN",
 			detail: fmt.Sprintf("cannot open /dev/tty: %v", err),
 		}
@@ -733,7 +852,7 @@ func checkLiveRawMode() checkResult {
 	orig, err := unix.IoctlGetTermios(fd, doctorIoctlGetTermios)
 	if err != nil {
 		return checkResult{
-			name:   "Live terminal raw mode",
+			name:   checkNameLiveRawMode,
 			status: "WARN",
 			detail: fmt.Sprintf("raw mode not available: %v", err),
 		}
@@ -748,20 +867,20 @@ func checkLiveRawMode() checkResult {
 	}
 	if err := unix.IoctlSetTermios(fd, doctorIoctlSetTermios, &raw); err != nil {
 		return checkResult{
-			name:   "Live terminal raw mode",
-			status: "FAIL",
+			name:   checkNameLiveRawMode,
+			status: "WARN",
 			detail: fmt.Sprintf("enter raw mode: %v", err),
 		}
 	}
 	if err := unix.IoctlSetTermios(fd, doctorIoctlSetTermios, orig); err != nil {
 		return checkResult{
-			name:   "Live terminal raw mode",
-			status: "FAIL",
+			name:   checkNameLiveRawMode,
+			status: "WARN",
 			detail: fmt.Sprintf("restore terminal state: %v", err),
 		}
 	}
 	return checkResult{
-		name:   "Live terminal raw mode",
+		name:   checkNameLiveRawMode,
 		status: "PASS",
 		detail: "entered and restored raw mode on /dev/tty",
 	}
@@ -771,7 +890,7 @@ func checkLiveForegroundProcessGroup() checkResult {
 	fd := int(os.Stdin.Fd())
 	if _, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP); err != nil {
 		return checkResult{
-			name:   "Live foreground process-group handoff",
+			name:   checkNameLiveForegroundHandoff,
 			status: "WARN",
 			detail: "stdin is not a terminal; foreground process-group handoff not probed",
 		}
@@ -780,7 +899,7 @@ func checkLiveForegroundProcessGroup() checkResult {
 	cmd, err := startForegroundProbeProcess(os.Stdin, io.Discard, io.Discard)
 	if err != nil {
 		return checkResult{
-			name:   "Live foreground process-group handoff",
+			name:   checkNameLiveForegroundHandoff,
 			status: "FAIL",
 			detail: fmt.Sprintf("start probe child: %v", err),
 		}
@@ -793,7 +912,7 @@ func checkLiveForegroundProcessGroup() checkResult {
 	restore, err := adapters.ForegroundChildProcessGroupIfTTY(cmd.Process.Pid)
 	if err != nil {
 		return checkResult{
-			name:   "Live foreground process-group handoff",
+			name:   checkNameLiveForegroundHandoff,
 			status: "FAIL",
 			detail: fmt.Sprintf("handoff probe failed: %v", err),
 		}
@@ -802,7 +921,7 @@ func checkLiveForegroundProcessGroup() checkResult {
 		restore()
 	}
 	return checkResult{
-		name:   "Live foreground process-group handoff",
+		name:   checkNameLiveForegroundHandoff,
 		status: "PASS",
 		detail: "foreground handoff to a child process group succeeded",
 	}

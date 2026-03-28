@@ -89,6 +89,33 @@ func TestBuildUserPrompt_TruncatedScript(t *testing.T) {
 	}
 }
 
+func TestBuildUserPrompt_ScrubsContextFields(t *testing.T) {
+	ctx := PromptContext{
+		Command:         "echo hello",
+		Cwd:             "/tmp/api_key=EXAMPLE_API_KEY",
+		WorkspaceRoot:   "/workspace/Cookie: session=EXAMPLE_SESSION_ID",
+		CurrentDecision: "APPROVAL",
+		Reason:          "Bearer EXAMPLE_TOKEN detected",
+		RuleID:          "rule-token=ghp_EXAMPLE_GITHUB_TOKEN",
+		ToolName:        "mcp__server__Authorization: Basic ZXhhbXBsZTp1c2Vy",
+	}
+	prompt := BuildUserPrompt(ctx)
+	for _, forbidden := range []string{
+		"EXAMPLE_API_KEY",
+		"session=EXAMPLE_SESSION_ID",
+		"EXAMPLE_TOKEN",
+		"ghp_EXAMPLE_GITHUB_TOKEN",
+		"ZXhhbXBsZTp1c2Vy",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt leaked %q:\n%s", forbidden, prompt)
+		}
+	}
+	if !strings.Contains(prompt, "[REDACTED") {
+		t.Fatalf("expected scrubbed markers in prompt:\n%s", prompt)
+	}
+}
+
 func TestParseResponse_ValidJSON(t *testing.T) {
 	resp, err := ParseResponse(`{"decision":"SAFE","confidence":0.92,"reasoning":"safe command"}`)
 	if err != nil {

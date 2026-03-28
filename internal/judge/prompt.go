@@ -54,30 +54,32 @@ const MaxScriptBytes = 50 * 1024
 
 // PromptContext holds all context needed for the judge to make an informed decision.
 type PromptContext struct {
-	Command         string // the shell command or MCP tool call
-	Cwd             string // working directory
-	WorkspaceRoot   string // project root (last 2 path components)
-	CurrentDecision string // CAUTION or APPROVAL
-	Reason          string // why this classification was assigned
-	RuleID          string // which rule triggered
-	ToolName        string // "Bash", "mcp__server__delete_items", etc.
-	ScriptContents  string // full script contents if file inspection triggered (scrubbed)
-	ScriptPath      string // path to the inspected script
+	Command              string // the shell command or MCP tool call
+	Cwd                  string // working directory
+	WorkspaceRoot        string // project root (last 2 path components)
+	CurrentDecision      string // CAUTION or APPROVAL
+	Reason               string // why this classification was assigned
+	RuleID               string // which rule triggered
+	ToolName             string // "Bash", "mcp__server__delete_items", etc.
+	ScriptContents       string // full script contents if file inspection triggered (scrubbed)
+	ScriptPath           string // path to the inspected script
+	InlineScriptBody     string // extracted heredoc body or $() content (scrubbed)
+	ExtractionIncomplete bool   // true if inline extraction was truncated/incomplete
 }
 
 // BuildUserPrompt constructs the user prompt from the given context.
 func BuildUserPrompt(ctx PromptContext) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Command: %s\n", db.ScrubCredentials(ctx.Command))
-	fmt.Fprintf(&b, "Working directory: %s\n", ctx.Cwd)
+	fmt.Fprintf(&b, "Working directory: %s\n", db.ScrubCredentials(ctx.Cwd))
 	if ctx.WorkspaceRoot != "" {
-		fmt.Fprintf(&b, "Workspace: %s\n", ctx.WorkspaceRoot)
+		fmt.Fprintf(&b, "Workspace: %s\n", db.ScrubCredentials(ctx.WorkspaceRoot))
 	}
 	fmt.Fprintf(&b, "Current classification: %s\n", ctx.CurrentDecision)
-	fmt.Fprintf(&b, "Rule: %s\n", ctx.RuleID)
-	fmt.Fprintf(&b, "Reason: %s\n", ctx.Reason)
+	fmt.Fprintf(&b, "Rule: %s\n", db.ScrubCredentials(ctx.RuleID))
+	fmt.Fprintf(&b, "Reason: %s\n", db.ScrubCredentials(ctx.Reason))
 	if ctx.ToolName != "" && ctx.ToolName != "Bash" {
-		fmt.Fprintf(&b, "Tool: %s\n", ctx.ToolName)
+		fmt.Fprintf(&b, "Tool: %s\n", db.ScrubCredentials(ctx.ToolName))
 	}
 	if ctx.ScriptContents != "" {
 		scrubbed := db.ScrubCredentials(ctx.ScriptContents)
@@ -86,6 +88,19 @@ func BuildUserPrompt(ctx PromptContext) string {
 				ctx.ScriptPath, scrubbed[:MaxScriptBytes])
 		} else {
 			fmt.Fprintf(&b, "\nScript contents (%s):\n%s\n", ctx.ScriptPath, scrubbed)
+		}
+	}
+	if ctx.InlineScriptBody != "" {
+		scrubbed := db.ScrubCredentials(ctx.InlineScriptBody)
+		label := "Inline script body (extracted from command"
+		if ctx.ExtractionIncomplete {
+			label += ", PARTIAL — extraction was truncated"
+		}
+		if len(scrubbed) > MaxScriptBytes {
+			label += ", TRUNCATED at 50KB — cannot fully assess"
+			fmt.Fprintf(&b, "\n%s):\n%s\n", label, scrubbed[:MaxScriptBytes])
+		} else {
+			fmt.Fprintf(&b, "\n%s):\n%s\n", label, scrubbed)
 		}
 	}
 	return b.String()

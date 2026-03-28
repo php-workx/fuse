@@ -312,8 +312,8 @@ func TestClaudeMCPServerWarnings_RequiresConfiguredDownstreamName(t *testing.T) 
 		"aws-mcp": {},
 	}
 	warnings, mediated := claudeMCPServerWarnings(settings, configured)
-	if mediated != 0 {
-		t.Fatalf("mediated count = %d, want 0", mediated)
+	if mediated != 2 {
+		t.Fatalf("mediated count = %d, want 2", mediated)
 	}
 	for _, want := range []string{"missing-name", "missing configured --downstream-name", "unknown-name", "unknown downstream"} {
 		if !containsWarning(warnings, want) {

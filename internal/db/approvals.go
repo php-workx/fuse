@@ -6,6 +6,10 @@ import (
 	"time"
 )
 
+// TimestampMillisFormat is the standard timestamp layout with millisecond precision
+// used for serializing timestamps in the database (ISO 8601 with trailing Z).
+const TimestampMillisFormat = "2006-01-02T15:04:05.000Z"
+
 // Approval represents a stored approval record.
 type Approval struct {
 	ID          string
@@ -23,7 +27,7 @@ type Approval struct {
 func (d *DB) CreateApproval(id, decisionKey, decision, scope, sessionID, hmac string, expiresAt *time.Time) error {
 	var expiresAtStr *string
 	if expiresAt != nil {
-		s := expiresAt.UTC().Format("2006-01-02T15:04:05.000Z")
+		s := expiresAt.UTC().Format(TimestampMillisFormat)
 		expiresAtStr = &s
 	}
 
@@ -47,7 +51,7 @@ func (d *DB) CreateApproval(id, decisionKey, decision, scope, sessionID, hmac st
 //   - "session" — must match sessionID, NOT consumed
 //   - "forever" — never consumed, always valid
 func (d *DB) ConsumeApproval(decisionKey, sessionID string) (*Approval, error) {
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	now := time.Now().UTC().Format(TimestampMillisFormat)
 
 	// First try to find a matching unconsumed, non-expired approval.
 	// Order by scope priority: forever > session > command > once.
@@ -120,8 +124,9 @@ func (d *DB) DeleteApproval(id string) error {
 // Consumed approvals are retained for 1 hour after consumption to allow
 // auditing of recent decisions. Returns the number of rows deleted.
 func (d *DB) CleanupExpired() (int64, error) {
-	now := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
-	cutoff := time.Now().Add(-time.Hour).UTC().Format("2006-01-02T15:04:05.000Z")
+	t := time.Now().UTC()
+	now := t.Format(TimestampMillisFormat)
+	cutoff := t.Add(-time.Hour).Format(TimestampMillisFormat)
 
 	result, err := d.db.Exec(`
 		DELETE FROM approvals

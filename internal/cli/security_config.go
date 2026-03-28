@@ -97,26 +97,7 @@ func claudeSecurityWarnings(settings map[string]interface{}) ([]string, error) {
 	if !sandboxPresent {
 		warnings = append(warnings, "sandbox block is missing")
 	}
-	sandboxEnabled, err := readBool("sandbox.enabled", sandbox["enabled"])
-	if err != nil {
-		warnings = append(warnings, err.Error())
-	} else if !sandboxEnabled {
-		warnings = append(warnings, "sandbox.enabled should be true")
-	}
-
-	autoAllow, err := readBool("sandbox.autoAllowBashIfSandboxed", sandbox["autoAllowBashIfSandboxed"])
-	if err != nil {
-		warnings = append(warnings, err.Error())
-	} else if !autoAllow {
-		warnings = append(warnings, "sandbox.autoAllowBashIfSandboxed should be true")
-	}
-
-	allowUnsandboxed, err := readBool("sandbox.allowUnsandboxedCommands", sandbox["allowUnsandboxedCommands"])
-	if err != nil {
-		warnings = append(warnings, err.Error())
-	} else if !allowUnsandboxed {
-		warnings = append(warnings, "sandbox.allowUnsandboxedCommands should be true")
-	}
+	warnings = appendSandboxBoolWarnings(warnings, sandbox)
 
 	if !filesystemPresent {
 		warnings = append(warnings, "sandbox.filesystem block is missing")
@@ -128,6 +109,28 @@ func claudeSecurityWarnings(settings map[string]interface{}) ([]string, error) {
 	warnings = append(warnings, denyWriteWarnings...)
 
 	return warnings, nil
+}
+
+// appendSandboxBoolWarnings checks sandbox boolean settings and appends any warnings.
+func appendSandboxBoolWarnings(warnings []string, sandbox map[string]interface{}) []string {
+	checks := []struct {
+		path     string
+		key      string
+		expected string
+	}{
+		{"sandbox.enabled", "enabled", "sandbox.enabled should be true"},
+		{"sandbox.autoAllowBashIfSandboxed", "autoAllowBashIfSandboxed", "sandbox.autoAllowBashIfSandboxed should be true"},
+		{"sandbox.allowUnsandboxedCommands", "allowUnsandboxedCommands", "sandbox.allowUnsandboxedCommands should be true"},
+	}
+	for _, c := range checks {
+		val, err := readBool(c.path, sandbox[c.key])
+		if err != nil {
+			warnings = append(warnings, err.Error())
+		} else if !val {
+			warnings = append(warnings, c.expected)
+		}
+	}
+	return warnings
 }
 
 func codexSecurityWarnings(configText string) []string {
@@ -176,35 +179,42 @@ func claudeMCPServerWarnings(settings map[string]interface{}, configured map[str
 	var warnings []string
 	mediatedCount := 0
 	for name, entryRaw := range servers {
-		entry, ok := entryRaw.(map[string]interface{})
-		if !ok {
-			warnings = append(warnings, fmt.Sprintf("mcpServers.%s must be an object", name))
-			continue
+		warning, mediated := checkSingleMCPServer(name, entryRaw, configured)
+		if warning != "" {
+			warnings = append(warnings, warning)
 		}
-
-		command, _ := entry["command"].(string)
-		args, err := toStringSetInOrder("mcpServers."+name+".args", entry["args"])
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("mcpServers.%s has invalid args: %v", name, err))
-			continue
-		}
-		downstreamName, isMediated := mediatedClaudeMCPDownstreamName(command, args)
-		if isMediated && downstreamName == "" {
-			warnings = append(warnings, fmt.Sprintf("mcpServers.%s is missing configured --downstream-name", name))
-			continue
-		}
-		if isMediated && !configuredMCPProxyExists(configured, downstreamName) {
-			warnings = append(warnings, fmt.Sprintf("mcpServers.%s references unknown downstream MCP proxy %q", name, downstreamName))
-			continue
-		}
-		if isMediated {
+		if mediated {
 			mediatedCount++
-			continue
 		}
-		warnings = append(warnings, fmt.Sprintf("mcpServers.%s is not mediated through fuse", name))
 	}
 
 	return warnings, mediatedCount
+}
+
+// checkSingleMCPServer validates a single MCP server entry. Returns a warning
+// string (empty if valid) and whether the server is mediated through fuse.
+func checkSingleMCPServer(name string, entryRaw interface{}, configured map[string]struct{}) (string, bool) {
+	entry, ok := entryRaw.(map[string]interface{})
+	if !ok {
+		return fmt.Sprintf("mcpServers.%s must be an object", name), false
+	}
+
+	command, _ := entry["command"].(string)
+	args, err := toStringSetInOrder("mcpServers."+name+".args", entry["args"])
+	if err != nil {
+		return fmt.Sprintf("mcpServers.%s has invalid args: %v", name, err), false
+	}
+	downstreamName, isMediated := mediatedClaudeMCPDownstreamName(command, args)
+	if !isMediated {
+		return fmt.Sprintf("mcpServers.%s is not mediated through fuse", name), false
+	}
+	if downstreamName == "" {
+		return fmt.Sprintf("mcpServers.%s is missing configured --downstream-name", name), true
+	}
+	if !configuredMCPProxyExists(configured, downstreamName) {
+		return fmt.Sprintf("mcpServers.%s references unknown downstream MCP proxy %q", name, downstreamName), true
+	}
+	return "", true
 }
 
 func mediatedClaudeMCPDownstreamName(command string, args []string) (string, bool) {
@@ -428,41 +438,54 @@ func tomlSection(content, header string) (string, bool) {
 func tomlAssignment(section, key string) string {
 	lines := strings.Split(section, "\n")
 	for i := 0; i < len(lines); i++ {
-		line := strings.TrimSpace(lines[i])
-		if line == "" || strings.HasPrefix(line, "#") {
+		value, ok := extractTOMLValue(lines[i], key)
+		if !ok {
 			continue
 		}
-		if !strings.HasPrefix(line, key) {
-			continue
-		}
-
-		remainder := strings.TrimSpace(strings.TrimPrefix(line, key))
-		if !strings.HasPrefix(remainder, "=") {
-			continue
-		}
-
-		value := strings.TrimSpace(strings.TrimPrefix(remainder, "="))
 		if value == "" {
 			return ""
 		}
 		if strings.HasPrefix(value, "[") && !hasBalancedTOMLBrackets(value) {
-			var builder strings.Builder
-			builder.WriteString(value)
-			for j := i + 1; j < len(lines); j++ {
-				next := strings.TrimSpace(lines[j])
-				if next == "" || strings.HasPrefix(next, "#") {
-					continue
-				}
-				builder.WriteString("\n")
-				builder.WriteString(next)
-				if hasBalancedTOMLBrackets(builder.String()) {
-					return builder.String()
-				}
-			}
+			return collectMultilineTOMLArray(value, lines[i+1:])
 		}
 		return value
 	}
 	return ""
+}
+
+// extractTOMLValue checks whether a line contains a TOML assignment for the
+// given key. Returns the trimmed value and true if found, or ("", false) otherwise.
+func extractTOMLValue(rawLine, key string) (string, bool) {
+	line := strings.TrimSpace(rawLine)
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", false
+	}
+	if !strings.HasPrefix(line, key) {
+		return "", false
+	}
+	remainder := strings.TrimSpace(strings.TrimPrefix(line, key))
+	if !strings.HasPrefix(remainder, "=") {
+		return "", false
+	}
+	return strings.TrimSpace(strings.TrimPrefix(remainder, "=")), true
+}
+
+// collectMultilineTOMLArray joins continuation lines until the brackets balance.
+func collectMultilineTOMLArray(initial string, remaining []string) string {
+	var builder strings.Builder
+	builder.WriteString(initial)
+	for _, rawLine := range remaining {
+		next := strings.TrimSpace(rawLine)
+		if next == "" || strings.HasPrefix(next, "#") {
+			continue
+		}
+		builder.WriteString("\n")
+		builder.WriteString(next)
+		if hasBalancedTOMLBrackets(builder.String()) {
+			return builder.String()
+		}
+	}
+	return initial
 }
 
 func hasBalancedTOMLBrackets(value string) bool {

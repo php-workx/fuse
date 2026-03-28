@@ -433,3 +433,146 @@ func TestProviderError(t *testing.T) {
 		t.Error("verdict should not be applied on error")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Downgrade guard tests (FailClosed, SAFE cap, ExtractionIncomplete)
+// ---------------------------------------------------------------------------
+
+// setupMaybeJudgeWithMock injects a mock provider into the cached judge
+// for MaybeJudge testing. Returns a cleanup function.
+// activeCfgForMock returns a config whose hash matches what setupMaybeJudgeWithMock stores.
+var mockJudgeCfg = config.LLMJudgeConfig{Mode: "active"}
+
+func setupMaybeJudgeWithMock(response string) func() {
+	cachedJudgeMu.Lock()
+	old := cachedJudge
+	oldHash := cachedCfgHash
+	cachedJudge = testJudge("active", &mockProvider{
+		name:     "test-mock",
+		response: response,
+	})
+	// Use the real config hash so MaybeJudge doesn't try to reinitialize.
+	cachedCfgHash = configHash(mockJudgeCfg)
+	cachedJudgeMu.Unlock()
+	return func() {
+		cachedJudgeMu.Lock()
+		cachedJudge = old
+		cachedCfgHash = oldHash
+		cachedJudgeMu.Unlock()
+	}
+}
+
+func activeCfg() *config.Config {
+	return &config.Config{
+		LLMJudge: mockJudgeCfg,
+	}
+}
+
+func TestMaybeJudge_FailClosedBlocksDowngrade(t *testing.T) {
+	cleanup := setupMaybeJudgeWithMock(`{"decision":"CAUTION","confidence":0.99,"reasoning":"looks safe"}`)
+	defer cleanup()
+
+	result := testResult(core.DecisionApproval)
+	result.FailClosed = true
+
+	out, verdict := MaybeJudge(context.Background(), activeCfg(), result, testPromptCtx())
+	if verdict == nil {
+		t.Fatal("expected verdict, got nil")
+	}
+	if verdict.Applied {
+		t.Error("verdict should NOT be applied on fail-closed result")
+	}
+	if out.Decision != core.DecisionApproval {
+		t.Errorf("decision should remain APPROVAL, got %s", out.Decision)
+	}
+}
+
+func TestMaybeJudge_FailClosedAllowsUpgrade(t *testing.T) {
+	cleanup := setupMaybeJudgeWithMock(`{"decision":"APPROVAL","confidence":0.8,"reasoning":"dangerous"}`)
+	defer cleanup()
+
+	result := testResult(core.DecisionCaution)
+	result.FailClosed = true
+
+	out, verdict := MaybeJudge(context.Background(), activeCfg(), result, testPromptCtx())
+	if verdict == nil {
+		t.Fatal("expected verdict, got nil")
+	}
+	if !verdict.Applied {
+		t.Error("upgrade should be applied even on fail-closed result")
+	}
+	if out.Decision != core.DecisionApproval {
+		t.Errorf("decision should be upgraded to APPROVAL, got %s", out.Decision)
+	}
+}
+
+func TestMaybeJudge_DowngradeCapApprovalToSafe(t *testing.T) {
+	cleanup := setupMaybeJudgeWithMock(`{"decision":"SAFE","confidence":0.99,"reasoning":"totally safe"}`)
+	defer cleanup()
+
+	result := testResult(core.DecisionApproval)
+
+	out, verdict := MaybeJudge(context.Background(), activeCfg(), result, testPromptCtx())
+	if verdict == nil {
+		t.Fatal("expected verdict, got nil")
+	}
+	if out.Decision != core.DecisionCaution {
+		t.Errorf("APPROVAL->SAFE should be capped to CAUTION, got %s", out.Decision)
+	}
+}
+
+func TestMaybeJudge_DowngradeApprovalToCautionAllowed(t *testing.T) {
+	cleanup := setupMaybeJudgeWithMock(`{"decision":"CAUTION","confidence":0.96,"reasoning":"minor concern"}`)
+	defer cleanup()
+
+	result := testResult(core.DecisionApproval)
+
+	out, verdict := MaybeJudge(context.Background(), activeCfg(), result, testPromptCtx())
+	if verdict == nil {
+		t.Fatal("expected verdict, got nil")
+	}
+	if !verdict.Applied {
+		t.Error("APPROVAL->CAUTION should be applied")
+	}
+	if out.Decision != core.DecisionCaution {
+		t.Errorf("decision should be CAUTION, got %s", out.Decision)
+	}
+}
+
+func TestMaybeJudge_ExtractionIncompleteBlocksDowngrade(t *testing.T) {
+	cleanup := setupMaybeJudgeWithMock(`{"decision":"CAUTION","confidence":0.99,"reasoning":"looks ok"}`)
+	defer cleanup()
+
+	result := testResult(core.DecisionApproval)
+	promptCtx := testPromptCtx()
+	promptCtx.ExtractionIncomplete = true
+
+	out, verdict := MaybeJudge(context.Background(), activeCfg(), result, promptCtx)
+	if verdict == nil {
+		t.Fatal("expected verdict, got nil")
+	}
+	if verdict.Applied {
+		t.Error("downgrade should be blocked when extraction incomplete")
+	}
+	if out.Decision != core.DecisionApproval {
+		t.Errorf("decision should remain APPROVAL, got %s", out.Decision)
+	}
+}
+
+func TestMaybeJudge_UpgradeNotAffectedByGuards(t *testing.T) {
+	cleanup := setupMaybeJudgeWithMock(`{"decision":"APPROVAL","confidence":0.8,"reasoning":"risky"}`)
+	defer cleanup()
+
+	result := testResult(core.DecisionCaution)
+
+	out, verdict := MaybeJudge(context.Background(), activeCfg(), result, testPromptCtx())
+	if verdict == nil {
+		t.Fatal("expected verdict, got nil")
+	}
+	if !verdict.Applied {
+		t.Error("upgrade should be applied")
+	}
+	if out.Decision != core.DecisionApproval {
+		t.Errorf("decision should be upgraded to APPROVAL, got %s", out.Decision)
+	}
+}

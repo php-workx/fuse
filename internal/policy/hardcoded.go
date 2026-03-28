@@ -1,8 +1,11 @@
 package policy
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+)
 
-// HardcodedBlocked contains the 22 non-overridable BLOCKED rules compiled into
+// HardcodedBlocked contains the non-overridable BLOCKED rules compiled into
 // the binary. These protect against catastrophic system destruction and fuse
 // self-protection. They cannot be disabled via disabled_builtins or policy.yaml.
 // unsafeDevRedirect matches redirects to actual block/char devices.
@@ -14,47 +17,105 @@ func hasUnsafeDevRedirect(cmd string) bool {
 	return unsafeDevRedirect.MatchString(cmd)
 }
 
+// catastrophicPaths are top-level directories where rm -rf would be catastrophic.
+// Paths like /tmp/mydir, /var/folders/xxx, or /Users/dev/project are NOT catastrophic.
+var catastrophicPaths = map[string]bool{
+	"/":     true,
+	"/etc":  true,
+	"/usr":  true,
+	"/var":  true,
+	"/bin":  true,
+	"/sbin": true,
+	"/lib":  true,
+	"/boot": true,
+	"/root": true,
+	"/home": true,
+	"/opt":  true,
+	"/srv":  true,
+	"/sys":  true,
+	"/proc": true,
+}
+
+// isCatastrophicRmTarget returns true if any rm target path is catastrophic.
+// Matches: /*, ~, ~/, $VAR, or a top-level system directory.
+// Does NOT match specific subdirectories like /tmp/mydir or /var/folders/xxx.
+func isCatastrophicRmTarget(cmd string) bool {
+	// Always block: /* and variable-expanded targets.
+	if strings.Contains(cmd, " /*") || strings.Contains(cmd, " $") {
+		return true
+	}
+	// Check each argument after flags for catastrophic paths.
+	fields := strings.Fields(cmd)
+	for _, f := range fields {
+		if strings.HasPrefix(f, "-") {
+			continue
+		}
+		if f == "rm" {
+			continue
+		}
+		// Treat tilde expansion as targeting the user's home directory.
+		if f == "~" || strings.HasPrefix(f, "~/") {
+			return true
+		}
+		// Clean the path and check against catastrophic list.
+		clean := strings.TrimRight(f, "/")
+		if clean == "" {
+			clean = "/" // root
+		}
+		if catastrophicPaths[clean] {
+			return true
+		}
+	}
+	return false
+}
+
 var HardcodedBlocked = []HardcodedRule{
 	// === Catastrophic filesystem destruction ===
 
-	// rm -rf with combined short flags (e.g., -rf, -rfi, -fir)
+	// rm -rf targeting catastrophic paths (/, /etc, /usr, /home, ~, $VAR, /*).
+	// The regex matches any rm with recursive+force flags. The predicate checks
+	// whether ANY argument targets a catastrophic path — including cases like
+	// `rm -rf ./safe /etc` where the catastrophic path is not the first argument.
 	{
-		Pattern: regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\s+[/~$]`),
-		Reason:  "Recursive force-remove of root, home, or variable path",
-	},
-	{
-		Pattern: regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\s+/\*`),
-		Reason:  "Recursive force-remove of /*",
+		Pattern:   regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\b`),
+		Reason:    "Recursive force-remove of system directory, home, or variable path",
+		Predicate: isCatastrophicRmTarget,
 	},
 
 	// rm with split short flags (e.g., -r -f, -f -r)
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*-r\b.*-f\b.*[/~$]`),
-		Reason:  "Recursive force-remove (split flags) of root/home",
+		Pattern:   regexp.MustCompile(`\brm\s+.*-r\b.*-f\b`),
+		Reason:    "Recursive force-remove (split flags) of system directory",
+		Predicate: isCatastrophicRmTarget,
 	},
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*-f\b.*-r\b.*[/~$]`),
-		Reason:  "Recursive force-remove (split flags) of root/home",
+		Pattern:   regexp.MustCompile(`\brm\s+.*-f\b.*-r\b`),
+		Reason:    "Recursive force-remove (split flags) of system directory",
+		Predicate: isCatastrophicRmTarget,
 	},
 
 	// rm with long flags (--recursive --force in any order)
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*--recursive\b.*--force\b.*[/~$]`),
-		Reason:  "Recursive force-remove (long flags) of root/home",
+		Pattern:   regexp.MustCompile(`\brm\s+.*--recursive\b.*--force\b`),
+		Reason:    "Recursive force-remove (long flags) of system directory",
+		Predicate: isCatastrophicRmTarget,
 	},
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*--force\b.*--recursive\b.*[/~$]`),
-		Reason:  "Recursive force-remove (long flags) of root/home",
+		Pattern:   regexp.MustCompile(`\brm\s+.*--force\b.*--recursive\b`),
+		Reason:    "Recursive force-remove (long flags) of system directory",
+		Predicate: isCatastrophicRmTarget,
 	},
 
 	// rm with mixed short/long flags
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*-r\b.*--force\b.*[/~$]`),
-		Reason:  "Recursive force-remove (mixed flags) of root/home",
+		Pattern:   regexp.MustCompile(`\brm\s+.*-r\b.*--force\b`),
+		Reason:    "Recursive force-remove (mixed flags) of system directory",
+		Predicate: isCatastrophicRmTarget,
 	},
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*--recursive\b.*-f\b.*[/~$]`),
-		Reason:  "Recursive force-remove (mixed flags) of root/home",
+		Pattern:   regexp.MustCompile(`\brm\s+.*--recursive\b.*-f\b`),
+		Reason:    "Recursive force-remove (mixed flags) of system directory",
+		Predicate: isCatastrophicRmTarget,
 	},
 
 	// Filesystem formatting

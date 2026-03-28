@@ -294,7 +294,9 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 		return 0
 
 	case core.DecisionBlocked:
-		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", result.Reason)
+		// Scrub the reason to avoid echoing destructive patterns back into the agent's context.
+		scrubbed := db.ScrubCredentials(result.Reason)
+		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", scrubbed)
 		fmt.Fprintln(stderr, msg)
 		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
 		return 2
@@ -381,6 +383,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 		}
 		applyVerdict(event, verdict)
 		_ = database.LogEvent(event)
+		fmt.Fprintln(stderr, "[fuse] Command approved and executed.")
 		return 0
 	default:
 		event := &db.EventRecord{
@@ -423,13 +426,15 @@ func logHookEventFields(sessionID, command, cwd, decision, ruleID, reason string
 // script contents when a referenced file is detected. Used by all shell adapters.
 func buildJudgeContext(command, cwd, toolName string, result *core.ClassifyResult) judge.PromptContext {
 	ctx := judge.PromptContext{
-		Command:         command,
-		Cwd:             cwd,
-		WorkspaceRoot:   judge.ShortenToLastN(cwd, 2),
-		CurrentDecision: string(result.Decision),
-		Reason:          result.Reason,
-		RuleID:          result.RuleID,
-		ToolName:        toolName,
+		Command:              command,
+		Cwd:                  cwd,
+		WorkspaceRoot:        judge.ShortenToLastN(cwd, 2),
+		CurrentDecision:      string(result.Decision),
+		Reason:               result.Reason,
+		RuleID:               result.RuleID,
+		ToolName:             toolName,
+		InlineScriptBody:     result.InlineBody,
+		ExtractionIncomplete: result.ExtractionIncomplete,
 	}
 	if cwd != "" {
 		if scriptPath := core.DetectReferencedFile(command); scriptPath != "" {
@@ -521,17 +526,24 @@ func extractCommandFromResult(result *core.ClassifyResult) string {
 }
 
 // loadPolicyEvaluator loads user policy and returns a PolicyEvaluator.
-// Returns a default evaluator if no policy file exists.
+// Uses LKG fallback when policy.yaml has errors (loud warning via slog.Warn).
+// Returns a default evaluator if no policy file and no LKG exists.
 func loadPolicyEvaluator() core.PolicyEvaluator {
 	policyPath := config.PolicyPath()
-	policyCfg, err := policy.LoadPolicy(policyPath)
+	policyCfg, err := policy.LoadPolicyWithLKG(policyPath, 0)
 	if err != nil {
-		// No policy file or parse error: use default (no user rules).
-		slog.Debug("no user policy loaded", "path", policyPath, "error", err)
+		if !os.IsNotExist(err) {
+			slog.Warn("policy load failed, using default (no user rules)", "path", policyPath, "error", err)
+		}
 		return policy.NewEvaluator(nil)
 	}
 	return policy.NewEvaluator(policyCfg)
 }
+
+// Policy lifecycle events (POLICY_LOADED/POLICY_LOAD_FAILED) are logged by
+// long-running adapters (codex-shell, proxy) via their own mechanisms.
+// Hook mode is short-lived (one process per invocation), so logging policy
+// state on every call just produces noise in the event log.
 
 // openDBAndSecret opens the SQLite database and reads the HMAC secret.
 func openDBAndSecret() (*db.DB, []byte, error) {

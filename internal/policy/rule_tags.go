@@ -223,6 +223,14 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag
 		"builtin:cred:copy-creds":      {tags: []string{"credential"}, keywords: []string{"cp", "scp"}},
 		"builtin:cred:base64-key":      {tags: []string{"credential"}, keywords: []string{"base64"}},
 
+		// === Sensitive local files ===
+		"builtin:cred:cat-env":         {tags: []string{"credential"}, keywords: []string{".env", "cat"}},
+		"builtin:cred:cp-env":          {tags: []string{"credential"}, keywords: []string{".env", "cp", "mv", "scp"}},
+		"builtin:cred:edit-git-hooks":  {tags: []string{"persistence", "git"}, keywords: []string{".git/hooks"}},
+		"builtin:cred:chmod-git-hooks": {tags: []string{"persistence", "git"}, keywords: []string{".git/hooks", "chmod"}},
+		"builtin:cred:cat-gpg-key":     {tags: []string{"credential"}, keywords: []string{".gnupg", "cat"}},
+		"builtin:cred:cat-pypirc":      {tags: []string{"credential"}, keywords: []string{".pypirc", "cat"}},
+
 		// === Exfiltration ===
 		"builtin:exfil:curl-post":    {tags: []string{"exfiltration"}, keywords: []string{"curl"}},
 		"builtin:exfil:curl-upload":  {tags: []string{"exfiltration"}, keywords: []string{"curl"}},
@@ -306,4 +314,22 @@ func applyRuleMetadata(meta map[string]ruleMetadata) {
 			BuiltinRules[i].Keywords = m.keywords
 		}
 	}
+}
+
+// knownTags is the set of all valid tag names used by builtin rules.
+// Built once at init from builtinRuleTags. Used to validate tag_overrides keys.
+var knownTags map[string]bool
+
+func init() {
+	knownTags = make(map[string]bool)
+	for _, m := range builtinRuleTags() {
+		for _, tag := range m.tags {
+			knownTags[tag] = true
+		}
+	}
+}
+
+// IsKnownTag returns true if the tag is used by any builtin rule.
+func IsKnownTag(tag string) bool {
+	return knownTags[tag]
 }

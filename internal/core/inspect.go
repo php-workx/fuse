@@ -68,15 +68,32 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 		Exists: true,
 		Size:   info.Size(),
 	}
+	if !info.Mode().IsRegular() {
+		result.Decision = DecisionApproval
+		result.Reason = "non-regular file requires approval"
+		return result, nil
+	}
 
 	// 3. Check size and determine if truncation is needed.
 	truncated := info.Size() > maxBytes
 	result.Truncated = truncated
 
 	// 4. Read file content (up to maxBytes).
-	f, err := os.Open(resolved)
+	content, hash, err := readFileForInspection(resolved, maxBytes, truncated)
 	if err != nil {
 		return nil, err
+	}
+	result.Hash = hash
+
+	// 5. Dispatch to scanner and infer decision.
+	return dispatchScannerAndInfer(result, resolved, content, truncated)
+}
+
+// readFileForInspection reads the file content (up to maxBytes) and computes its SHA-256 hash.
+func readFileForInspection(resolved string, maxBytes int64, truncated bool) ([]byte, string, error) {
+	f, err := os.Open(resolved)
+	if err != nil {
+		return nil, "", err
 	}
 	defer func() { _ = f.Close() }()
 
@@ -86,23 +103,24 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 		content = make([]byte, maxBytes)
 		n, readErr := io.ReadFull(io.TeeReader(f, hasher), content)
 		if readErr != nil && readErr != io.ErrUnexpectedEOF {
-			return nil, readErr
+			return nil, "", readErr
 		}
 		content = content[:n]
 		if _, copyErr := io.Copy(hasher, f); copyErr != nil {
-			return nil, copyErr
+			return nil, "", copyErr
 		}
 	} else {
 		content, err = io.ReadAll(io.TeeReader(f, hasher))
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
+	return content, hex.EncodeToString(hasher.Sum(nil)), nil
+}
 
-	// 5. Compute SHA-256 hash of full file content.
-	result.Hash = hex.EncodeToString(hasher.Sum(nil))
-
-	// 6. Determine file type from extension and dispatch to scanner.
+// dispatchScannerAndInfer selects the scanner based on file extension, runs it,
+// and infers the decision from any detected signals.
+func dispatchScannerAndInfer(result *FileInspection, resolved string, content []byte, truncated bool) (*FileInspection, error) {
 	ext := strings.ToLower(filepath.Ext(resolved))
 
 	var signals []inspect.Signal
@@ -119,35 +137,30 @@ func InspectFile(path string, maxBytes int64) (*FileInspection, error) {
 		result.Reason = "unsupported file type"
 		return result, nil
 	default:
-		// Unknown extension, no scanner — treat with caution.
 		result.Decision = DecisionCaution
 		result.Reason = "unknown file type, no scanner available"
 		return result, nil
 	}
 
 	result.Signals = signals
+	inferSignalDecision(result, signals, truncated)
+	return result, nil
+}
 
-	// 7. Apply risk inference rules.
-
-	// Truncated with no signals in the inspected portion: APPROVAL.
+// inferSignalDecision sets the decision and reason on the result based on detected signals.
+func inferSignalDecision(result *FileInspection, signals []inspect.Signal, truncated bool) {
 	if truncated && len(signals) == 0 {
 		result.Decision = DecisionApproval
 		result.Reason = "file truncated, partial scan found no signals"
-		return result, nil
+		return
 	}
-
-	// No signals at all: SAFE.
 	if len(signals) == 0 {
 		result.Decision = DecisionSafe
 		result.Reason = "no signals detected"
-		return result, nil
+		return
 	}
-
-	// Signals present: use highest-severity signal category to decide.
 	result.Decision = inferDecisionFromSignals(signals)
 	result.Reason = "signals detected"
-
-	return result, nil
 }
 
 // inferDecisionFromSignals returns the decision based on the highest-severity
@@ -189,8 +202,8 @@ func DetectReferencedFile(subCommand string) string {
 		return ""
 	}
 
-	parts := strings.Fields(subCommand)
-	if len(parts) == 0 {
+	parts, unbalancedQuotes := tokenizeQuoteAware(subCommand)
+	if unbalancedQuotes || len(parts) == 0 {
 		return ""
 	}
 

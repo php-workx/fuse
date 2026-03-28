@@ -9,7 +9,7 @@ import (
 )
 
 // SplitCompoundCommand splits a display-normalized command string into
-// individual sub-commands by parsing it with a POSIX shell parser and
+// individual sub-commands by parsing it with a Bash-compatible shell parser and
 // walking the AST. It splits on ;, &&, ||, |, and newline-separated
 // commands (respecting quoting).
 //
@@ -18,7 +18,7 @@ import (
 //
 // A single command with no operators returns a slice of 1 element.
 func SplitCompoundCommand(displayNorm string) ([]string, error) {
-	parser := syntax.NewParser(syntax.Variant(syntax.LangPOSIX))
+	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	prog, err := parser.Parse(strings.NewReader(displayNorm), "")
 	if err != nil {
 		return nil, fmt.Errorf("shell parse error: %w", err)
