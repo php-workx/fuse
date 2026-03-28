@@ -84,7 +84,8 @@ func runTestClassify(command string) error {
 		fmt.Println()
 		fmt.Println("Sub-command Results")
 		fmt.Println("-------------------")
-		for i, sub := range result.SubResults {
+		for i := range result.SubResults {
+			sub := &result.SubResults[i]
 			fmt.Printf("  [%d] %s\n", i+1, sub.Command)
 			fmt.Printf("      Decision: %s\n", sub.Decision)
 			fmt.Printf("      Reason:   %s\n", sub.Reason)
