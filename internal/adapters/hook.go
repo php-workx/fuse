@@ -91,7 +91,12 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 	case code := <-resultCh:
 		return code
 	case <-ctx.Done():
-		fmt.Fprintln(stderr, pendingApprovalMessage())
+		if runtime.GOOS == "windows" {
+			fmt.Fprintln(stderr, "fuse: hook timed out. The command could not be classified in time. "+
+				"Do not retry — this may indicate the command requires approval which is not yet supported on Windows.")
+		} else {
+			fmt.Fprintln(stderr, pendingApprovalMsg)
+		}
 		return 2
 	}
 }

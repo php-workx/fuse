@@ -4,6 +4,7 @@ package adapters
 
 import (
 	"os"
+	"strings"
 	"syscall"
 )
 
@@ -33,6 +34,10 @@ func isValidWindowsRoot(path string) bool {
 	}
 	// Third char must be backslash
 	if path[2] != '\\' {
+		return false
+	}
+	// Reject path traversal sequences
+	if strings.Contains(path, "..") {
 		return false
 	}
 	return true

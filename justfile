@@ -253,6 +253,7 @@ build-darwin:
     GOOS=darwin GOARCH=arm64 go build -ldflags '{{ldflags}}' -o bin/fuse-darwin-arm64 ./cmd/fuse
 
 build-windows:
+    mkdir -p bin
     GOOS=windows GOARCH=amd64 go build -ldflags '{{ldflags}}' -o bin/fuse-windows-amd64.exe ./cmd/fuse
     GOOS=windows GOARCH=arm64 go build -ldflags '{{ldflags}}' -o bin/fuse-windows-arm64.exe ./cmd/fuse
 

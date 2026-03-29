@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -120,10 +119,10 @@ func readApprovalDecision(ctx context.Context, tty *os.File, deadline time.Time,
 
 		n, err := tty.Read(buf)
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, syscall.EIO) {
-				return false, "", fmt.Errorf("tty closed: %w", err)
+			if errors.Is(err, syscall.EINTR) {
+				continue // interrupted by signal — retry
 			}
-			continue
+			return false, "", fmt.Errorf("tty read: %w", err)
 		}
 		if n == 0 {
 			continue
@@ -195,10 +194,10 @@ func readScope(ctx context.Context, tty *os.File, deadline time.Time, sigCh <-ch
 
 		n, err := tty.Read(buf)
 		if err != nil {
-			if errors.Is(err, io.EOF) || errors.Is(err, syscall.EIO) {
-				return "", true
+			if errors.Is(err, syscall.EINTR) {
+				continue // interrupted by signal — retry
 			}
-			continue
+			return "", true // tty error — deny
 		}
 		if n == 0 {
 			continue

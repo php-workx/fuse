@@ -71,7 +71,9 @@ func splitSimpleCompound(displayNorm string) []string {
 			inDouble = !inDouble
 			current.WriteByte(ch)
 		case !inSingle && !inDouble && (ch == ';' || ch == '|' || ch == '&'):
-			// Split point — flush the current sub-command.
+			// Split on command separators. In CMD, & and && are separators.
+			// In PowerShell, & is the call operator, but splitting on it is
+			// conservative (the called executable still gets classified).
 			sub := strings.TrimSpace(current.String())
 			if sub != "" {
 				result = append(result, sub)

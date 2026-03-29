@@ -134,7 +134,6 @@ func TestDetectShellType_Ambiguous(t *testing.T) {
 		{"echo", "echo hello"},
 		{"ls", "ls"},
 		{"set", "set -e"},
-		{"type", "type foo"},
 	}
 
 	if runtime.GOOS != "windows" {

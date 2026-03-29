@@ -281,7 +281,7 @@ var HardcodedBlocked = []HardcodedRule{
 
 	// CMD destructive — del /s /q or rd /s /q targeting catastrophic paths
 	{
-		Pattern:   regexp.MustCompile(`(?i)\b(del|rd|rmdir)\b.*/[sqSQ]`),
+		Pattern:   regexp.MustCompile(`(?i)\b(del|rd|rmdir)\b.*\s/[sqSQ]\b`),
 		Reason:    "CMD recursive deletion of system directory",
 		Predicate: isWindowsCatastrophicTarget,
 	},
