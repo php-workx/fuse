@@ -300,8 +300,7 @@ func TestBuildChildEnv_COMPLUSPrefix(t *testing.T) {
 // constructing inputs that exercise it directly.
 func TestBuildChildEnv_CaseNormalization(t *testing.T) {
 	// comspec=evil.exe — lowercase variant of a stripped Windows var.
-	// On Windows the lookupName becomes "COMSPEC" (in strippedEnvVars).
-	// On non-Windows it is not in strippedEnvVars and will pass through.
+	// Lookup is always uppercased, so "comspec" → "COMSPEC" matches the map on all platforms.
 	inputComspec := []string{"comspec=evil.exe", "SAFE=keep"}
 	resultComspec := BuildChildEnv(inputComspec)
 	comspecFound := false
@@ -310,14 +309,8 @@ func TestBuildChildEnv_CaseNormalization(t *testing.T) {
 			comspecFound = true
 		}
 	}
-	if runtime.GOOS == "windows" {
-		if comspecFound {
-			t.Error("comspec= (lowercase) should be stripped on Windows but was present")
-		}
-	} else {
-		if !comspecFound {
-			t.Error("comspec= should be preserved on non-Windows but was missing")
-		}
+	if comspecFound {
+		t.Error("comspec= should be stripped (uppercased lookup matches COMSPEC) but was present")
 	}
 
 	// Path=/attacker/bin — title-case PATH variant seen in Windows os.Environ output.

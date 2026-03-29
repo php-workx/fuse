@@ -78,8 +78,9 @@ func executeCapturedShellCommandWithStdin(ctx context.Context, command, cwd stri
 	}
 	if err != nil {
 		return commandExecution{
-			Stdout: stdoutBuf.String(),
-			Stderr: stderrBuf.String(),
+			Stdout:   stdoutBuf.String(),
+			Stderr:   stderrBuf.String(),
+			ExitCode: exitCode,
 		}, err
 	}
 

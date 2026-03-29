@@ -26,25 +26,21 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 
 	// Check if stdin is a terminal using the platform-specific ioctl.
 	if _, termErr := unix.IoctlGetTermios(fd, ioctlGetTermios); termErr != nil {
-		// Not a terminal — nothing to do.
-		return nil, nil
+		// Not a terminal — nothing to do. termErr is an expected "not a tty"
+		// condition, not a failure, so returning nil error is correct.
+		return nil, nil //nolint:nilerr // termErr means not-a-tty, which is a valid no-op
 	}
 
 	// Suppress SIGTTOU before acquiring the lock to eliminate the window
 	// where a SIGTTOU could arrive with the lock held but signal not yet ignored.
 	signal.Ignore(syscall.SIGTTOU)
 
-	unlocked := false
 	ttyOwnershipMu.Lock()
-	defer func() {
-		if !unlocked {
-			ttyOwnershipMu.Unlock()
-		}
-	}()
 
 	// Get the current foreground process group.
 	origPgrp, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
 	if err != nil {
+		ttyOwnershipMu.Unlock()
 		signal.Reset(syscall.SIGTTOU)
 		return nil, fmt.Errorf("get foreground pgrp: %w", err)
 	}
@@ -52,6 +48,7 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 	// Set the child's process group as the foreground group.
 	childPgrp := pid
 	if err := unix.IoctlSetInt(fd, unix.TIOCSPGRP, childPgrp); err != nil {
+		ttyOwnershipMu.Unlock()
 		signal.Reset(syscall.SIGTTOU)
 		return nil, fmt.Errorf("set child foreground pgrp: %w", err)
 	}
@@ -59,7 +56,6 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 	restore = func() {
 		_ = unix.IoctlSetInt(fd, unix.TIOCSPGRP, origPgrp)
 		signal.Reset(syscall.SIGTTOU)
-		unlocked = true
 		ttyOwnershipMu.Unlock()
 	}
 

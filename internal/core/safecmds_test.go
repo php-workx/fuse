@@ -756,31 +756,3 @@ func TestIsPowerShellCmdletSafe(t *testing.T) {
 		t.Error("Invoke-Expression should NOT be conditionally safe")
 	}
 }
-
-func TestCanonicalizePSCmdlet(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{"get-childitem", "Get-Childitem"},
-		{"GET-PROCESS", "Get-Process"},
-		{"Test-Path", "Test-Path"},
-		{"write-output", "Write-Output"},
-		{"FORMAT-TABLE", "Format-Table"},
-		// Non-cmdlet strings should pass through unchanged.
-		{"ls", "ls"},
-		{"nodash", "nodash"},
-		// Edge: empty parts should pass through.
-		{"-Something", "-Something"},
-		{"Something-", "Something-"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			got := canonicalizePSCmdlet(tt.input)
-			if got != tt.want {
-				t.Errorf("canonicalizePSCmdlet(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}

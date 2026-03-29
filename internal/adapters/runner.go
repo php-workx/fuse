@@ -38,11 +38,11 @@ var strippedEnvVars = map[string]bool{
 	"BASH_ENV":        true,
 	"ENV":             true,
 	// Windows injection vectors (harmless no-ops on Unix).
+	// Keys are UPPERCASE for case-insensitive lookup via strings.ToUpper on Windows.
 	"COMSPEC":                     true, // Controls which shell runs commands.
-	"PSModulePath":                true, // PowerShell module loading path.
-	"PSMODULEPATH":                true, // Case variant seen on some Windows installs.
-	"PSExecutionPolicyPreference": true, // PowerShell execution policy override.
-	"COMPLUS_Version":             true, // .NET CLR version override.
+	"PSMODULEPATH":                true, // PowerShell module loading path.
+	"PSEXECUTIONPOLICYPREFERENCE": true, // PowerShell execution policy override.
+	"COMPLUS_VERSION":             true, // .NET CLR version override.
 	"JAVA_TOOL_OPTIONS":           true, // JVM startup flag injection.
 	"NODE_OPTIONS":                true, // Node.js startup flag injection.
 }
@@ -62,12 +62,9 @@ func BuildChildEnv(environ []string) []string {
 		name := parts[0]
 
 		// Strip dangerous variables.
-		// On Windows, env var names are case-insensitive, so normalize to upper-case
-		// for map lookup. Use a separate variable to preserve original casing in output.
-		lookupName := name
-		if runtime.GOOS == "windows" {
-			lookupName = strings.ToUpper(name)
-		}
+		// Normalize to upper-case for map lookup (all map keys are uppercase).
+		// Use a separate variable to preserve original casing in output and DYLD_ check.
+		lookupName := strings.ToUpper(name)
 		if strippedEnvVars[lookupName] || strings.HasPrefix(name, "DYLD_") {
 			continue
 		}

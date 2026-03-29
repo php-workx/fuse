@@ -144,14 +144,11 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 		return result
 	}
 
-	// Extract basename from first token if it contains '/' or '\'.
+	// Extract basename from first token if it contains path separators.
 	firstToken := tokens[i]
 	if strings.Contains(firstToken, "/") || strings.Contains(firstToken, `\`) {
-		firstToken = filepath.Base(firstToken)
-		// Handle Windows backslash paths on non-Windows platforms
-		if j := strings.LastIndex(firstToken, `\`); j >= 0 {
-			firstToken = firstToken[j+1:]
-		}
+		normalizedToken := strings.ReplaceAll(firstToken, `\`, "/")
+		firstToken = filepath.Base(normalizedToken)
 	}
 
 	// Check for bash -c / sh -c pattern.
@@ -341,11 +338,8 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 		// Extract basename if wrapper is invoked by path.
 		base := tok
 		if strings.Contains(tok, "/") || strings.Contains(tok, `\`) {
-			base = filepath.Base(tok)
-			// Handle Windows backslash paths on non-Windows platforms
-			if j := strings.LastIndex(base, `\`); j >= 0 {
-				base = base[j+1:]
-			}
+			normalizedTok := strings.ReplaceAll(tok, `\`, "/")
+			base = filepath.Base(normalizedTok)
 		}
 
 		if !wrapperBinaries[base] {

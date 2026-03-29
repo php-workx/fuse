@@ -129,21 +129,6 @@ func IsUnconditionalSafe(basename string) bool {
 	return false
 }
 
-// canonicalizePSCmdlet normalizes a PowerShell cmdlet to Title-Case form.
-// e.g. "get-childitem" → "Get-Childitem", "GET-PROCESS" → "Get-Process".
-func canonicalizePSCmdlet(s string) string {
-	parts := strings.SplitN(s, "-", 2)
-	if len(parts) != 2 {
-		return s
-	}
-	if parts[0] == "" || parts[1] == "" {
-		return s
-	}
-	verb := strings.ToUpper(parts[0][:1]) + strings.ToLower(parts[0][1:])
-	noun := strings.ToUpper(parts[1][:1]) + strings.ToLower(parts[1][1:])
-	return verb + "-" + noun
-}
-
 // IsUnconditionalSafeCmd returns true if the full command string matches either
 // a single-word unconditionally safe command or a multi-word safe prefix.
 func IsUnconditionalSafeCmd(fullCmd string) bool {

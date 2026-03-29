@@ -831,12 +831,9 @@ func extractBasename(cmd string) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	base := filepath.Base(fields[0])
-	// Handle Windows backslash paths on non-Windows platforms
-	if i := strings.LastIndex(base, `\`); i >= 0 {
-		base = base[i+1:]
-	}
-	return base
+	// Normalize backslashes to forward slashes for consistent cross-platform parsing.
+	normalizedPath := strings.ReplaceAll(fields[0], `\`, "/")
+	return filepath.Base(normalizedPath)
 }
 
 // resolvePath resolves a file path relative to a working directory.
