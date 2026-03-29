@@ -19,7 +19,7 @@ func TestUnconditionalSafe(t *testing.T) {
 		// Diff / compare
 		"diff", "colordiff", "vimdiff", "cmp",
 		// Environment
-		"date", "cal", "uname", "hostname", "whoami", "id", "groups",
+		"cal", "uname", "hostname", "whoami", "id", "groups",
 		"uptime", "free", "top", "htop", "ps", "pgrep", "lsof", "lsblk",
 		"mount",
 		// Help/docs

@@ -24,7 +24,7 @@ var unconditionalSafe = map[string]bool{
 	// Diff / compare
 	"diff": true, "colordiff": true, "vimdiff": true, "cmp": true,
 	// Environment
-	"date": true, "cal": true, "uname": true, "hostname": true, "whoami": true,
+	"cal": true, "uname": true, "hostname": true, "whoami": true,
 	"id": true, "groups": true, "uptime": true, "free": true, "top": true,
 	"htop": true, "ps": true, "pgrep": true, "lsof": true, "lsblk": true,
 	"mount": true,
@@ -65,7 +65,7 @@ var windowsSafeCmdlets = map[string]bool{
 var windowsSafeCMDBuiltins = map[string]bool{
 	"dir": true, "type": true, "echo": true,
 	"ver": true, "vol": true, "cls": true, "title": true,
-	"path": true, "where": true, "help": true,
+	"where": true, "help": true,
 	"hostname": true, "whoami": true, "systeminfo": true,
 	"tasklist": true, "findstr": true, "find": true, "more": true,
 	"sort": true, "fc": true, "comp": true, "tree": true,
@@ -152,9 +152,11 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 		}
 	}
 
-	// Check Windows-specific multi-word prefixes.
+	// Check Windows-specific multi-word prefixes (case-insensitive).
+	lowerNormalized := strings.ToLower(normalized)
 	for _, prefix := range windowsSafePrefixes {
-		if normalized == prefix || strings.HasPrefix(normalized, prefix+" ") {
+		lowerPrefix := strings.ToLower(prefix)
+		if lowerNormalized == lowerPrefix || strings.HasPrefix(lowerNormalized, lowerPrefix+" ") {
 			return true
 		}
 	}
@@ -203,6 +205,9 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 		return isRemoveItemSafe(fields)
 	case "set":
 		// CMD set without args displays env vars (safe); with args modifies them (dangerous).
+		return len(fields) == 1
+	case "path":
+		// CMD path without args displays PATH (safe); with args modifies command resolution (dangerous).
 		return len(fields) == 1
 	case "time", "date":
 		// CMD time/date without args or with /t displays value (safe); with args modifies (dangerous).

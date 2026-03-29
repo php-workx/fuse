@@ -69,7 +69,7 @@ func executeCapturedShellCommandWithStdin(ctx context.Context, command, cwd stri
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
-		return commandExecution{}, fmt.Errorf("start command: %w", err)
+		return commandExecution{ExitCode: -1}, fmt.Errorf("start command: %w", err)
 	}
 
 	exitCode, err := waitForManagedCommand(cmd)
