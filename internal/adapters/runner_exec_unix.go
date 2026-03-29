@@ -41,7 +41,11 @@ func executeShellCommand(command, cwd string, timeout time.Duration) (int, error
 		return -1, fmt.Errorf("start command: %w", err)
 	}
 
-	return waitForManagedCommand(cmd)
+	exitCode, err := waitForManagedCommand(cmd)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return -1, fmt.Errorf("command timed out: %w", ctxErr)
+	}
+	return exitCode, err
 }
 
 func executeCapturedShellCommandWithStdin(ctx context.Context, command, cwd string, timeout time.Duration, stdin io.Reader) (commandExecution, error) {

@@ -55,8 +55,8 @@ func ForegroundChildProcessGroupIfTTY(pid int) (restore func(), err error) {
 
 	restore = func() {
 		_ = unix.IoctlSetInt(fd, unix.TIOCSPGRP, origPgrp)
-		signal.Reset(syscall.SIGTTOU)
 		ttyOwnershipMu.Unlock()
+		signal.Reset(syscall.SIGTTOU)
 	}
 
 	return restore, nil // nosemgrep: missing-unlock-before-return -- unlock is in the restore closure, called by defer restore()
