@@ -824,15 +824,27 @@ func escalateDecision(d Decision, reason string) (Decision, string) {
 	}
 }
 
-// extractBasename returns the first whitespace-delimited token of a command,
+// extractBasename returns the first token of a command (quote-aware),
 // with any path components stripped.
 func extractBasename(cmd string) string {
-	fields := strings.Fields(cmd)
-	if len(fields) == 0 {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
 		return ""
 	}
+	// Extract first token, respecting quotes for paths like "C:\Program Files\...\pwsh.exe".
+	var firstToken string
+	if cmd[0] == '"' || cmd[0] == '\'' {
+		quote := cmd[0]
+		if end := strings.IndexByte(cmd[1:], quote); end >= 0 {
+			firstToken = cmd[1 : end+1]
+		} else {
+			firstToken = cmd[1:] // unmatched quote — use rest
+		}
+	} else {
+		firstToken = strings.Fields(cmd)[0]
+	}
 	// Normalize backslashes to forward slashes for consistent cross-platform parsing.
-	normalizedPath := strings.ReplaceAll(fields[0], `\`, "/")
+	normalizedPath := strings.ReplaceAll(firstToken, `\`, "/")
 	return filepath.Base(normalizedPath)
 }
 

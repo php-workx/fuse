@@ -13,7 +13,7 @@ func trustedPath() string {
 	if systemRoot == "" || !isValidWindowsRoot(systemRoot) {
 		systemRoot = `C:\Windows`
 	}
-	return systemRoot + `\System32;` + systemRoot + `;` + systemRoot + `\System32\Wbem`
+	return systemRoot + `\System32;` + systemRoot + `;` + systemRoot + `\System32\Wbem;` + systemRoot + `\System32\WindowsPowerShell\v1.0`
 }
 
 // isValidWindowsRoot checks that the path looks like a real Windows root (e.g., C:\Windows).

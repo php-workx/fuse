@@ -341,6 +341,8 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 			normalizedTok := strings.ReplaceAll(tok, `\`, "/")
 			base = filepath.Base(normalizedTok)
 		}
+		// Normalize for lookup: lowercase and strip .exe suffix (handles RUNAS.EXE, Sudo.exe, etc.)
+		base = strings.TrimSuffix(strings.ToLower(base), ".exe")
 
 		if !wrapperBinaries[base] {
 			break

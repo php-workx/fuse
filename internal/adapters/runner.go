@@ -135,6 +135,7 @@ func (rc *runContext) handleApprovalCommand() (int, error) {
 	if runtime.GOOS == "windows" {
 		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — approval not yet supported on Windows\n")
 		rc.logWithVerdict("blocked")
+		cleanupExecutionState(rc.database, rc.cfg)
 		return 1, nil
 	}
 
