@@ -197,6 +197,7 @@ func readScope(ctx context.Context, tty *os.File, deadline time.Time, sigCh <-ch
 			if errors.Is(err, syscall.EINTR) {
 				continue // interrupted by signal — retry
 			}
+			slog.Debug("tty read failed while selecting approval scope", "error", err)
 			return "", true // tty error — deny
 		}
 		if n == 0 {

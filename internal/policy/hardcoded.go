@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -36,7 +37,7 @@ func isWindowsCatastrophicTarget(cmd string) bool {
 	// Check for Windows environment variable patterns that expand to system dirs.
 	// CMD-style %VAR% and PowerShell $env: syntax are both checked.
 	for _, env := range []string{
-		"%systemroot%", "%programfiles%", "%userprofile%",
+		"%systemroot%", "%programfiles%", "%userprofile%", "%systemdrive%",
 		"$env:systemroot", "$env:programfiles", "$env:userprofile", "$env:systemdrive",
 	} {
 		if strings.Contains(lower, env) {
@@ -46,6 +47,14 @@ func isWindowsCatastrophicTarget(cmd string) bool {
 
 	// Normalize forward slashes to backslashes for consistent matching.
 	normalized := strings.ReplaceAll(lower, "/", `\`)
+
+	// Collapse path traversal sequences (e.g., C:\Windows\.. → C:\).
+	// Use filepath.Clean on each whitespace-delimited token to resolve .. components.
+	var cleanedTokens []string
+	for _, tok := range strings.Fields(normalized) {
+		cleanedTokens = append(cleanedTokens, filepath.Clean(tok))
+	}
+	normalized = strings.Join(cleanedTokens, " ")
 
 	// Check if any catastrophic path appears as a complete path (not as a prefix
 	// of a longer path like C:\Users\me\tmp). A catastrophic path match requires
@@ -302,15 +311,15 @@ var HardcodedBlocked = []HardcodedRule{
 		Reason:  "Cannot modify Claude Code hooks through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`(?i)(>|>>|tee|copy|move|Set-Content|Out-File|Add-Content|Tee-Object)\s+.*[/\\]?\.fuse[/\\]`),
+		Pattern: regexp.MustCompile(`(?i)(>|>>|tee|copy|move|Set-Content|Out-File|Add-Content|Tee-Object)\s+.*[/\\]?\.fuse([/\\]|$|\s)`),
 		Reason:  "Cannot modify fuse configuration through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`(?i)\b(Remove-Item|del|rm)\b.*[/\\]?\.claude[/\\]settings\.json`),
+		Pattern: regexp.MustCompile(`(?i)\b(Remove-Item|del|rm|rd|rmdir)\b.*[/\\]?\.claude[/\\]settings\.json`),
 		Reason:  "Cannot delete Claude Code settings through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`(?i)\b(Remove-Item|del|rm)\b.*[/\\]?\.fuse[/\\]`),
+		Pattern: regexp.MustCompile(`(?i)\b(Remove-Item|del|rm|rd|rmdir)\b.*[/\\]?\.fuse([/\\]|$|\s)`),
 		Reason:  "Cannot delete fuse files through mediated path",
 	},
 }

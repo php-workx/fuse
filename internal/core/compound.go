@@ -172,16 +172,11 @@ func ContainsCwdChange(subCommands []string) bool {
 		// Extract the first word (the command name).
 		first := firstWord(trimmed)
 
-		// Exact match for Unix builtins.
-		switch first {
-		case "cd", "pushd", "popd":
-			return true
-		}
-
-		// Case-insensitive match for PowerShell cmdlets and CMD aliases.
+		// Case-insensitive match for cwd-changing commands across all shells.
 		lower := strings.ToLower(first)
 		switch lower {
-		case "set-location", "sl", "push-location", "pop-location", "chdir":
+		case "cd", "pushd", "popd",
+			"set-location", "sl", "push-location", "pop-location", "chdir":
 			return true
 		}
 	}
