@@ -300,6 +300,18 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) SubCommandResult {
 	sub := SubCommandResult{Command: subCmd}
 
+	// Pre-normalization hardcoded check: the tokenizer treats backslashes as
+	// escape characters (Bash semantics), which mangles Windows paths like
+	// C:\Windows into C:Windows. Check hardcoded rules against the raw
+	// sub-command before normalization strips the backslashes.
+	if evaluator != nil {
+		if d, reason := evaluator.EvaluateHardcoded(subCmd); d != "" {
+			sub.Decision = d
+			sub.Reason = reason
+			return sub
+		}
+	}
+
 	// Step 4a: Classification normalize.
 	classified := ClassificationNormalize(subCmd)
 	fileInspection := inspectReferencedFile(subCmd, cwd)
@@ -307,10 +319,11 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 		sub.FileHash = fileInspection.Hash
 	}
 
-	// Fail-closed: if bash -c extraction failed, force APPROVAL.
+	// Fail-closed: if inner command extraction failed, force APPROVAL.
+	// This covers bash -c, powershell -EncodedCommand, powershell -File, etc.
 	if classified.ExtractionFailed {
 		sub.Decision = DecisionApproval
-		sub.Reason = "bash -c extraction failed (fail-closed)"
+		sub.Reason = "inner command extraction failed (fail-closed)"
 		sub.FailClosed = true
 		return sub
 	}
@@ -818,7 +831,12 @@ func extractBasename(cmd string) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	return filepath.Base(fields[0])
+	base := filepath.Base(fields[0])
+	// Handle Windows backslash paths on non-Windows platforms
+	if i := strings.LastIndex(base, `\`); i >= 0 {
+		base = base[i+1:]
+	}
+	return base
 }
 
 // resolvePath resolves a file path relative to a working directory.
@@ -1020,7 +1038,7 @@ func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd s
 	if classified.ExtractionFailed {
 		return extractedSubCommandResult{
 			decision:   DecisionApproval,
-			reason:     "inline bash -c extraction failed (fail-closed)",
+			reason:     "inline command extraction failed (fail-closed)",
 			failClosed: true,
 		}
 	}

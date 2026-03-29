@@ -14,7 +14,10 @@ Make the codebase compile on Windows. Produce a `.exe`. No new functionality —
 - GoReleaser, CI, and justfile need Windows targets added
 - Research complete: `.agents/research/2026-03-28-windows-compilation-blockers.md`
 
-**Done when:** `GOOS=windows go build ./...` succeeds, CI runs on `windows-latest`, GoReleaser produces `.exe`
+**Done when:**
+- `GOOS=windows go build ./...` succeeds
+- CI cross-compiles and vets with `GOOS=windows` on `ubuntu-latest` (chosen over `windows-latest` for cost and simplicity; runtime behaviour on real Windows is not tested in CI at this phase)
+- GoReleaser Windows `.exe` deferred pending code signing resolution (security review required before distributing unsigned Windows binaries)
 
 ## Phase 2: Shell Strategy
 
@@ -61,8 +64,10 @@ Replace Unix process groups with Windows job objects. Enables `fuse run` robustn
 Teach fuse to understand Windows-specific threats. Without this, fuse classifies Windows commands but doesn't catch Windows-native attacks.
 
 **Known scope:**
-- PowerShell attack patterns: `Invoke-Expression`, `-EncodedCommand`, `DownloadString`, `Add-MpPreference` (Defender exclusions)
+- PowerShell attack patterns: `Invoke-Expression`, `DownloadString`, `Add-MpPreference` (Defender exclusions), `New-Object Net.WebClient`, `IEX`, `.NET` method invocations
+- `-EncodedCommand` is already blocked unconditionally in Phase 2 hardcoded rules (base64 payload hides target). Phase 5 may add base64 decode + inspect for audit/reporting, but the block itself is in place.
 - CMD patterns: `certutil -decode`, `bitsadmin /transfer`, `reg add`, `schtasks /create`
+- LOLBins: `mshta`, `regsvr32`, `rundll32`, `cmstp`, `msiexec` with suspicious arguments
 - Windows path rules: `C:\Windows\System32`, `%APPDATA%`, credential stores, registry
 - Script inspection for `.ps1`, `.bat`, `.cmd` files
 - Existing Unix rules (reverse shells via `/dev/tcp`, `.bash_history`, `/etc/shadow`) are irrelevant on Windows

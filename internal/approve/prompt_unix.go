@@ -4,7 +4,10 @@ package approve
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -116,7 +119,13 @@ func readApprovalDecision(ctx context.Context, tty *os.File, deadline time.Time,
 		}
 
 		n, err := tty.Read(buf)
-		if err != nil || n == 0 {
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, syscall.EIO) {
+				return false, "", fmt.Errorf("tty closed: %w", err)
+			}
+			continue
+		}
+		if n == 0 {
 			continue
 		}
 
@@ -158,6 +167,7 @@ func openTTY(nonInteractive bool) (*os.File, error) {
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
+		slog.Debug("failed to open /dev/tty", "error", err)
 		return nil, errNonInteractive
 	}
 	return tty, nil
@@ -184,7 +194,13 @@ func readScope(ctx context.Context, tty *os.File, deadline time.Time, sigCh <-ch
 		}
 
 		n, err := tty.Read(buf)
-		if err != nil || n == 0 {
+		if err != nil {
+			if errors.Is(err, io.EOF) || errors.Is(err, syscall.EIO) {
+				return "", true
+			}
+			continue
+		}
+		if n == 0 {
 			continue
 		}
 

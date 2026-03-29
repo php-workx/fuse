@@ -870,6 +870,135 @@ func stringSliceEqual(a, b []string) bool {
 	return true
 }
 
+// ---------------------------------------------------------------------------
+// PowerShell / CMD / WSL normalization tests
+// ---------------------------------------------------------------------------
+
+func TestClassificationNormalize_PowerShellCommand(t *testing.T) {
+	got := ClassificationNormalize("powershell.exe -Command Get-Process")
+	if len(got.Inner) == 0 {
+		t.Fatal("expected Inner to be non-empty")
+	}
+	if got.Inner[0] != "Get-Process" {
+		t.Errorf("Inner[0] = %q, want %q", got.Inner[0], "Get-Process")
+	}
+}
+
+func TestClassificationNormalize_PowerShellNoProfile(t *testing.T) {
+	got := ClassificationNormalize("powershell.exe -NoProfile -NonInteractive -Command Get-Date")
+	if len(got.Inner) == 0 {
+		t.Fatal("expected Inner to be non-empty")
+	}
+	if got.Inner[0] != "Get-Date" {
+		t.Errorf("Inner[0] = %q, want %q", got.Inner[0], "Get-Date")
+	}
+}
+
+func TestClassificationNormalize_CmdC(t *testing.T) {
+	got := ClassificationNormalize("cmd.exe /c dir /s")
+	if len(got.Inner) == 0 {
+		t.Fatal("expected Inner to be non-empty")
+	}
+	if got.Inner[0] != "dir /s" {
+		t.Errorf("Inner[0] = %q, want %q", got.Inner[0], "dir /s")
+	}
+}
+
+func TestClassificationNormalize_BackslashPath(t *testing.T) {
+	// Use single quotes to preserve backslashes through the tokenizer
+	// (in real Windows usage, paths arrive via JSON/MCP where \ is literal).
+	got := ClassificationNormalize(`'C:\Windows\System32\cmd.exe' /c echo hi`)
+	// Basename should be cmd.exe; inner should contain "echo hi".
+	if !strings.Contains(got.Outer, "cmd.exe") {
+		t.Errorf("Outer = %q, want it to contain 'cmd.exe'", got.Outer)
+	}
+	if len(got.Inner) == 0 {
+		t.Fatal("expected Inner to be non-empty")
+	}
+	if got.Inner[0] != "echo hi" {
+		t.Errorf("Inner[0] = %q, want %q", got.Inner[0], "echo hi")
+	}
+}
+
+func TestClassificationNormalize_Runas(t *testing.T) {
+	got := ClassificationNormalize("runas /user:admin cmd.exe")
+	if !got.EscalateClassification {
+		t.Error("expected EscalateClassification to be true for runas")
+	}
+}
+
+func TestClassificationNormalize_EncodedCommand(t *testing.T) {
+	got := ClassificationNormalize("powershell -EncodedCommand ABC123")
+	if !got.ExtractionFailed {
+		t.Error("expected ExtractionFailed to be true for -EncodedCommand")
+	}
+}
+
+func TestClassificationNormalize_PowerShellAlias(t *testing.T) {
+	got := ClassificationNormalize(`powershell -Command rm -Recurse C:\`)
+	if len(got.Inner) == 0 {
+		t.Fatal("expected Inner to be non-empty")
+	}
+	// "rm" should be resolved to "Remove-Item" inside the inner command.
+	if !strings.Contains(got.Inner[0], "Remove-Item") {
+		t.Errorf("Inner[0] = %q, want it to contain 'Remove-Item' (alias resolved)", got.Inner[0])
+	}
+}
+
+func TestClassificationNormalize_WslWrapper(t *testing.T) {
+	got := ClassificationNormalize("wsl -e bash -c 'ls -la'")
+	if len(got.Inner) == 0 {
+		t.Fatal("expected Inner to be non-empty")
+	}
+	// The outer wrapper is wsl; inner should have the extracted command chain.
+	// wsl -e extracts "bash -c ls -la", which recursively extracts "ls -la".
+	foundLs := false
+	for _, inner := range got.Inner {
+		if strings.Contains(inner, "ls -la") {
+			foundLs = true
+			break
+		}
+	}
+	if !foundLs {
+		t.Errorf("Inner = %v, want at least one entry containing 'ls -la'", got.Inner)
+	}
+}
+
+func TestResolvePowerShellAlias(t *testing.T) {
+	tests := []struct {
+		alias string
+		want  string
+	}{
+		{"ls", "Get-ChildItem"},
+		{"dir", "Get-ChildItem"},
+		{"rm", "Remove-Item"},
+		{"cat", "Get-Content"},
+		{"iex", "Invoke-Expression"},
+		{"iwr", "Invoke-WebRequest"},
+		{"curl", "Invoke-WebRequest"},
+		{"wget", "Invoke-WebRequest"},
+		{"ps", "Get-Process"},
+		{"kill", "Stop-Process"},
+		{"cd", "Set-Location"},
+		{"cp", "Copy-Item"},
+		{"mv", "Move-Item"},
+		{"echo", "Write-Output"},
+		{"start", "Start-Process"},
+		// Not an alias — returned unchanged.
+		{"Get-Process", "Get-Process"},
+		{"unknown-binary", "unknown-binary"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.alias, func(t *testing.T) {
+			got := resolvePowerShellAlias(tt.alias)
+			if got != tt.want {
+				t.Errorf("resolvePowerShellAlias(%q) = %q, want %q", tt.alias, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestClassificationNormalize_SensitiveEnvAssignment(t *testing.T) {
 	tests := []struct {
 		name     string

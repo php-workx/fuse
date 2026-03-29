@@ -10,11 +10,11 @@ import (
 	"github.com/php-workx/fuse/internal/core"
 )
 
-// TestHardcoded_AllCompile verifies that all 21 hardcoded patterns are valid
+// TestHardcoded_AllCompile verifies that all 29 hardcoded patterns are valid
 // compiled regexes (they use MustCompile, so this also confirms the count).
 func TestHardcoded_AllCompile(t *testing.T) {
-	if len(HardcodedBlocked) != 21 {
-		t.Fatalf("expected 21 hardcoded rules, got %d", len(HardcodedBlocked))
+	if len(HardcodedBlocked) != 29 {
+		t.Fatalf("expected 29 hardcoded rules, got %d", len(HardcodedBlocked))
 	}
 	for i, r := range HardcodedBlocked {
 		if r.Pattern == nil {

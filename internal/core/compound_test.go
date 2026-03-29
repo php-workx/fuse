@@ -203,3 +203,211 @@ func TestContainsCwdChange(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitCompoundCommand_PowerShellPipeline(t *testing.T) {
+	result, err := SplitCompoundCommand("Get-Process | Sort-Object CPU")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 sub-commands, got %d: %v", len(result), result)
+	}
+	if result[0] != "Get-Process" {
+		t.Errorf("expected first sub-command %q, got %q", "Get-Process", result[0])
+	}
+	if result[1] != "Sort-Object CPU" {
+		t.Errorf("expected second sub-command %q, got %q", "Sort-Object CPU", result[1])
+	}
+}
+
+func TestSplitCompoundCommand_PowerShellSemicolon(t *testing.T) {
+	result, err := SplitCompoundCommand("Get-Date; Get-Location")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 sub-commands, got %d: %v", len(result), result)
+	}
+	if result[0] != "Get-Date" {
+		t.Errorf("expected first sub-command %q, got %q", "Get-Date", result[0])
+	}
+	if result[1] != "Get-Location" {
+		t.Errorf("expected second sub-command %q, got %q", "Get-Location", result[1])
+	}
+}
+
+func TestSplitCompoundCommand_CMDChain(t *testing.T) {
+	// CMD with syntax that fails the Bash parser: unmatched parenthesis in
+	// "cmd /c (dir /s" is invalid Bash but detected as CMD via the cmd /c prefix.
+	result, err := SplitCompoundCommand("cmd /c (dir /s & type file.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(result) != 2 {
+		t.Fatalf("expected 2 sub-commands, got %d: %v", len(result), result)
+	}
+	if result[0] != "cmd /c (dir /s" {
+		t.Errorf("expected first sub-command %q, got %q", "cmd /c (dir /s", result[0])
+	}
+	if result[1] != "type file.txt" {
+		t.Errorf("expected second sub-command %q, got %q", "type file.txt", result[1])
+	}
+}
+
+func TestSplitCompoundCommand_BashFallthrough(t *testing.T) {
+	// A command that fails Bash parsing and looks like PowerShell should use the fallback.
+	// "Get-Process | Where-Object { $_.CPU -gt 50 }" fails Bash parsing due to $_.CPU syntax
+	// but is detected as PowerShell due to Get-Process cmdlet.
+	result, err := SplitCompoundCommand("Get-Process | Where-Object { $_.CPU -gt 50 }")
+	if err != nil {
+		t.Fatalf("expected PowerShell fallback to succeed, got error: %v", err)
+	}
+	if len(result) == 0 {
+		t.Fatal("expected non-empty result from PowerShell fallback")
+	}
+
+	// A command that fails Bash parsing and looks like Bash should return an error
+	// (fail-closed behavior preserved).
+	_, err = SplitCompoundCommand("echo $(")
+	if err == nil {
+		t.Fatal("expected parse error for invalid Bash command, got nil")
+	}
+}
+
+func TestContainsCwdChange_PowerShell(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmds     []string
+		expected bool
+	}{
+		{
+			name:     "Set-Location",
+			cmds:     []string{"Set-Location C:\\Users"},
+			expected: true,
+		},
+		{
+			name:     "sl alias",
+			cmds:     []string{"sl C:\\Users"},
+			expected: true,
+		},
+		{
+			name:     "Push-Location",
+			cmds:     []string{"Push-Location /tmp"},
+			expected: true,
+		},
+		{
+			name:     "Pop-Location",
+			cmds:     []string{"Pop-Location"},
+			expected: true,
+		},
+		{
+			name:     "chdir CMD alias",
+			cmds:     []string{"chdir C:\\Users"},
+			expected: true,
+		},
+		{
+			name:     "case-insensitive set-location",
+			cmds:     []string{"set-location C:\\Users"},
+			expected: true,
+		},
+		{
+			name:     "case-insensitive SET-LOCATION",
+			cmds:     []string{"SET-LOCATION C:\\Users"},
+			expected: true,
+		},
+		{
+			name:     "PowerShell non-cwd command",
+			cmds:     []string{"Get-Process", "Sort-Object CPU"},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ContainsCwdChange(tt.cmds)
+			if got != tt.expected {
+				t.Errorf("ContainsCwdChange(%v) = %v, want %v", tt.cmds, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestSplitSimpleCompound(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "semicolon split",
+			input:    "echo a; echo b",
+			expected: []string{"echo a", "echo b"},
+		},
+		{
+			name:     "pipe split",
+			input:    "ls | grep foo",
+			expected: []string{"ls", "grep foo"},
+		},
+		{
+			name:     "ampersand split",
+			input:    "cmd1 & cmd2",
+			expected: []string{"cmd1", "cmd2"},
+		},
+		{
+			name:     "double ampersand splits into parts",
+			input:    "cmd1 && cmd2",
+			expected: []string{"cmd1", "cmd2"},
+		},
+		{
+			name:     "double pipe splits into parts",
+			input:    "cmd1 || cmd2",
+			expected: []string{"cmd1", "cmd2"},
+		},
+		{
+			name:     "quoted semicolon not split",
+			input:    `echo "a; b"`,
+			expected: []string{`echo "a; b"`},
+		},
+		{
+			name:     "single-quoted pipe not split",
+			input:    "echo 'a | b'",
+			expected: []string{"echo 'a | b'"},
+		},
+		{
+			name:     "mixed operators",
+			input:    "cmd1; cmd2 | cmd3 & cmd4",
+			expected: []string{"cmd1", "cmd2", "cmd3", "cmd4"},
+		},
+		{
+			name:     "single command no operators",
+			input:    "echo hello",
+			expected: []string{"echo hello"},
+		},
+		{
+			name:     "empty segments trimmed",
+			input:    "cmd1;; cmd2",
+			expected: []string{"cmd1", "cmd2"},
+		},
+		{
+			name:     "whitespace trimmed",
+			input:    "  cmd1  ;  cmd2  ",
+			expected: []string{"cmd1", "cmd2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := splitSimpleCompound(tt.input)
+			if len(got) != len(tt.expected) {
+				t.Fatalf("splitSimpleCompound(%q) = %v (len %d), want %v (len %d)",
+					tt.input, got, len(got), tt.expected, len(tt.expected))
+			}
+			for i := range got {
+				if got[i] != tt.expected[i] {
+					t.Errorf("splitSimpleCompound(%q)[%d] = %q, want %q",
+						tt.input, i, got[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}

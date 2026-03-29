@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/php-workx/fuse/internal/config"
@@ -163,13 +164,46 @@ func formatNativeFileCommand(toolName string, paths []string) string {
 }
 
 type filePathInfo struct {
-	raw      string
-	cleanRaw string
-	abs      string
-	slashRaw string
-	slashAbs string
-	homeDir  string
-	cwd      string
+	raw             string
+	cleanRaw        string
+	abs             string
+	slashRaw        string
+	slashAbs        string
+	homeDir         string
+	cwd             string
+	caseInsensitive bool // true on Windows: paths are compared case-insensitively
+}
+
+// pathContains checks if path contains substr, case-insensitive when ci is true.
+func pathContains(path, substr string, ci bool) bool {
+	if ci {
+		return strings.Contains(strings.ToLower(path), strings.ToLower(substr))
+	}
+	return strings.Contains(path, substr)
+}
+
+// pathHasSuffix checks if path ends with suffix, case-insensitive when ci is true.
+func pathHasSuffix(path, suffix string, ci bool) bool {
+	if ci {
+		return strings.HasSuffix(strings.ToLower(path), strings.ToLower(suffix))
+	}
+	return strings.HasSuffix(path, suffix)
+}
+
+// pathHasPrefix checks if path starts with prefix, case-insensitive when ci is true.
+func pathHasPrefix(path, prefix string, ci bool) bool {
+	if ci {
+		return strings.HasPrefix(strings.ToLower(path), strings.ToLower(prefix))
+	}
+	return strings.HasPrefix(path, prefix)
+}
+
+// pathEquals checks if two paths are equal, case-insensitive when ci is true.
+func pathEquals(a, b string, ci bool) bool {
+	if ci {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
 }
 
 func nativeFilePathInfo(path, cwd string) filePathInfo {
@@ -192,13 +226,14 @@ func nativeFilePathInfo(path, cwd string) filePathInfo {
 	// and recompose the path so containment checks use the real target.
 	resolved = evalSymlinksWithFallback(resolved)
 	return filePathInfo{
-		raw:      path,
-		cleanRaw: cleanRaw,
-		abs:      filepath.Clean(resolved),
-		slashRaw: filepath.ToSlash(cleanRaw),
-		slashAbs: filepath.ToSlash(filepath.Clean(resolved)),
-		homeDir:  evalSymlinksWithFallback(filepath.Clean(homeDir)),
-		cwd:      cleanCwd,
+		raw:             path,
+		cleanRaw:        cleanRaw,
+		abs:             filepath.Clean(resolved),
+		slashRaw:        filepath.ToSlash(cleanRaw),
+		slashAbs:        filepath.ToSlash(filepath.Clean(resolved)),
+		homeDir:         evalSymlinksWithFallback(filepath.Clean(homeDir)),
+		cwd:             cleanCwd,
+		caseInsensitive: runtime.GOOS == "windows",
 	}
 }
 
@@ -227,19 +262,20 @@ func evalSymlinksWithFallback(path string) string {
 
 func (p *filePathInfo) matchesRelative(want string) bool {
 	want = filepath.ToSlash(filepath.Clean(want))
-	return p.slashRaw == want || strings.HasPrefix(p.slashRaw, want+"/")
+	return pathEquals(p.slashRaw, want, p.caseInsensitive) ||
+		pathHasPrefix(p.slashRaw, want+"/", p.caseInsensitive)
 }
 
 func (p *filePathInfo) matchesAbsolute(want string) bool {
 	if want == "" {
 		return false
 	}
-	return p.slashAbs == filepath.ToSlash(filepath.Clean(want))
+	return pathEquals(p.slashAbs, filepath.ToSlash(filepath.Clean(want)), p.caseInsensitive)
 }
 
 func (p *filePathInfo) containsSegment(segment string) bool {
 	for _, s := range strings.Split(p.slashAbs, "/") {
-		if s == segment {
+		if pathEquals(s, segment, p.caseInsensitive) {
 			return true
 		}
 	}
@@ -248,10 +284,10 @@ func (p *filePathInfo) containsSegment(segment string) bool {
 
 func (p *filePathInfo) endsWithPathSuffix(suffix string) bool {
 	suffix = filepath.ToSlash(filepath.Clean(suffix))
-	return p.slashRaw == suffix ||
-		p.slashAbs == suffix ||
-		strings.HasSuffix(p.slashRaw, "/"+suffix) ||
-		strings.HasSuffix(p.slashAbs, "/"+suffix)
+	return pathEquals(p.slashRaw, suffix, p.caseInsensitive) ||
+		pathEquals(p.slashAbs, suffix, p.caseInsensitive) ||
+		pathHasSuffix(p.slashRaw, "/"+suffix, p.caseInsensitive) ||
+		pathHasSuffix(p.slashAbs, "/"+suffix, p.caseInsensitive)
 }
 
 func (p *filePathInfo) isClaudeSettingsPath() bool {
@@ -269,7 +305,12 @@ func (p *filePathInfo) isUnder(base string) bool {
 		return false
 	}
 	base = filepath.Clean(base)
-	rel, err := filepath.Rel(base, p.abs)
+	absPath := p.abs
+	if p.caseInsensitive {
+		base = strings.ToLower(base)
+		absPath = strings.ToLower(absPath)
+	}
+	rel, err := filepath.Rel(base, absPath)
 	if err != nil {
 		return false
 	}
@@ -277,11 +318,12 @@ func (p *filePathInfo) isUnder(base string) bool {
 }
 
 func (p *filePathInfo) hasBase(name string) bool {
-	return filepath.Base(p.cleanRaw) == name || filepath.Base(p.abs) == name
+	return pathEquals(filepath.Base(p.cleanRaw), name, p.caseInsensitive) ||
+		pathEquals(filepath.Base(p.abs), name, p.caseInsensitive)
 }
 
 func (p *filePathInfo) isGitHookPath() bool {
-	return p.matchesRelative(".git/hooks") || strings.Contains(p.slashAbs, "/.git/hooks/")
+	return p.matchesRelative(".git/hooks") || pathContains(p.slashAbs, "/.git/hooks/", p.caseInsensitive)
 }
 
 func (p *filePathInfo) isEnvFile() bool {
@@ -289,7 +331,8 @@ func (p *filePathInfo) isEnvFile() bool {
 	if base == "." || base == string(filepath.Separator) {
 		base = filepath.Base(p.abs)
 	}
-	return base == ".env" || strings.HasPrefix(base, ".env.")
+	return pathEquals(base, ".env", p.caseInsensitive) ||
+		pathHasPrefix(base, ".env.", p.caseInsensitive)
 }
 
 func (p *filePathInfo) hasSensitiveExtension() bool {

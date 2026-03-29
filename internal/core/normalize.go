@@ -34,12 +34,15 @@ var wrapperBinaries = map[string]bool{
 	"taskset": true,
 	"setsid":  true,
 	"chroot":  true,
+	// Windows wrapper
+	"runas": true,
 }
 
 // escalationWrappers trigger the EscalateClassification flag.
 var escalationWrappers = map[string]bool{
-	"sudo": true,
-	"doas": true,
+	"sudo":  true,
+	"doas":  true,
+	"runas": true,
 }
 
 // DisplayNormalize sanitizes a raw command string for display and approval hashing.
@@ -141,15 +144,42 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 		return result
 	}
 
-	// Extract basename from first token if it contains '/'.
+	// Extract basename from first token if it contains '/' or '\'.
 	firstToken := tokens[i]
-	if strings.Contains(firstToken, "/") {
+	if strings.Contains(firstToken, "/") || strings.Contains(firstToken, `\`) {
 		firstToken = filepath.Base(firstToken)
+		// Handle Windows backslash paths on non-Windows platforms
+		if j := strings.LastIndex(firstToken, `\`); j >= 0 {
+			firstToken = firstToken[j+1:]
+		}
 	}
 
 	// Check for bash -c / sh -c pattern.
 	if (firstToken == "bash" || firstToken == "sh") && i+1 < len(tokens) {
 		if handleBashC(tokens, i, depth, unbalancedQuotes, &result) {
+			return result
+		}
+	}
+
+	// Check for powershell / pwsh pattern.
+	lowerFirst := strings.ToLower(firstToken)
+	if (lowerFirst == "powershell.exe" || lowerFirst == "powershell" ||
+		lowerFirst == "pwsh.exe" || lowerFirst == "pwsh") && i+1 < len(tokens) {
+		if handlePowerShellCommand(tokens, i, depth, unbalancedQuotes, &result) {
+			return result
+		}
+	}
+
+	// Check for cmd.exe /c pattern.
+	if (lowerFirst == "cmd.exe" || lowerFirst == "cmd") && i+1 < len(tokens) {
+		if handleCmdC(tokens, i, depth, unbalancedQuotes, &result) {
+			return result
+		}
+	}
+
+	// Check for wsl wrapper pattern.
+	if (lowerFirst == "wsl.exe" || lowerFirst == "wsl") && i+1 < len(tokens) {
+		if handleWslCommand(tokens, i, depth, unbalancedQuotes, &result) {
 			return result
 		}
 	}
@@ -310,8 +340,12 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 		tok := tokens[i]
 		// Extract basename if wrapper is invoked by path.
 		base := tok
-		if strings.Contains(tok, "/") {
+		if strings.Contains(tok, "/") || strings.Contains(tok, `\`) {
 			base = filepath.Base(tok)
+			// Handle Windows backslash paths on non-Windows platforms
+			if j := strings.LastIndex(base, `\`); j >= 0 {
+				base = base[j+1:]
+			}
 		}
 
 		if !wrapperBinaries[base] {
@@ -346,6 +380,8 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 			i = skipChrootArgs(tokens, i)
 		case "setsid":
 			i = skipSetsidArgs(tokens, i)
+		case "runas":
+			i = skipRunasArgs(tokens, i)
 		default:
 			// command, nohup, time: no special flag handling needed
 		}
@@ -974,4 +1010,294 @@ func extractSSHRemoteCommand(tokens []string, i int) (string, bool) {
 	}
 
 	return "", false
+}
+
+// --- PowerShell alias resolution ---
+
+// powerShellAliases maps common PowerShell aliases and shorthand names to their
+// full cmdlet names. Used only when resolving inner commands of an explicit
+// powershell/pwsh invocation.
+var powerShellAliases = map[string]string{
+	"ls": "Get-ChildItem", "dir": "Get-ChildItem", "gci": "Get-ChildItem",
+	"cat": "Get-Content", "gc": "Get-Content", "type": "Get-Content",
+	"cd": "Set-Location", "chdir": "Set-Location", "sl": "Set-Location",
+	"cp": "Copy-Item", "copy": "Copy-Item", "cpi": "Copy-Item",
+	"mv": "Move-Item", "move": "Move-Item", "mi": "Move-Item",
+	"rm": "Remove-Item", "del": "Remove-Item", "rmdir": "Remove-Item", "rd": "Remove-Item", "ri": "Remove-Item",
+	"echo": "Write-Output", "write": "Write-Output",
+	"ps": "Get-Process", "gps": "Get-Process",
+	"kill": "Stop-Process", "spps": "Stop-Process",
+	"cls": "Clear-Host", "clear": "Clear-Host",
+	"man": "Get-Help", "help": "Get-Help",
+	"where":   "Where-Object",
+	"select":  "Select-Object",
+	"sort":    "Sort-Object",
+	"measure": "Measure-Object",
+	"iwr":     "Invoke-WebRequest", "wget": "Invoke-WebRequest", "curl": "Invoke-WebRequest",
+	"iex":  "Invoke-Expression",
+	"sal":  "Set-Alias",
+	"saps": "Start-Process", "start": "Start-Process",
+}
+
+// resolvePowerShellAlias returns the canonical PowerShell cmdlet name for
+// a known alias, or the original token unchanged if it is not an alias.
+func resolvePowerShellAlias(token string) string {
+	// PowerShell aliases are case-insensitive.
+	if cmdlet, ok := powerShellAliases[strings.ToLower(token)]; ok {
+		return cmdlet
+	}
+	return token
+}
+
+// --- Runas flag skipping ---
+
+// skipRunasArgs skips runas flags. runas /user:admin cmd.exe ...
+func skipRunasArgs(tokens []string, i int) int {
+	for i < len(tokens) {
+		t := tokens[i]
+		if !strings.HasPrefix(t, "/") {
+			break
+		}
+		// /user:X, /profile, /env, /netonly, /savecred, /smartcard, /noprofile
+		// All start with / and are runas flags.
+		i++
+	}
+	return i
+}
+
+// --- PowerShell command handling ---
+
+// skipPowerShellArgs skips PowerShell invocation flags.
+// Returns the index of the first token that is part of the inner command.
+// If -EncodedCommand is found, sets result.ExtractionFailed = true and returns
+// past the end of tokens (fail-closed, pm-20260328-107).
+// If -Command is found, returns the index of the next token (start of inner command).
+func skipPowerShellArgs(tokens []string, i int, result *ClassifiedCommand) int {
+	// PowerShell flags that take a value argument (case-insensitive).
+	psValueFlags := []string{
+		"-ExecutionPolicy", "-OutputFormat", "-WindowStyle",
+	}
+
+	// PowerShell flags that are standalone (no value).
+	psStandaloneFlags := []string{
+		"-NoProfile", "-NonInteractive", "-NoLogo", "-NoExit",
+		"-Sta", "-Mta",
+	}
+
+	for i < len(tokens) {
+		t := tokens[i]
+
+		// -Command: remaining tokens are the inner command.
+		if strings.EqualFold(t, "-Command") {
+			i++ // skip the -Command flag itself
+			return i
+		}
+
+		// -EncodedCommand: opaque Base64 — fail-closed.
+		if strings.EqualFold(t, "-EncodedCommand") {
+			result.ExtractionFailed = true
+			return len(tokens) // stop processing
+		}
+
+		// -File: script content is in the file, not the command line — fail-closed.
+		if strings.EqualFold(t, "-File") {
+			result.ExtractionFailed = true
+			return len(tokens) // stop processing
+		}
+
+		// Check standalone flags.
+		matched := false
+		for _, flag := range psStandaloneFlags {
+			if strings.EqualFold(t, flag) {
+				i++
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+
+		// Check value flags (consume flag + next token).
+		for _, flag := range psValueFlags {
+			if strings.EqualFold(t, flag) {
+				i += 2
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+
+		// Unknown flag or start of positional arguments — stop.
+		break
+	}
+	return i
+}
+
+// handlePowerShellCommand processes powershell/pwsh -Command inner command extraction.
+// Returns true if the result was fully resolved.
+func handlePowerShellCommand(tokens []string, i, depth int, unbalancedQuotes bool, result *ClassifiedCommand) bool {
+	if i+1 >= len(tokens) {
+		return false
+	}
+
+	j := i + 1 // skip the powershell/pwsh token
+	innerStart := skipPowerShellArgs(tokens, j, result)
+
+	// If ExtractionFailed was set by -EncodedCommand, record outer and return.
+	if result.ExtractionFailed {
+		result.Outer = strings.Join(tokens[i:], " ")
+		return true
+	}
+
+	if innerStart >= len(tokens) {
+		return false
+	}
+
+	innerCmd := strings.Join(tokens[innerStart:], " ")
+	if innerCmd == "" {
+		return false
+	}
+
+	// Resolve PowerShell aliases in the inner command.
+	innerTokens := strings.Fields(innerCmd)
+	if len(innerTokens) > 0 {
+		innerTokens[0] = resolvePowerShellAlias(innerTokens[0])
+		innerCmd = strings.Join(innerTokens, " ")
+	}
+
+	result.Outer = strings.Join(tokens[i:], " ")
+
+	if depth < maxRecursionDepth && !unbalancedQuotes {
+		innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
+		result.Inner = append(result.Inner, innerCmd)
+		result.Inner = append(result.Inner, innerResult.Inner...)
+		if innerResult.EscalateClassification {
+			result.EscalateClassification = true
+		}
+	} else {
+		result.Inner = append(result.Inner, innerCmd)
+	}
+	return true
+}
+
+// --- CMD command handling ---
+
+// skipCmdArgs skips CMD flags.
+// Returns the index of the first token that is part of the inner command.
+// When /c or /k is found, returns the index of the next token.
+func skipCmdArgs(tokens []string, i int) int {
+	for i < len(tokens) {
+		t := strings.ToLower(tokens[i])
+		switch t {
+		case "/c", "/k":
+			i++ // skip the flag; remaining tokens are the inner command
+			return i
+		case "/s", "/q", "/d", "/a", "/u",
+			"/e:on", "/e:off", "/v:on", "/v:off":
+			i++
+			continue
+		}
+		// Unknown flag or start of inner command — stop.
+		break
+	}
+	return i
+}
+
+// handleCmdC processes cmd /c inner command extraction.
+// Returns true if the result was fully resolved.
+func handleCmdC(tokens []string, i, depth int, unbalancedQuotes bool, result *ClassifiedCommand) bool {
+	if i+1 >= len(tokens) {
+		return false
+	}
+
+	j := i + 1 // skip the cmd/cmd.exe token
+	innerStart := skipCmdArgs(tokens, j)
+
+	if innerStart >= len(tokens) {
+		return false
+	}
+
+	innerCmd := strings.Join(tokens[innerStart:], " ")
+	if innerCmd == "" {
+		return false
+	}
+
+	result.Outer = strings.Join(tokens[i:], " ")
+
+	if depth < maxRecursionDepth && !unbalancedQuotes {
+		innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
+		result.Inner = append(result.Inner, innerCmd)
+		result.Inner = append(result.Inner, innerResult.Inner...)
+		if innerResult.EscalateClassification {
+			result.EscalateClassification = true
+		}
+	} else {
+		result.Inner = append(result.Inner, innerCmd)
+	}
+	return true
+}
+
+// --- WSL command handling ---
+
+// handleWslCommand processes wsl wrapper command extraction.
+// Patterns: wsl -e bash -c "...", wsl -- command, wsl command.
+// Returns true if the result was fully resolved.
+func handleWslCommand(tokens []string, i, depth int, unbalancedQuotes bool, result *ClassifiedCommand) bool {
+	if i+1 >= len(tokens) {
+		return false
+	}
+
+	j := i + 1 // skip the wsl/wsl.exe token
+
+	// Skip WSL flags.
+	for j < len(tokens) {
+		t := tokens[j]
+		if t == "--" {
+			j++ // skip the --
+			break
+		}
+		// -d <distro>, -u <user>: flags that take a value.
+		if t == "-d" || t == "-u" {
+			j += 2
+			continue
+		}
+		// -e: execute command (remaining tokens are the command).
+		if t == "-e" {
+			j++
+			break
+		}
+		// Other flags starting with -.
+		if strings.HasPrefix(t, "-") {
+			j++
+			continue
+		}
+		// First non-flag token: start of the inner command.
+		break
+	}
+
+	if j >= len(tokens) {
+		return false
+	}
+
+	innerCmd := strings.Join(tokens[j:], " ")
+	if innerCmd == "" {
+		return false
+	}
+
+	result.Outer = strings.Join(tokens[i:], " ")
+
+	if depth < maxRecursionDepth && !unbalancedQuotes {
+		innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
+		result.Inner = append(result.Inner, innerCmd)
+		result.Inner = append(result.Inner, innerResult.Inner...)
+		if innerResult.EscalateClassification {
+			result.EscalateClassification = true
+		}
+	} else {
+		result.Inner = append(result.Inner, innerCmd)
+	}
+	return true
 }

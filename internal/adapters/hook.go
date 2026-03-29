@@ -331,7 +331,7 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 
 // handleApproval handles the APPROVAL decision path, which requires DB access.
 func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge.Verdict, stderr io.Writer, cfg *config.Config, dryRun bool) int {
-	// Phase 1: no approval mechanism on Windows. Short-circuit before opening
+	// No approval mechanism on Windows yet. Short-circuit before opening
 	// the DB or starting the approval manager — there is no TUI to resolve the
 	// request, so polling would just hang for the full hook timeout (~298s).
 	// Remove when Phase 3 adds Console API or web-based approval.

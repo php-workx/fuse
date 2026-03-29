@@ -69,6 +69,13 @@ func executeCapturedShellCommandWithStdin(ctx context.Context, command, cwd stri
 	}
 
 	exitCode, err := waitForManagedCommand(cmd)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return commandExecution{
+			Stdout:   stdoutBuf.String(),
+			Stderr:   stderrBuf.String(),
+			ExitCode: -1,
+		}, fmt.Errorf("command timed out: %w", ctxErr)
+	}
 	if err != nil {
 		return commandExecution{
 			Stdout: stdoutBuf.String(),
@@ -117,10 +124,8 @@ func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 func forwardSignals(pid int, sigCh <-chan os.Signal, done <-chan struct{}) {
 	for {
 		select {
-		case sig, ok := <-sigCh:
-			if !ok {
-				return
-			}
+		case sig := <-sigCh:
+			// signal.Stop does not close sigCh; goroutine exits via <-done.
 			sysSig, isSyscall := sig.(syscall.Signal)
 			if !isSyscall {
 				continue

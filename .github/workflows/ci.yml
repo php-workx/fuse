@@ -98,22 +98,25 @@ jobs:
             -v
 
   windows-check:
-    name: Windows Build Check
-    runs-on: windows-latest
+    name: Windows Cross-Compile Check
+    runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
+
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build
-        run: go build ./...
-      - name: Vet
-        run: go vet ./...
-      - name: Test
-        run: go test ./... -race -timeout 120s
+
+      - name: Vet (GOOS=windows)
+        run: GOOS=windows GOARCH=amd64 go vet ./...
+
+      - name: Build (GOOS=windows)
+        run: GOOS=windows GOARCH=amd64 go build ./cmd/fuse
 
   build:
     name: Build

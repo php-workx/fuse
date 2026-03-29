@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -37,10 +38,13 @@ var strippedEnvVars = map[string]bool{
 	"BASH_ENV":        true,
 	"ENV":             true,
 	// Windows injection vectors (harmless no-ops on Unix).
-	"COMSPEC":           true, // Controls which shell runs commands.
-	"PSModulePath":      true, // PowerShell module loading path.
-	"JAVA_TOOL_OPTIONS": true, // JVM startup flag injection.
-	"NODE_OPTIONS":      true, // Node.js startup flag injection.
+	"COMSPEC":                     true, // Controls which shell runs commands.
+	"PSModulePath":                true, // PowerShell module loading path.
+	"PSMODULEPATH":                true, // Case variant seen on some Windows installs.
+	"PSExecutionPolicyPreference": true, // PowerShell execution policy override.
+	"COMPLUS_Version":             true, // .NET CLR version override.
+	"JAVA_TOOL_OPTIONS":           true, // JVM startup flag injection.
+	"NODE_OPTIONS":                true, // Node.js startup flag injection.
 }
 
 // BuildChildEnv sanitizes the environment for child process execution.
@@ -58,12 +62,25 @@ func BuildChildEnv(environ []string) []string {
 		name := parts[0]
 
 		// Strip dangerous variables.
-		if strippedEnvVars[name] || strings.HasPrefix(name, "DYLD_") {
+		// On Windows, env var names are case-insensitive, so normalize to upper-case
+		// for map lookup. Use a separate variable to preserve original casing in output.
+		lookupName := name
+		if runtime.GOOS == "windows" {
+			lookupName = strings.ToUpper(name)
+		}
+		if strippedEnvVars[lookupName] || strings.HasPrefix(name, "DYLD_") {
+			continue
+		}
+
+		// Strip .NET CLR injection vectors on Windows (COMPLUS_* prefix).
+		// Windows env var names are case-insensitive, so use ToUpper for the check.
+		if runtime.GOOS == "windows" && strings.HasPrefix(strings.ToUpper(name), "COMPLUS_") {
 			continue
 		}
 
 		// Replace PATH with trusted platform-specific path.
-		if name == "PATH" {
+		// Use EqualFold to handle title-case "Path" seen in Windows os.Environ output.
+		if strings.EqualFold(name, "PATH") {
 			result = append(result, "PATH="+trustedPath())
 			pathSet = true
 			continue
@@ -116,6 +133,12 @@ func (rc *runContext) handleApprovalCommand() (int, error) {
 	if rc.dryRun {
 		rc.logWithVerdict("dry-run")
 		return 0, nil
+	}
+
+	if runtime.GOOS == "windows" {
+		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — approval not yet supported on Windows\n")
+		rc.logWithVerdict("blocked")
+		return 1, nil
 	}
 
 	if rc.database == nil {

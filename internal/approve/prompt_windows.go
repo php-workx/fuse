@@ -4,9 +4,11 @@ package approve
 
 import "context"
 
-// PromptUser is not yet implemented on Windows (planned: Phase 3).
-// Returns errNonInteractive, which causes RequestApproval to fall back to
-// DB polling. If no TUI resolves the request, the command is BLOCKED.
+// PromptUser on Windows returns errNonInteractive immediately.
+// This stub is only reached from run mode (runner.go handleApprovalCommand).
+// Hook mode short-circuits at hook.go handleApproval before calling
+// RequestApproval, so this function is never invoked from the hook path.
+// Planned replacement: Phase 3 (Windows Console API prompts).
 func PromptUser(_ context.Context, _, _ string, _, _ bool) (bool, string, error) {
 	return false, "", errNonInteractive
 }
