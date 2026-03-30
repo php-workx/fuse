@@ -69,9 +69,9 @@ func TestRenderPromptPlain_RendersContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create temp file: %v", err)
 	}
-	defer func() { _ = f.Close() }()
 
 	renderPromptPlain(f, "echo hello", "test reason")
+	_ = f.Close()
 
 	content, err := os.ReadFile(f.Name())
 	if err != nil {
