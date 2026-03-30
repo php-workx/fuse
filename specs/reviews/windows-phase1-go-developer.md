@@ -137,7 +137,7 @@ cmd.Env = append(filtered, "GOOS=windows", "GOARCH=amd64")
 The test runs `exec.Command("go", "build", "./...")` which builds relative to the test's working directory (`internal/adapters/`), not the repo root. This means it would only test the `adapters` package, not the entire binary. To verify the full binary compiles, it should build `./cmd/fuse` from the repo root.
 
 **Severity:** WARN
-**Recommendation:** Set `cmd.Dir` to the repo root (use `runtime.GOROOT()` or derive from the test file path), or change the build target:
+**Recommendation:** Set `cmd.Dir` to the repo root (derive from the test file path), or change the build target:
 ```go
 // Find the module root.
 root := filepath.Join("..", "..")

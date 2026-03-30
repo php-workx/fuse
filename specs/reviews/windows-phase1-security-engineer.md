@@ -5,7 +5,7 @@
 **Documents reviewed:**
 - `.agents/plans/2026-03-28-windows-foundation.md` (Phase 1 implementation plan)
 - `specs/windows-support-plan.md` (overall 5-phase roadmap)
-- Source files: `approve/prompt.go`, `approve/manager.go`, `adapters/hook.go`, `adapters/runner.go`, `adapters/codexshell.go`, `core/classify.go`, `policy/builtins_security.go`, `policy/hardcoded.go`, `core/normalize.go`, `core/compound.go`, `core/safecmds.go`
+- Source files: `internal/approve/prompt.go`, `internal/approve/manager.go`, `internal/adapters/hook.go`, `internal/adapters/runner.go`, `internal/adapters/codexshell.go`, `internal/core/classify.go`, `internal/policy/builtins_security.go`, `internal/policy/hardcoded.go`, `internal/core/normalize.go`, `internal/core/compound.go`, `internal/core/safecmds.go`
 
 ---
 
@@ -176,7 +176,7 @@ During step 2, the agent receives `pendingApprovalMsg` which says "wait 30-60 se
 |-----|---------|
 | Named pipe / COM object abuse | Not mentioned in Phase 5 scope. PowerShell can create COM objects (`New-Object -ComObject ...`) for privilege escalation and lateral movement. |
 | WMI command execution | `Get-WmiObject`, `Invoke-WmiMethod`, `wmic` are not mentioned. These are common living-off-the-land techniques. |
-| .NET method invocation via PowerShell | `[System.Net.WebClient]::new().DownloadString(...)` is functionally equivalent to `curl | bash` but uses .NET types, not commands. |
+| .NET method invocation via PowerShell | `[System.Net.WebClient]::new().DownloadString(...)` is functionally equivalent to `curl \| bash` but uses .NET types, not commands. |
 | Windows Event Log tampering | `wevtutil cl Security` clears the security event log. Not listed in Phase 5 scope. |
 | DLL sideloading via PATH manipulation | Windows DLL search order is different from Unix library loading. `PATH=` manipulation on Windows can cause DLL sideloading. The `trustedPath` mechanism partially addresses this but is currently stubbed. |
 

@@ -23,14 +23,13 @@ Make the codebase compile on Windows. Produce a `.exe`. No new functionality —
 
 Decide how fuse executes and classifies commands on Windows. This is the most consequential design decision — everything downstream depends on it.
 
-**Open questions:**
-- PowerShell, CMD, or both?
-- How does normalization work for PowerShell syntax? (cmdlets, pipelines, aliases)
-- Does `fuse run` invoke `cmd.exe /c` or `powershell.exe -Command`?
-- How do Claude Code and Codex invoke shells on Windows?
-- What does the safe-command list look like on Windows?
+**Resolved (implemented in PR #10):**
+- Both PowerShell and CMD are supported. `DetectShellType` heuristic classifies commands; PowerShell is the default for ambiguous input on Windows.
+- Normalization extracts inner commands from `powershell.exe -Command ...` and `cmd.exe /c ...` wrappers, resolves PowerShell aliases (scoped to wrapper context), and handles backslash paths.
+- `fuse run` dispatches to `powershell.exe -NoProfile -NonInteractive -Command` or `cmd.exe /c` based on detected shell type.
+- Safe-command list includes ~50 PowerShell cmdlets (Get-*, Test-*, Format-*, etc.) and ~20 CMD builtins (dir, type, findstr, etc.).
 
-**Done when:** Shell execution works, commands are classified through the pipeline, safe-command detection covers common Windows workflows.
+**Done when:** ~~Shell execution works, commands are classified through the pipeline, safe-command detection covers common Windows workflows.~~ **DONE** — implemented and merged.
 
 ## Phase 3: Terminal & Approval
 
@@ -79,7 +78,7 @@ Teach fuse to understand Windows-specific threats. Without this, fuse classifies
 
 ## Dependency Graph
 
-```
+```text
 1 Foundation ──→ 2 Shell Strategy ──┬──→ 3 Terminal & Approval ───→ ┐
                                     ├──→ 4 Process Mgmt & Proxy ──→ ├─ User-ready
                                     └──→ 5 Security Intelligence ─→ ┘
