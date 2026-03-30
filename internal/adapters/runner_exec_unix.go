@@ -37,6 +37,16 @@ func executeShellCommand(command, cwd string, timeout time.Duration) (int, error
 	// Platform-specific SysProcAttr (Setpgid, optionally Pdeathsig on Linux).
 	cmd.SysProcAttr = platformSysProcAttr()
 
+	// On timeout, kill the entire process group (not just the direct child)
+	// so grandchildren are cleaned up. WaitDelay bounds the Wait after cancel.
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 2 * time.Second
+
 	if err := cmd.Start(); err != nil {
 		return -1, fmt.Errorf("start command: %w", err)
 	}
@@ -62,6 +72,15 @@ func executeCapturedShellCommandWithStdin(ctx context.Context, command, cwd stri
 	cmd.Stdin = stdin
 	cmd.Env = BuildChildEnv(os.Environ())
 	cmd.SysProcAttr = platformSysProcAttr()
+
+	// On timeout, kill the entire process group so grandchildren are cleaned up.
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = 2 * time.Second
 
 	var stdoutBuf strings.Builder
 	var stderrBuf strings.Builder
@@ -100,6 +119,7 @@ func waitForManagedCommand(cmd *exec.Cmd) (int, error) {
 	restoreTTY, err := ForegroundChildProcessGroupIfTTY(cmd.Process.Pid)
 	if err != nil {
 		_ = cmd.Process.Kill()
+		_ = cmd.Wait() // reap to avoid zombie
 		return -1, fmt.Errorf("foreground child process group: %w", err)
 	}
 	if restoreTTY != nil {

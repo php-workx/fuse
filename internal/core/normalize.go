@@ -1082,29 +1082,34 @@ func skipPowerShellArgs(tokens []string, i int, result *ClassifiedCommand) int {
 
 	for i < len(tokens) {
 		t := tokens[i]
+		tLower := strings.ToLower(t)
 
-		// -Command: remaining tokens are the inner command.
-		if strings.EqualFold(t, "-Command") {
+		// Handle PowerShell -Flag:Value colon syntax.
+		// Split on first colon to extract the flag name.
+		colonFlag, _, hasColon := strings.Cut(tLower, ":")
+
+		// -Command or -Command:value — remaining tokens (or colon value) are the inner command.
+		if colonFlag == "-command" || strings.EqualFold(t, "-Command") {
 			i++ // skip the -Command flag itself
 			return i
 		}
 
-		// -EncodedCommand: opaque Base64 — fail-closed.
-		if strings.EqualFold(t, "-EncodedCommand") {
+		// -EncodedCommand or -EncodedCommand:value — opaque Base64, fail-closed.
+		if colonFlag == "-encodedcommand" || strings.EqualFold(t, "-EncodedCommand") {
 			result.ExtractionFailed = true
-			return len(tokens) // stop processing
+			return len(tokens)
 		}
 
-		// -File: script content is in the file, not the command line — fail-closed.
-		if strings.EqualFold(t, "-File") {
+		// -File or -File:path — script content is in the file, fail-closed.
+		if colonFlag == "-file" || strings.EqualFold(t, "-File") {
 			result.ExtractionFailed = true
-			return len(tokens) // stop processing
+			return len(tokens)
 		}
 
-		// Check standalone flags.
+		// Check standalone flags (with or without colon suffix).
 		matched := false
 		for _, flag := range psStandaloneFlags {
-			if strings.EqualFold(t, flag) {
+			if strings.EqualFold(t, flag) || (hasColon && strings.EqualFold(colonFlag, flag)) {
 				i++
 				matched = true
 				break
@@ -1114,10 +1119,16 @@ func skipPowerShellArgs(tokens []string, i int, result *ClassifiedCommand) int {
 			continue
 		}
 
-		// Check value flags (consume flag + next token).
+		// Check value flags: -Flag Value (two tokens) or -Flag:Value (one token).
 		for _, flag := range psValueFlags {
+			flagLower := strings.ToLower(flag)
 			if strings.EqualFold(t, flag) {
-				i += 2
+				i += 2 // flag + separate value
+				matched = true
+				break
+			}
+			if hasColon && colonFlag == flagLower {
+				i++ // flag:value is a single token
 				matched = true
 				break
 			}
@@ -1255,8 +1266,8 @@ func handleWslCommand(tokens []string, i, depth int, unbalancedQuotes bool, resu
 			j++ // skip the --
 			break
 		}
-		// -d <distro>, -u <user>: flags that take a value.
-		if t == "-d" || t == "-u" {
+		// -d/--distribution <distro>, -u/--user <user>: flags that take a value.
+		if t == "-d" || t == "-u" || t == "--distribution" || t == "--user" {
 			j += 2
 			continue
 		}
