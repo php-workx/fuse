@@ -2,14 +2,25 @@
 
 package cli
 
-// terminalWidth returns a default width on Windows.
-// Real terminal width detection not yet supported on Windows (planned: Phase 3).
+import "golang.org/x/sys/windows"
+
 func terminalWidth() int {
+	conOut, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+	if err != nil || conOut == windows.InvalidHandle {
+		return 80
+	}
+	var info windows.ConsoleScreenBufferInfo
+	if err := windows.GetConsoleScreenBufferInfo(conOut, &info); err != nil {
+		return 80
+	}
+	width := int(info.Window.Right - info.Window.Left + 1)
+	if width > 0 {
+		return width
+	}
 	return 80
 }
 
-// isTerminal returns false on Windows as a conservative default.
-// Real terminal detection not yet supported on Windows (planned: Phase 3).
-func isTerminal(_ int) bool {
-	return false
+func isTerminal(fd int) bool {
+	var mode uint32
+	return windows.GetConsoleMode(windows.Handle(fd), &mode) == nil
 }
