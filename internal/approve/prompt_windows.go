@@ -220,6 +220,9 @@ func readScope(ctx context.Context, conIn, conOut *os.File, deadline time.Time, 
 
 		// Wait up to 100ms for input to become available.
 		event, _ := windows.WaitForSingleObject(inHandle, 100)
+		if event == 0xFFFFFFFF { // WAIT_FAILED — console handle invalid
+			return "", true // deny on failure
+		}
 		if event != windows.WAIT_OBJECT_0 {
 			continue
 		}
