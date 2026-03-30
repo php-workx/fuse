@@ -1,7 +1,6 @@
 package approve
 
 import (
-	"os"
 	"strings"
 	"testing"
 )
@@ -34,29 +33,23 @@ func TestSanitizePrompt_StripsNewlines(t *testing.T) {
 	}
 }
 
-func TestGetContextVars_Empty(t *testing.T) {
-	// With no relevant env vars set, should return empty string.
-	// Save and clear any that might be set.
-	vars := []string{
+// clearTrackedVars blanks all env vars that getContextVars monitors,
+// ensuring test isolation regardless of the host environment.
+func clearTrackedVars(t *testing.T) {
+	t.Helper()
+	for _, v := range []string{
 		"AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
 		"TF_WORKSPACE", "TF_VAR_environment",
 		"KUBECONFIG", "KUBECONTEXT",
 		"GCP_PROJECT", "GOOGLE_CLOUD_PROJECT",
 		"AZURE_SUBSCRIPTION",
+	} {
+		t.Setenv(v, "")
 	}
-	saved := make(map[string]string)
-	for _, v := range vars {
-		if val, ok := os.LookupEnv(v); ok {
-			saved[v] = val
-			t.Setenv(v, "")
-			os.Unsetenv(v)
-		}
-	}
-	t.Cleanup(func() {
-		for k, v := range saved {
-			os.Setenv(k, v)
-		}
-	})
+}
+
+func TestGetContextVars_Empty(t *testing.T) {
+	clearTrackedVars(t)
 
 	got := getContextVars()
 	if got != "" {
@@ -65,7 +58,9 @@ func TestGetContextVars_Empty(t *testing.T) {
 }
 
 func TestGetContextVars_SingleVar(t *testing.T) {
+	clearTrackedVars(t)
 	t.Setenv("AWS_PROFILE", "prod")
+
 	got := getContextVars()
 	if got != "AWS_PROFILE=prod" {
 		t.Errorf("expected AWS_PROFILE=prod, got %q", got)

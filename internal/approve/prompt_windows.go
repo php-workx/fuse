@@ -43,17 +43,23 @@ func PromptUser(ctx context.Context, command, reason string, hookMode, nonIntera
 	defer func() { _ = conOut.Close() }()
 
 	inHandle := windows.Handle(conIn.Fd())
+	outHandle := windows.Handle(conOut.Fd())
 
-	// Save original console mode.
+	// Save original console modes (input and output).
 	var origMode uint32
 	if err := windows.GetConsoleMode(inHandle, &origMode); err != nil {
 		return false, "", fmt.Errorf("get console mode: %w", err)
 	}
+	var origOutMode uint32
+	hasOutMode := windows.GetConsoleMode(outHandle, &origOutMode) == nil
 
-	// Restore console mode on panic.
+	// Restore console modes on panic.
 	defer func() {
 		if r := recover(); r != nil {
 			_ = windows.SetConsoleMode(inHandle, origMode)
+			if hasOutMode {
+				_ = windows.SetConsoleMode(outHandle, origOutMode)
+			}
 			fmt.Fprintf(os.Stderr, "fuse: prompt panic recovered: %v\n", r)
 			approved = false
 			scope = ""
@@ -76,9 +82,12 @@ func PromptUser(ctx context.Context, command, reason string, hookMode, nonIntera
 		return false, "", fmt.Errorf("set raw console mode: %w", err)
 	}
 
-	// Ensure console mode is always restored.
+	// Ensure console modes are always restored (input + output).
 	restoreConsole := func() {
 		_ = windows.SetConsoleMode(inHandle, origMode)
+		if hasOutMode {
+			_ = windows.SetConsoleMode(outHandle, origOutMode)
+		}
 	}
 	defer restoreConsole()
 
@@ -127,7 +136,7 @@ func readApprovalDecision(ctx context.Context, conIn, conOut *os.File, deadline 
 		select {
 		case <-ctx.Done():
 			fmt.Fprintf(conOut, "\n  Denied (shutdown).\n\n")
-			return false, "", nil
+			return false, "", fmt.Errorf("approval interrupted: %w", ctx.Err())
 		case <-sigCh:
 			fmt.Fprintf(conOut, "\n  Denied (signal received).\n\n")
 			return false, "", nil
@@ -140,9 +149,12 @@ func readApprovalDecision(ctx context.Context, conIn, conOut *os.File, deadline 
 		}
 
 		// Wait up to 100ms for input to become available.
-		event, _ := windows.WaitForSingleObject(inHandle, 100)
+		event, waitErr := windows.WaitForSingleObject(inHandle, 100)
+		if event == 0xFFFFFFFF { // WAIT_FAILED
+			return false, "", fmt.Errorf("console wait failed: %w", waitErr)
+		}
 		if event != windows.WAIT_OBJECT_0 {
-			continue // timeout or error — loop back to check ctx/deadline/signals
+			continue // timeout — loop back to check ctx/deadline/signals
 		}
 
 		n, err := conIn.Read(buf)

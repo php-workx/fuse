@@ -428,7 +428,9 @@ func TestRunDoctorSecurity_WarnsWhenClaudeMCPDownstreamNameIsMissingOrUnknown(t 
 
 func TestRunDoctorLive_ReportsTerminalCapabilityChecks(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("terminal capability checks not yet supported on Windows (planned: Phase 3)")
+		// Windows console checks require a real console (CONIN$).
+		// CI runners typically don't have one — skip if unavailable.
+		t.Skip("Windows terminal checks require interactive console (not available in CI)")
 	}
 	tmpDir := t.TempDir()
 	t.Setenv("FUSE_HOME", tmpDir)

@@ -105,7 +105,7 @@ func readApprovalDecision(ctx context.Context, tty *os.File, deadline time.Time,
 		select {
 		case <-ctx.Done():
 			fmt.Fprintf(tty, "\n  Denied (shutdown).\n\n")
-			return false, "", nil
+			return false, "", fmt.Errorf("approval interrupted: %w", ctx.Err())
 		case <-sigCh:
 			fmt.Fprintf(tty, "\n  Denied (signal received).\n\n")
 			return false, "", nil

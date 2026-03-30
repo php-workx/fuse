@@ -4,6 +4,7 @@ package approve
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -61,24 +62,26 @@ func TestPromptUser_NonInteractiveEnv(t *testing.T) {
 	}
 }
 
-// TestRenderPromptPlain_DoesNotPanic verifies that the plain prompt renderer
-// can write to a temp file without panicking.
-func TestRenderPromptPlain_DoesNotPanic(t *testing.T) {
+// TestRenderPromptPlain_RendersContent verifies that the plain prompt renderer
+// outputs the command, reason, and header.
+func TestRenderPromptPlain_RendersContent(t *testing.T) {
 	f, err := os.CreateTemp(t.TempDir(), "prompt-test-*")
 	if err != nil {
 		t.Fatalf("create temp file: %v", err)
 	}
-	defer func() { _ = f.Close() }()
 
-	// Should not panic.
 	renderPromptPlain(f, "echo hello", "test reason")
+	_ = f.Close()
 
-	// Verify something was written.
-	info, err := f.Stat()
+	content, err := os.ReadFile(f.Name())
 	if err != nil {
-		t.Fatalf("stat temp file: %v", err)
+		t.Fatalf("read temp file: %v", err)
 	}
-	if info.Size() == 0 {
-		t.Error("expected non-empty output from renderPromptPlain")
+	got := string(content)
+
+	for _, want := range []string{"echo hello", "test reason", "fuse: approval required"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output missing %q:\n%s", want, got)
+		}
 	}
 }

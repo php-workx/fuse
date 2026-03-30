@@ -8,7 +8,7 @@ import (
 	"github.com/php-workx/fuse/internal/sanitize"
 )
 
-var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
+var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (console unavailable)")
 
 var errPromptTimeout = fmt.Errorf("fuse:TIMEOUT_WAITING_FOR_USER STOP. The user did not approve this action in time")
 
