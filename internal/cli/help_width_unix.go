@@ -20,3 +20,9 @@ func isTerminal(fd int) bool {
 	_, err := unix.IoctlGetWinsize(fd, unix.TIOCGWINSZ)
 	return err == nil
 }
+
+// supportsANSI returns true if the terminal supports ANSI escape sequences.
+// All modern Unix terminals support ANSI.
+func supportsANSI() bool {
+	return true
+}

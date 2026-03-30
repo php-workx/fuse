@@ -54,7 +54,8 @@ func initHelp() {
 	rootCmd.SetUsageTemplate(usageTemplate)
 }
 
-// shouldColorize returns true when stdout is a terminal and color is not suppressed.
+// shouldColorize returns true when stdout is a terminal that supports ANSI
+// escape sequences and color is not suppressed.
 func shouldColorize() bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
@@ -62,7 +63,7 @@ func shouldColorize() bool {
 	if os.Getenv("TERM") == "dumb" {
 		return false
 	}
-	return isTerminal(int(os.Stdout.Fd()))
+	return isTerminal(int(os.Stdout.Fd())) && supportsANSI()
 }
 
 // helpRenderer applies optional ANSI styling to help output.

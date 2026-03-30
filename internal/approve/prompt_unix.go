@@ -105,7 +105,7 @@ func readApprovalDecision(ctx context.Context, tty *os.File, deadline time.Time,
 		select {
 		case <-ctx.Done():
 			fmt.Fprintf(tty, "\n  Denied (shutdown).\n\n")
-			return false, "", nil
+			return false, "", fmt.Errorf("approval interrupted: %w", ctx.Err())
 		case <-sigCh:
 			fmt.Fprintf(tty, "\n  Denied (signal received).\n\n")
 			return false, "", nil
@@ -248,27 +248,4 @@ func renderPrompt(tty *os.File, command, reason string) {
 	fmt.Fprintf(tty, "\n")
 	fmt.Fprintf(tty, "  \033[1;32m[A]pprove\033[0m  |  \033[1;31m[D]eny\033[0m\n")
 	fmt.Fprintf(tty, "  > ")
-}
-
-// getContextVars returns relevant environment variables for the prompt.
-func getContextVars() string {
-	relevantVars := []string{
-		"AWS_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION",
-		"TF_WORKSPACE", "TF_VAR_environment",
-		"KUBECONFIG", "KUBECONTEXT",
-		"GCP_PROJECT", "GOOGLE_CLOUD_PROJECT",
-		"AZURE_SUBSCRIPTION",
-	}
-
-	var result string
-	for _, v := range relevantVars {
-		val := os.Getenv(v)
-		if val != "" {
-			if result != "" {
-				result += ", "
-			}
-			result += v + "=" + val
-		}
-	}
-	return result
 }
