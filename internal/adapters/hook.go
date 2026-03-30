@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -32,6 +33,18 @@ var hookTimeout = 300 * time.Second
 const pendingApprovalMsg = "fuse:PENDING_APPROVAL WAIT. This command requires user approval " +
 	"via fuse monitor. The approval request has been queued. " +
 	"Wait 30-60 seconds, then retry the same command."
+
+// pendingApprovalMessage returns a platform-aware message for pending approvals.
+// On Windows, the approval TUI is not yet available, so the message tells the
+// agent the command is blocked rather than suggesting a retry.
+func pendingApprovalMessage() string {
+	if runtime.GOOS == "windows" {
+		return "fuse:APPROVAL_NOT_AVAILABLE STOP. This command requires approval " +
+			"but the approval prompt is not yet available on Windows. " +
+			"The command has been blocked. Do not retry."
+	}
+	return pendingApprovalMsg
+}
 
 func init() {
 	if v := os.Getenv("FUSE_HOOK_TIMEOUT"); v != "" {
@@ -78,7 +91,12 @@ func RunHook(stdin io.Reader, stderr io.Writer) int {
 	case code := <-resultCh:
 		return code
 	case <-ctx.Done():
-		fmt.Fprintln(stderr, pendingApprovalMsg)
+		if runtime.GOOS == "windows" {
+			fmt.Fprintln(stderr, "fuse: hook timed out. The command could not be classified in time. "+
+				"Do not retry — this may indicate the command requires approval which is not yet supported on Windows.")
+		} else {
+			fmt.Fprintln(stderr, pendingApprovalMsg)
+		}
 		return 2
 	}
 }
@@ -318,6 +336,15 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 
 // handleApproval handles the APPROVAL decision path, which requires DB access.
 func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge.Verdict, stderr io.Writer, cfg *config.Config, dryRun bool) int {
+	// No approval mechanism on Windows yet. Short-circuit before opening
+	// the DB or starting the approval manager — there is no TUI to resolve the
+	// request, so polling would just hang for the full hook timeout (~298s).
+	// Remove when Phase 3 adds Console API or web-based approval.
+	if runtime.GOOS == "windows" {
+		fmt.Fprintln(stderr, pendingApprovalMessage())
+		return 2
+	}
+
 	// Lazy DB access: only APPROVAL path opens the database.
 	database, secret, err := openDBAndSecret()
 	if err != nil {
@@ -361,7 +388,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 		// If the error is from a non-interactive prompt timeout, tell the agent
 		// to retry — the user may approve via fuse monitor.
 		if strings.Contains(err.Error(), "NON_INTERACTIVE_MODE") || strings.Contains(err.Error(), "TIMEOUT_WAITING") {
-			fmt.Fprintln(stderr, pendingApprovalMsg)
+			fmt.Fprintln(stderr, pendingApprovalMessage())
 			return 2
 		}
 		if msg := extractFuseDirective(err); msg != "" {

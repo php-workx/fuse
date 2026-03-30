@@ -15,6 +15,8 @@ builds:
     goos:
       - linux
       - darwin
+      # Windows excluded from release builds until code signing is resolved.
+      # Use `just build-windows` for local testing. See specs/windows-support-plan.md.
     goarch:
       - amd64
       - arm64

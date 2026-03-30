@@ -13,11 +13,22 @@ import (
 // walking the AST. It splits on ;, &&, ||, |, and newline-separated
 // commands (respecting quoting).
 //
-// On parse error, an error is returned so the caller can fail-closed
-// (i.e., require APPROVAL).
+// For commands that fail Bash parsing, detection of the shell type is used as a
+// fallback: PowerShell and CMD commands are split using a simple token-based
+// splitter, while commands that look like Bash still fail-closed (i.e., require
+// APPROVAL).
 //
 // A single command with no operators returns a slice of 1 element.
 func SplitCompoundCommand(displayNorm string) ([]string, error) {
+	// Detect shell type first. PowerShell and CMD commands must not go
+	// through the Bash parser — it consumes backslashes as escape characters,
+	// mangling Windows paths like C:\Windows into C:Windows.
+	shellType := DetectShellType(displayNorm)
+	if shellType == ShellPowerShell || shellType == ShellCMD {
+		return splitSimpleCompound(displayNorm), nil
+	}
+
+	// Bash (or unknown): use the full Bash parser.
 	parser := syntax.NewParser(syntax.Variant(syntax.LangBash))
 	prog, err := parser.Parse(strings.NewReader(displayNorm), "")
 	if err != nil {
@@ -37,6 +48,53 @@ func SplitCompoundCommand(displayNorm string) ([]string, error) {
 	}
 
 	return result, nil
+}
+
+// splitSimpleCompound is a token-based splitter that splits on ;, |, and &
+// while respecting quoted strings (single and double quotes). It does NOT use
+// mvdan.cc/sh. Returns sub-commands as string slices with whitespace trimmed.
+// Empty results are skipped.
+func splitSimpleCompound(displayNorm string) []string {
+	var result []string
+	var current strings.Builder
+	inSingle := false
+	inDouble := false
+
+	for i := 0; i < len(displayNorm); i++ {
+		ch := displayNorm[i]
+
+		switch {
+		case ch == '\'' && !inDouble:
+			inSingle = !inSingle
+			current.WriteByte(ch)
+		case ch == '"' && !inSingle:
+			inDouble = !inDouble
+			current.WriteByte(ch)
+		case !inSingle && !inDouble && (ch == ';' || ch == '|' || ch == '&'):
+			// Split on command separators. In CMD, & and && are separators.
+			// In PowerShell, & is the call operator, but splitting on it is
+			// conservative (the called executable still gets classified).
+			sub := strings.TrimSpace(current.String())
+			if sub != "" {
+				result = append(result, sub)
+			}
+			current.Reset()
+		default:
+			current.WriteByte(ch)
+		}
+	}
+
+	// Flush any remaining content.
+	sub := strings.TrimSpace(current.String())
+	if sub != "" {
+		result = append(result, sub)
+	}
+
+	if len(result) == 0 {
+		return []string{displayNorm}
+	}
+
+	return result
 }
 
 // extractFromStmt extracts sub-commands from a single statement,
@@ -102,8 +160,10 @@ func printNode(node syntax.Node) string {
 	return strings.TrimSpace(buf.String())
 }
 
-// ContainsCwdChange checks if any of the sub-commands starts with
-// cd, pushd, or popd — builtins that change the working directory.
+// ContainsCwdChange checks if any of the sub-commands starts with a command
+// that changes the working directory. This includes Unix builtins (cd, pushd,
+// popd), PowerShell cmdlets (Set-Location, sl, Push-Location, Pop-Location),
+// and CMD aliases (chdir). PowerShell cmdlets are matched case-insensitively.
 // This is used to detect when cwd changes might affect file-backed
 // sub-commands that follow.
 func ContainsCwdChange(subCommands []string) bool {
@@ -111,11 +171,13 @@ func ContainsCwdChange(subCommands []string) bool {
 		trimmed := strings.TrimSpace(cmd)
 		// Extract the first word (the command name).
 		first := firstWord(trimmed)
-		switch first {
-		case "cd", "pushd", "popd":
+
+		// Case-insensitive match for cwd-changing commands across all shells.
+		lower := strings.ToLower(first)
+		switch lower {
+		case "cd", "pushd", "popd",
+			"set-location", "sl", "push-location", "pop-location", "chdir":
 			return true
-		default:
-			// Not a directory-changing command.
 		}
 	}
 	return false

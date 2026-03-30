@@ -202,6 +202,9 @@ func (m *Manager) handlePromptError(
 	case r2 := <-ch:
 		cancel()
 		workers.Wait()
+		if r2.err != nil {
+			slog.Warn("DB poll also failed during approval fallback", "db_error", r2.err)
+		}
 		if r2.err == nil && r2.decision != "" {
 			deletePending() // resolved via TUI poll
 			return r2.decision, nil

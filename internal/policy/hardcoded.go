@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -15,6 +16,75 @@ var unsafeDevRedirect = regexp.MustCompile(`>\s*/dev/(?:sd|vd|hd|xvd|nvme|disk|l
 // device that isn't /dev/null, /dev/stderr, /dev/stdout, or /dev/fd.
 func hasUnsafeDevRedirect(cmd string) bool {
 	return unsafeDevRedirect.MatchString(cmd)
+}
+
+// windowsCatastrophicPaths are Windows system directories where recursive deletion
+// would be catastrophic. Keys are stored in lowercase for case-insensitive matching.
+var windowsCatastrophicPaths = map[string]bool{
+	`c:\`:                    true,
+	`c:\windows`:             true,
+	`c:\windows\system32`:    true,
+	`c:\program files`:       true,
+	`c:\program files (x86)`: true,
+	`c:\users`:               true,
+}
+
+// isWindowsCatastrophicTarget returns true if any non-flag token in the command
+// resolves to a Windows catastrophic path or env var pattern.
+func isWindowsCatastrophicTarget(cmd string) bool {
+	lower := strings.ToLower(cmd)
+
+	// Check for Windows environment variable patterns that expand to system dirs.
+	// CMD-style %VAR% and PowerShell $env: syntax are both checked.
+	for _, env := range []string{
+		"%systemroot%", "%programfiles%", "%userprofile%", "%systemdrive%",
+		"$env:systemroot", "$env:programfiles", "$env:userprofile", "$env:systemdrive",
+	} {
+		if strings.Contains(lower, env) {
+			return true
+		}
+	}
+
+	// Normalize forward slashes to backslashes for consistent matching.
+	normalized := strings.ReplaceAll(lower, "/", `\`)
+
+	// Collapse path traversal sequences (e.g., C:\Windows\.. → C:\).
+	// Use filepath.Clean on each whitespace-delimited token to resolve .. components.
+	var cleanedTokens []string
+	for _, tok := range strings.Fields(normalized) {
+		cleanedTokens = append(cleanedTokens, filepath.Clean(tok))
+	}
+	normalized = strings.Join(cleanedTokens, " ")
+
+	// Check if any catastrophic path appears as a complete path (not as a prefix
+	// of a longer path like C:\Users\me\tmp). A catastrophic path match requires
+	// the path to be followed by end-of-string, whitespace, a trailing backslash,
+	// or a quote character — NOT by additional path components.
+	for path := range windowsCatastrophicPaths {
+		idx := strings.Index(normalized, path)
+		if idx < 0 {
+			continue
+		}
+		end := idx + len(path)
+		// Check what follows the match.
+		if end >= len(normalized) {
+			return true // path is at end of string
+		}
+		next := normalized[end]
+		// If followed by a backslash, check if it's just a trailing slash (no more content).
+		if next == '\\' {
+			if end+1 >= len(normalized) || normalized[end+1] == ' ' || normalized[end+1] == '"' || normalized[end+1] == '\'' {
+				return true // trailing backslash only
+			}
+			// Otherwise it's a subdirectory like C:\Users\me — not catastrophic.
+			continue
+		}
+		if next == ' ' || next == '"' || next == '\'' {
+			return true // path ends at word boundary
+		}
+	}
+
+	return false
 }
 
 // catastrophicPaths are top-level directories where rm -rf would be catastrophic.
@@ -167,19 +237,19 @@ var HardcodedBlocked = []HardcodedRule{
 
 	// Prevent agent from modifying fuse config/policy files
 	{
-		Pattern: regexp.MustCompile(`(>|>>|tee|cp|mv|sed\s+-i|cat\s+.*>)\s*.*[~/.]fuse/config/`),
+		Pattern: regexp.MustCompile(`(>|>>|tee|cp|mv|sed\s+-i|cat\s+.*>)\s*.*[~/.]fuse[/\\]config[/\\]`),
 		Reason:  "Cannot modify fuse configuration through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`(>|>>|tee|cp|mv|sed\s+-i|cat\s+.*>)\s*.*\.claude/settings\.json`),
+		Pattern: regexp.MustCompile(`(>|>>|tee|cp|mv|sed\s+-i|cat\s+.*>)\s*.*\.claude[/\\]settings\.json`),
 		Reason:  "Cannot modify Claude Code hooks through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*[~/.]fuse/`),
+		Pattern: regexp.MustCompile(`\brm\s+.*[~/.]fuse[/\\]`),
 		Reason:  "Cannot delete fuse files through mediated path",
 	},
 	{
-		Pattern: regexp.MustCompile(`\brm\s+.*\.claude/settings\.json`),
+		Pattern: regexp.MustCompile(`\brm\s+.*\.claude[/\\]settings\.json`),
 		Reason:  "Cannot delete Claude Code settings through mediated path",
 	},
 
@@ -192,9 +262,64 @@ var HardcodedBlocked = []HardcodedRule{
 		Reason: "Cannot modify fuse database through mediated path",
 	},
 
-	// Prevent inline interpreter/eval commands from touching fuse-managed files
+	// Prevent inline interpreter/eval commands from touching fuse-managed files.
+	// [/\\] matches both Unix forward-slash and Windows backslash separators.
+	// (?i) makes the PowerShell interpreter names case-insensitive.
 	{
-		Pattern: regexp.MustCompile(`\b(python[23]?|node|perl|ruby|(ba)?sh)\s+(-c|-e|--eval)\b.*(~/\.fuse/|\.fuse/|\.claude/settings\.json|fuse\.db|secret\.key)`),
-		Reason:  "Cannot reference fuse-managed files through inline interpreter/eval",
+		Pattern: regexp.MustCompile(
+			`(?i)\b(python[23]?|node|perl|ruby|(ba)?sh|pwsh|powershell(?:\.exe)?)\s+(-c|-e|--eval|-Command|-EncodedCommand)\b` +
+				`.*(~[/\\]\.fuse[/\\]|\.fuse[/\\]|\.claude[/\\]settings\.json|fuse\.db|secret\.key)`),
+		Reason: "Cannot reference fuse-managed files through inline interpreter/eval",
+	},
+
+	// Block powershell/pwsh -EncodedCommand unconditionally — the base64 payload
+	// hides the true target path from all regex inspection.
+	{
+		Pattern: regexp.MustCompile(`(?i)\b(pwsh|powershell(?:\.exe)?)\s+.*-EncodedCommand\b`),
+		Reason:  "PowerShell -EncodedCommand unconditionally blocked: base64 payload hides target path",
+	},
+
+	// === Windows: Catastrophic filesystem destruction ===
+
+	// PowerShell destructive — Remove-Item targeting catastrophic paths
+	{
+		Pattern:   regexp.MustCompile(`(?i)\bRemove-Item\b.*-Recurse\b`),
+		Reason:    "PowerShell recursive removal of system directory",
+		Predicate: isWindowsCatastrophicTarget,
+	},
+
+	// CMD destructive — del /s /q or rd /s /q targeting catastrophic paths
+	{
+		Pattern:   regexp.MustCompile(`(?i)\b(del|rd|rmdir)\b.*\s/[sqSQ]\b`),
+		Reason:    "CMD recursive deletion of system directory",
+		Predicate: isWindowsCatastrophicTarget,
+	},
+
+	// PowerShell format disk
+	{
+		Pattern: regexp.MustCompile(`(?i)\b(Format-Volume|Clear-Disk|Initialize-Disk)\b`),
+		Reason:  "Disk formatting via PowerShell",
+	},
+
+	// === Windows: Self-protection ===
+
+	// Self-protection: Windows path variants.
+	// Uses [/\\] to match both forward and back slashes (Windows accepts both).
+	// [/\\]? before .claude/.fuse makes the separator optional for relative paths.
+	{
+		Pattern: regexp.MustCompile(`(?i)(>|>>|tee|copy|move|Set-Content|Out-File|Add-Content|Tee-Object)\s+.*[/\\]?\.claude[/\\]settings\.json`),
+		Reason:  "Cannot modify Claude Code hooks through mediated path",
+	},
+	{
+		Pattern: regexp.MustCompile(`(?i)(>|>>|tee|copy|move|Set-Content|Out-File|Add-Content|Tee-Object)\s+.*[/\\]?\.fuse([/\\]|$|\s)`),
+		Reason:  "Cannot modify fuse configuration through mediated path",
+	},
+	{
+		Pattern: regexp.MustCompile(`(?i)\b(Remove-Item|del|rm|rd|rmdir)\b.*[/\\]?\.claude[/\\]settings\.json`),
+		Reason:  "Cannot delete Claude Code settings through mediated path",
+	},
+	{
+		Pattern: regexp.MustCompile(`(?i)\b(Remove-Item|del|rm|rd|rmdir)\b.*[/\\]?\.fuse([/\\]|$|\s)`),
+		Reason:  "Cannot delete fuse files through mediated path",
 	},
 }

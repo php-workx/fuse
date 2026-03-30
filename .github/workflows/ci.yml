@@ -97,6 +97,27 @@ jobs:
             -run 'TestReleaseCheckShellWrapperCompatibility|TestReleaseCheckLocaleInvariantClassification' \
             -v
 
+  windows-check:
+    name: Windows Cross-Compile Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Vet (GOOS=windows)
+        run: GOOS=windows GOARCH=amd64 go vet ./...
+
+      - name: Build (GOOS=windows)
+        run: GOOS=windows GOARCH=amd64 go build ./cmd/fuse
+
   build:
     name: Build
     runs-on: ubuntu-latest
@@ -104,6 +125,7 @@ jobs:
     needs:
       - check
       - compat
+      - windows-check
     permissions:
       contents: read
     steps:

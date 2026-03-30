@@ -19,7 +19,7 @@ func TestUnconditionalSafe(t *testing.T) {
 		// Diff / compare
 		"diff", "colordiff", "vimdiff", "cmp",
 		// Environment
-		"date", "cal", "uname", "hostname", "whoami", "id", "groups",
+		"cal", "uname", "hostname", "whoami", "id", "groups",
 		"uptime", "free", "top", "htop", "ps", "pgrep", "lsof", "lsblk",
 		"mount",
 		// Help/docs
@@ -593,5 +593,166 @@ func TestConditionallySafe_Base64(t *testing.T) {
 				t.Errorf("IsConditionallySafe(base64, %q) = %v, want %v", tt.cmd, got, tt.wantSafe)
 			}
 		})
+	}
+}
+
+func TestIsUnconditionalSafe_PowerShellCmdlets(t *testing.T) {
+	safeCmdlets := []string{
+		"Get-ChildItem", "Get-Content", "Test-Path",
+		"Write-Output", "Format-Table", "Select-Object",
+		"Where-Object", "Sort-Object", "Measure-Object",
+		"ConvertTo-Json", "ConvertFrom-Json",
+	}
+	for _, cmd := range safeCmdlets {
+		if !IsUnconditionalSafe(cmd) {
+			t.Errorf("IsUnconditionalSafe(%q) = false, want true", cmd)
+		}
+	}
+
+	// Case-insensitive: lowercase should also match.
+	caseInsensitive := []string{
+		"get-childitem", "GET-CHILDITEM", "get-content", "test-path",
+	}
+	for _, cmd := range caseInsensitive {
+		if !IsUnconditionalSafe(cmd) {
+			t.Errorf("IsUnconditionalSafe(%q) = false, want true (case-insensitive)", cmd)
+		}
+	}
+
+	// Dangerous cmdlets should NOT be safe.
+	unsafeCmdlets := []string{
+		"Remove-Item", "Set-Content", "Stop-Process", "Restart-Service",
+		"New-Item", "Invoke-Expression", "Invoke-WebRequest",
+	}
+	for _, cmd := range unsafeCmdlets {
+		if IsUnconditionalSafe(cmd) {
+			t.Errorf("IsUnconditionalSafe(%q) = true, want false", cmd)
+		}
+	}
+}
+
+func TestIsUnconditionalSafe_CMDBuiltins(t *testing.T) {
+	safeBuiltins := []string{
+		"dir", "type", "findstr", "systeminfo",
+		"echo", "ver", "cls", "hostname",
+		"whoami", "tasklist", "tree", "more", "sort",
+	}
+	for _, cmd := range safeBuiltins {
+		if !IsUnconditionalSafe(cmd) {
+			t.Errorf("IsUnconditionalSafe(%q) = false, want true", cmd)
+		}
+	}
+
+	// CMD builtins should be case-insensitive.
+	if !IsUnconditionalSafe("DIR") {
+		t.Error("IsUnconditionalSafe(\"DIR\") = false, want true (case-insensitive)")
+	}
+	if !IsUnconditionalSafe("Type") {
+		t.Error("IsUnconditionalSafe(\"Type\") = false, want true (case-insensitive)")
+	}
+
+	// Dangerous CMD commands should NOT be safe.
+	unsafeBuiltins := []string{
+		"del", "rd", "rmdir", "format", "shutdown",
+	}
+	for _, cmd := range unsafeBuiltins {
+		if IsUnconditionalSafe(cmd) {
+			t.Errorf("IsUnconditionalSafe(%q) = true, want false", cmd)
+		}
+	}
+}
+
+func TestIsUnconditionalSafeCmd_WindowsPrefixes(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      string
+		wantSafe bool
+	}{
+		{"Get-ChildItem -Recurse", "Get-ChildItem -Recurse", true},
+		{"Get-Content with path", "Get-Content C:\\file.txt", true},
+		{"Test-Path", "Test-Path C:\\dir", true},
+		{"Test-Connection", "Test-Connection google.com", true},
+		{"dotnet --version", "dotnet --version", true},
+		{"dotnet --info", "dotnet --info", true},
+		{"dotnet --list-sdks", "dotnet --list-sdks", true},
+		{"winget --version", "winget --version", true},
+		{"winget list", "winget list", true},
+		{"winget show", "winget show packagename", true},
+		{"choco list", "choco list", true},
+		{"choco info", "choco info packagename", true},
+		{"choco --version", "choco --version", true},
+		{"scoop list", "scoop list", true},
+		{"scoop info", "scoop info packagename", true},
+		{"scoop --version", "scoop --version", true},
+		{"Select-String pattern", "Select-String -Pattern foo", true},
+		{"Measure-Object", "Measure-Object -Line", true},
+
+		// Should NOT be safe.
+		{"dotnet build", "dotnet build", false},
+		{"winget install", "winget install packagename", false},
+		{"choco install", "choco install packagename", false},
+		{"scoop install", "scoop install packagename", false},
+		{"Remove-Item", "Remove-Item C:\\file.txt", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsUnconditionalSafeCmd(tt.cmd)
+			if got != tt.wantSafe {
+				t.Errorf("IsUnconditionalSafeCmd(%q) = %v, want %v", tt.cmd, got, tt.wantSafe)
+			}
+		})
+	}
+}
+
+func TestIsConditionallySafe_RemoveItem(t *testing.T) {
+	tests := []struct {
+		name     string
+		basename string
+		cmd      string
+		wantSafe bool
+	}{
+		{"Remove-Item without WhatIf", "Remove-Item", "Remove-Item C:\\file.txt", false},
+		{"Remove-Item with -WhatIf", "Remove-Item", "Remove-Item C:\\file.txt -WhatIf", true},
+		{"Remove-Item with -WhatIf case-insensitive", "Remove-Item", "Remove-Item C:\\file.txt -whatif", true},
+		{"Remove-Item -Recurse without WhatIf", "Remove-Item", "Remove-Item -Recurse C:\\dir", false},
+		{"Remove-Item -Recurse -WhatIf", "Remove-Item", "Remove-Item -Recurse C:\\dir -WhatIf", true},
+		{"remove-item lowercase with WhatIf", "remove-item", "remove-item C:\\file.txt -WhatIf", true},
+		{"remove-item lowercase without WhatIf", "remove-item", "remove-item C:\\file.txt", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsConditionallySafe(tt.basename, tt.cmd)
+			if got != tt.wantSafe {
+				t.Errorf("IsConditionallySafe(%q, %q) = %v, want %v", tt.basename, tt.cmd, got, tt.wantSafe)
+			}
+		})
+	}
+}
+
+func TestIsPowerShellCmdletSafe(t *testing.T) {
+	// Unconditionally safe cmdlets should pass through IsUnconditionalSafe.
+	if !IsUnconditionalSafe("Get-ChildItem") {
+		t.Error("Get-ChildItem should be unconditionally safe")
+	}
+	if !IsUnconditionalSafe("Test-Path") {
+		t.Error("Test-Path should be unconditionally safe")
+	}
+
+	// Conditionally safe cmdlets should only be safe under conditions.
+	if IsUnconditionalSafe("Remove-Item") {
+		t.Error("Remove-Item should NOT be unconditionally safe")
+	}
+	if IsConditionallySafe("Remove-Item", "Remove-Item C:\\file.txt") {
+		t.Error("Remove-Item without -WhatIf should NOT be conditionally safe")
+	}
+	if !IsConditionallySafe("Remove-Item", "Remove-Item C:\\file.txt -WhatIf") {
+		t.Error("Remove-Item with -WhatIf should be conditionally safe")
+	}
+
+	// Unknown cmdlets should fall through to default (not safe).
+	if IsConditionallySafe("Invoke-Expression", "Invoke-Expression 'dangerous'") {
+		t.Error("Invoke-Expression should NOT be conditionally safe")
 	}
 }

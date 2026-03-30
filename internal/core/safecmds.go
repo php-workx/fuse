@@ -24,7 +24,7 @@ var unconditionalSafe = map[string]bool{
 	// Diff / compare
 	"diff": true, "colordiff": true, "vimdiff": true, "cmp": true,
 	// Environment
-	"date": true, "cal": true, "uname": true, "hostname": true, "whoami": true,
+	"cal": true, "uname": true, "hostname": true, "whoami": true,
 	"id": true, "groups": true, "uptime": true, "free": true, "top": true,
 	"htop": true, "ps": true, "pgrep": true, "lsof": true, "lsblk": true,
 	"mount": true,
@@ -37,6 +37,50 @@ var unconditionalSafe = map[string]bool{
 	"eslint": true, "prettier": true, "black": true, "ruff": true,
 	"mypy": true, "pylint": true, "flake8": true, "gofmt": true,
 	"golint": true, "rustfmt": true, "goimports": true, "pytest": true,
+}
+
+// windowsSafeCmdlets contains PowerShell cmdlets that are SAFE regardless of arguments.
+// These are read-only or display-only cmdlets.
+var windowsSafeCmdlets = map[string]bool{
+	"Get-ChildItem": true, "Get-Content": true, "Get-Item": true,
+	"Get-ItemProperty": true, "Get-Location": true, "Get-Process": true,
+	"Get-Service": true, "Get-Date": true, "Get-Help": true,
+	"Get-Command": true, "Get-Alias": true, "Get-Variable": true,
+	"Get-Member": true, "Get-Host": true, "Get-History": true,
+	"Get-Culture": true, "Get-ComputerInfo": true, "Get-Disk": true,
+	"Get-Volume": true, "Get-NetAdapter": true, "Get-NetIPAddress": true,
+	"Get-DnsClientCache": true, "Get-EventLog": true,
+	"Test-Path": true, "Test-Connection": true, "Test-NetConnection": true,
+	"Write-Output": true, "Write-Host": true, "Write-Verbose": true,
+	"Format-List": true, "Format-Table": true, "Format-Wide": true,
+	"Out-String": true, "Out-Null": true,
+	"Select-Object": true, "Where-Object": true, "Sort-Object": true,
+	"Group-Object": true, "Measure-Object": true, "ForEach-Object": true,
+	"Compare-Object": true, "ConvertTo-Json": true, "ConvertFrom-Json": true,
+	"Select-String": true, "Resolve-Path": true,
+	"Get-TypeData": true, "Get-FormatData": true,
+}
+
+// windowsSafeCMDBuiltins contains CMD.exe builtins and utilities that are SAFE.
+var windowsSafeCMDBuiltins = map[string]bool{
+	"dir": true, "type": true, "echo": true,
+	"ver": true, "vol": true, "cls": true, "title": true,
+	"where": true, "help": true,
+	"hostname": true, "whoami": true, "systeminfo": true,
+	"tasklist": true, "findstr": true, "find": true, "more": true,
+	"sort": true, "fc": true, "comp": true, "tree": true,
+}
+
+// windowsSafePrefixes contains multi-word Windows command prefixes that are
+// unconditionally safe (read-only operations).
+var windowsSafePrefixes = []string{
+	"Get-ChildItem", "Get-Content", "Get-Process", "Get-Service",
+	"Test-Path", "Test-Connection", "Test-NetConnection",
+	"Select-String", "Measure-Object",
+	"dotnet --version", "dotnet --info", "dotnet --list-sdks",
+	"winget --version", "winget list", "winget show",
+	"choco list", "choco info", "choco --version",
+	"scoop list", "scoop info", "scoop --version",
 }
 
 // unconditionalSafePrefixes contains multi-word command prefixes that are
@@ -58,11 +102,31 @@ var unconditionalSafePrefixes = []string{
 	"gcloud --version", "az --version",
 }
 
+// windowsSafeCmdletsLower is a case-folded lookup for PowerShell cmdlets.
+var windowsSafeCmdletsLower = func() map[string]bool {
+	m := make(map[string]bool, len(windowsSafeCmdlets))
+	for k := range windowsSafeCmdlets {
+		m[strings.ToLower(k)] = true
+	}
+	return m
+}()
+
 // IsUnconditionalSafe returns true if the command basename (no path) is in the
 // unconditionally safe set. For multi-word safe commands (e.g. "cargo test"),
 // callers should use IsUnconditionalSafeCmd which checks the full command.
 func IsUnconditionalSafe(basename string) bool {
-	return unconditionalSafe[basename]
+	if unconditionalSafe[basename] {
+		return true
+	}
+	// PowerShell cmdlets are case-insensitive
+	if windowsSafeCmdletsLower[strings.ToLower(basename)] {
+		return true
+	}
+	// CMD builtins are case-insensitive
+	if windowsSafeCMDBuiltins[strings.ToLower(basename)] {
+		return true
+	}
+	return false
 }
 
 // IsUnconditionalSafeCmd returns true if the full command string matches either
@@ -75,8 +139,8 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 	}
 	basename := fields[0]
 
-	// Check single-word safe set.
-	if unconditionalSafe[basename] {
+	// Check single-word safe set (includes Windows cmdlets and CMD builtins).
+	if IsUnconditionalSafe(basename) {
 		return true
 	}
 
@@ -87,6 +151,16 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 			return true
 		}
 	}
+
+	// Check Windows-specific multi-word prefixes (case-insensitive).
+	lowerNormalized := strings.ToLower(normalized)
+	for _, prefix := range windowsSafePrefixes {
+		lowerPrefix := strings.ToLower(prefix)
+		if lowerNormalized == lowerPrefix || strings.HasPrefix(lowerNormalized, lowerPrefix+" ") {
+			return true
+		}
+	}
+
 	return false
 }
 
@@ -127,7 +201,22 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 		return isNcSafe(fields)
 	case "pip", "pip3":
 		return isPipSafe(fields)
+	case "Remove-Item":
+		return isRemoveItemSafe(fields)
+	case "set":
+		// CMD set without args displays env vars (safe); with args modifies them (dangerous).
+		return len(fields) == 1
+	case "path":
+		// CMD path without args displays PATH (safe); with args modifies command resolution (dangerous).
+		return len(fields) == 1
+	case "time", "date":
+		// CMD time/date without args or with /t displays value (safe); with args modifies (dangerous).
+		return len(fields) == 1 || (len(fields) == 2 && strings.EqualFold(fields[1], "/t"))
 	default:
+		// PowerShell cmdlet case-insensitive match for conditional checks.
+		if strings.EqualFold(basename, "Remove-Item") {
+			return isRemoveItemSafe(fields)
+		}
 		return false
 	}
 }
@@ -686,6 +775,17 @@ func hasNcScanFlag(fields []string) bool {
 			return true
 		}
 		if len(f) > 1 && f[0] == '-' && f[1] != '-' && strings.ContainsRune(f, 'z') {
+			return true
+		}
+	}
+	return false
+}
+
+// isRemoveItemSafe: Remove-Item is only safe when -WhatIf is present.
+// -WhatIf makes PowerShell show what would happen without actually performing the action.
+func isRemoveItemSafe(fields []string) bool {
+	for _, f := range fields {
+		if strings.EqualFold(f, "-WhatIf") {
 			return true
 		}
 	}

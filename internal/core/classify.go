@@ -300,6 +300,18 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) SubCommandResult {
 	sub := SubCommandResult{Command: subCmd}
 
+	// Pre-normalization hardcoded check: the tokenizer treats backslashes as
+	// escape characters (Bash semantics), which mangles Windows paths like
+	// C:\Windows into C:Windows. Check hardcoded rules against the raw
+	// sub-command before normalization strips the backslashes.
+	if evaluator != nil {
+		if d, reason := evaluator.EvaluateHardcoded(subCmd); d != "" {
+			sub.Decision = d
+			sub.Reason = reason
+			return sub
+		}
+	}
+
 	// Step 4a: Classification normalize.
 	classified := ClassificationNormalize(subCmd)
 	fileInspection := inspectReferencedFile(subCmd, cwd)
@@ -307,10 +319,11 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 		sub.FileHash = fileInspection.Hash
 	}
 
-	// Fail-closed: if bash -c extraction failed, force APPROVAL.
+	// Fail-closed: if inner command extraction failed, force APPROVAL.
+	// This covers bash -c, powershell -EncodedCommand, powershell -File, etc.
 	if classified.ExtractionFailed {
 		sub.Decision = DecisionApproval
-		sub.Reason = "bash -c extraction failed (fail-closed)"
+		sub.Reason = "inner command extraction failed (fail-closed)"
 		sub.FailClosed = true
 		return sub
 	}
@@ -811,14 +824,28 @@ func escalateDecision(d Decision, reason string) (Decision, string) {
 	}
 }
 
-// extractBasename returns the first whitespace-delimited token of a command,
+// extractBasename returns the first token of a command (quote-aware),
 // with any path components stripped.
 func extractBasename(cmd string) string {
-	fields := strings.Fields(cmd)
-	if len(fields) == 0 {
+	cmd = strings.TrimSpace(cmd)
+	if cmd == "" {
 		return ""
 	}
-	return filepath.Base(fields[0])
+	// Extract first token, respecting quotes for paths like "C:\Program Files\...\pwsh.exe".
+	var firstToken string
+	if cmd[0] == '"' || cmd[0] == '\'' {
+		quote := cmd[0]
+		if end := strings.IndexByte(cmd[1:], quote); end >= 0 {
+			firstToken = cmd[1 : end+1]
+		} else {
+			firstToken = cmd[1:] // unmatched quote — use rest
+		}
+	} else {
+		firstToken = strings.Fields(cmd)[0]
+	}
+	// Normalize backslashes to forward slashes for consistent cross-platform parsing.
+	normalizedPath := strings.ReplaceAll(firstToken, `\`, "/")
+	return filepath.Base(normalizedPath)
 }
 
 // resolvePath resolves a file path relative to a working directory.
@@ -1020,7 +1047,7 @@ func classifyExtractedSubCommand(subCmd string, evaluator PolicyEvaluator, cwd s
 	if classified.ExtractionFailed {
 		return extractedSubCommandResult{
 			decision:   DecisionApproval,
-			reason:     "inline bash -c extraction failed (fail-closed)",
+			reason:     "inline command extraction failed (fail-closed)",
 			failClosed: true,
 		}
 	}

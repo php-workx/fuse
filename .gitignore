@@ -7,6 +7,7 @@
 # Build artifacts
 bin/
 /fuse
+/fuse.exe
 coverage.out
 coverage.html
 

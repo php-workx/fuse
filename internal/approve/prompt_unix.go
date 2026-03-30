@@ -1,30 +1,20 @@
+//go:build unix
+
 package approve
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
-
-	"github.com/php-workx/fuse/internal/sanitize"
 )
-
-// sanitizePrompt delegates to the shared sanitize package and additionally
-// replaces \n and \r with spaces to prevent prompt layout injection.
-func sanitizePrompt(s string) string {
-	s = sanitize.String(s)
-	s = strings.ReplaceAll(s, "\n", " ")
-	s = strings.ReplaceAll(s, "\r", " ")
-	return s
-}
-
-var errNonInteractive = fmt.Errorf("fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable)")
 
 // ttyMu serializes concurrent TTY approval prompts. Without this, two
 // goroutines could both open /dev/tty and fight over raw mode and keystrokes.
@@ -104,11 +94,11 @@ func PromptUser(ctx context.Context, command, reason string, hookMode, nonIntera
 	// Render the prompt and read the user's decision.
 	renderPrompt(tty, command, reason)
 	deadline := time.Now().Add(timeout)
-	return readApprovalDecision(ctx, tty, fd, deadline, sigCh)
+	return readApprovalDecision(ctx, tty, deadline, sigCh)
 }
 
 // readApprovalDecision polls the TTY for the user's approve/deny decision.
-func readApprovalDecision(ctx context.Context, tty *os.File, fd int, deadline time.Time, sigCh <-chan os.Signal) (bool, string, error) {
+func readApprovalDecision(ctx context.Context, tty *os.File, deadline time.Time, sigCh <-chan os.Signal) (bool, string, error) {
 	buf := make([]byte, 1)
 
 	for {
@@ -123,13 +113,18 @@ func readApprovalDecision(ctx context.Context, tty *os.File, fd int, deadline ti
 		}
 
 		if time.Now().After(deadline) {
-			fmt.Fprintf(tty, "\n  Denied (timeout).\n")
-			fmt.Fprintf(tty, "  fuse:TIMEOUT_WAITING_FOR_USER STOP. The user did not approve this action in time. Do not retry this exact command.\n\n")
-			return false, "", nil
+			fmt.Fprintf(tty, "\n  Timed out. The command remains pending — approve via fuse monitor.\n\n")
+			return false, "", errPromptTimeout
 		}
 
 		n, err := tty.Read(buf)
-		if err != nil || n == 0 {
+		if err != nil {
+			if errors.Is(err, syscall.EINTR) {
+				continue // interrupted by signal — retry
+			}
+			return false, "", fmt.Errorf("tty read: %w", err)
+		}
+		if n == 0 {
 			continue
 		}
 
@@ -146,7 +141,7 @@ func readApprovalDecision(ctx context.Context, tty *os.File, fd int, deadline ti
 			fmt.Fprintf(tty, "    [o] once  |  [c] command  |  [s] session  |  [f] forever\n")
 			fmt.Fprintf(tty, "  > ")
 
-			scopeResult, denied := readScope(ctx, tty, fd, deadline, sigCh)
+			scopeResult, denied := readScope(ctx, tty, deadline, sigCh)
 			if denied {
 				return false, "", nil
 			}
@@ -171,6 +166,7 @@ func openTTY(nonInteractive bool) (*os.File, error) {
 	}
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
+		slog.Debug("failed to open /dev/tty", "error", err)
 		return nil, errNonInteractive
 	}
 	return tty, nil
@@ -178,7 +174,7 @@ func openTTY(nonInteractive bool) (*os.File, error) {
 
 // readScope reads the scope selection from the user.
 // Returns the scope string and whether the user denied.
-func readScope(ctx context.Context, tty *os.File, fd int, deadline time.Time, sigCh <-chan os.Signal) (string, bool) {
+func readScope(ctx context.Context, tty *os.File, deadline time.Time, sigCh <-chan os.Signal) (string, bool) {
 	buf := make([]byte, 1)
 	for {
 		select {
@@ -197,7 +193,14 @@ func readScope(ctx context.Context, tty *os.File, fd int, deadline time.Time, si
 		}
 
 		n, err := tty.Read(buf)
-		if err != nil || n == 0 {
+		if err != nil {
+			if errors.Is(err, syscall.EINTR) {
+				continue // interrupted by signal — retry
+			}
+			slog.Debug("tty read failed while selecting approval scope", "error", err)
+			return "", true // tty error — deny
+		}
+		if n == 0 {
 			continue
 		}
 
