@@ -48,15 +48,18 @@ Replace Unix TTY prompts with Windows Console API. This is what makes fuse a fir
 
 Replace Unix process groups with Windows job objects. Enables `fuse run` robustness and `fuse proxy codex-shell` for Codex support.
 
-**Known scope:**
-- Replace `Setpgid` / `Pdeathsig` with job object assignment (child dies when parent dies)
-- Replace `SIGTSTP`/`SIGWINCH`/`SIGTTOU` forwarding with `GenerateConsoleCtrlEvent`
-- Replace `syscall.Kill(-pid, sig)` (process group signal) with job object termination
-- `fuse proxy codex-shell` must work for Codex support on Windows
+**Resolved (implemented on `feat/windows-terminal-approval`):**
+- `jobObject` type wraps Windows Job Objects: create, assign process, terminate tree, close.
+- `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` ensures all children die when fuse exits (replaces `Pdeathsig`).
+- `CREATE_NEW_PROCESS_GROUP` in `platformSysProcAttr()` gives each child its own console group (replaces `Setpgid`).
+- `cmd.Cancel` calls `TerminateJobObject` to kill the entire process tree on timeout (replaces `Kill(-pid, SIGKILL)`).
+- `GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, childPID)` forwards interrupt to child group (replaces `syscall.Kill(-pid, sig)`).
+- `SIGTSTP`/`SIGWINCH`/`SIGHUP` have no Windows equivalents — not forwarded (correct behavior).
+- `ForegroundChildProcessGroupIfTTY` remains a no-op (Windows has no foreground process group transfer).
+- `fuse doctor` job object check verifies creation and assignment on Windows.
+- Both `executeShellCommand` (interactive) and `executeCapturedShellCommandWithStdin` (codex-shell) use job objects.
 
-**Can run in parallel with:** Phase 3, Phase 5
-
-**Done when:** `fuse run` and `fuse proxy codex-shell` handle child processes correctly on Windows, including cleanup on parent exit.
+**Done when:** ~~`fuse run` and `fuse proxy codex-shell` handle child processes correctly on Windows, including cleanup on parent exit.~~ **DONE** — implemented.
 
 ## Phase 5: Windows Security Intelligence
 

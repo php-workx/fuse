@@ -81,12 +81,11 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 	if startErr := cmd.Start(); startErr != nil {
 		return fmt.Errorf("start downstream %s: %w", downstreamName, startErr)
 	}
+	cleanup := proxyChildCleanup(cmd)
 	defer func() {
 		_ = downstreamIn.Close()
 		_ = downstreamOut.Close()
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
+		cleanup()
 		_ = cmd.Wait()
 	}()
 

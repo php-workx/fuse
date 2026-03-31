@@ -4,9 +4,14 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
+	"syscall"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/php-workx/fuse/internal/adapters"
 )
 
 func checkLiveTTYAccess() checkResult {
@@ -81,10 +86,52 @@ func checkLiveRawMode() checkResult {
 	}
 }
 
+// checkLiveForegroundProcessGroup verifies that job object creation and
+// process assignment work. This is the Windows equivalent of the Unix
+// foreground process group handoff check.
 func checkLiveForegroundProcessGroup() checkResult {
+	job, err := adapters.NewProbeJobObject()
+	if err != nil {
+		return checkResult{
+			name:   checkNameLiveForegroundHandoff,
+			status: "FAIL",
+			detail: fmt.Sprintf("create job object: %v", err),
+		}
+	}
+	defer adapters.CloseProbeJobObject(job)
+
+	// Use ping as the probe command — unlike "timeout", it works in
+	// non-interactive contexts (CI runners, SSH sessions, containers).
+	cmd := exec.Command("cmd.exe", "/c", "ping -n 30 127.0.0.1 >nul")
+	cmd.Stdin = nil
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+	}
+	if err := cmd.Start(); err != nil {
+		return checkResult{
+			name:   checkNameLiveForegroundHandoff,
+			status: "FAIL",
+			detail: fmt.Sprintf("start probe child: %v", err),
+		}
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	if err := adapters.AssignProbeJobObject(job, cmd.Process.Pid); err != nil {
+		return checkResult{
+			name:   checkNameLiveForegroundHandoff,
+			status: "FAIL",
+			detail: fmt.Sprintf("job object assign failed: %v", err),
+		}
+	}
+
 	return checkResult{
 		name:   checkNameLiveForegroundHandoff,
-		status: "SKIP",
-		detail: "Windows job object support not yet implemented (planned: Phase 4)",
+		status: "PASS",
+		detail: "job object creation and process assignment succeeded",
 	}
 }

@@ -44,8 +44,10 @@ func isValidWindowsRoot(path string) bool {
 }
 
 // platformSysProcAttr returns Windows-specific process attributes.
-// Note: CREATE_NEW_PROCESS_GROUP and job object support deferred to Phase 4.
-// Without these, child processes spawned by the shell may orphan on timeout.
+// CREATE_NEW_PROCESS_GROUP gives the child its own console control group
+// so GenerateConsoleCtrlEvent targets only the child tree, not fuse itself.
 func platformSysProcAttr() *syscall.SysProcAttr {
-	return &syscall.SysProcAttr{}
+	return &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
+	}
 }
