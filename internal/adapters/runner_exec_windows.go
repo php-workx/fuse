@@ -30,9 +30,11 @@ func executeShellCommand(command, cwd string, timeout time.Duration) (int, error
 		defer cancel()
 	}
 
+	// Fail-closed: if job object creation fails (e.g., restrictive parent
+	// job in CI), refuse to execute. Run 'fuse doctor --security' to diagnose.
 	job, err := newJobObject()
 	if err != nil {
-		return -1, fmt.Errorf("create job object: %w", err)
+		return -1, fmt.Errorf("create job object (run 'fuse doctor --security' to diagnose): %w", err)
 	}
 	defer job.close()
 

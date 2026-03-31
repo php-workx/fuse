@@ -71,7 +71,6 @@ func RunMCPProxy(downstreamName string, stdin io.Reader, stdout, stderr io.Write
 	if err != nil {
 		return fmt.Errorf("downstream stdin: %w", err)
 	}
-	defer func() { _ = downstreamIn.Close() }()
 
 	downstreamOut, err := cmd.StdoutPipe()
 	if err != nil {

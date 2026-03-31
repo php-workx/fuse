@@ -102,7 +102,7 @@ func checkLiveForegroundProcessGroup() checkResult {
 
 	// Use ping as the probe command — unlike "timeout", it works in
 	// non-interactive contexts (CI runners, SSH sessions, containers).
-	cmd := exec.Command("cmd.exe", "/c", "ping -n 30 127.0.0.1 >nul")
+	cmd := exec.Command("cmd.exe", "/c", "ping -n 2 127.0.0.1 >nul")
 	cmd.Stdin = nil
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard

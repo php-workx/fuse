@@ -139,7 +139,7 @@ func readApprovalDecision(ctx context.Context, conIn, conOut *os.File, deadline 
 			return false, "", fmt.Errorf("approval interrupted: %w", ctx.Err())
 		case <-sigCh:
 			fmt.Fprintf(conOut, "\n  Denied (signal received).\n\n")
-			return false, "", nil
+			return false, "", fmt.Errorf("approval interrupted by signal")
 		default: // non-blocking: fall through to deadline + read
 		}
 
@@ -179,7 +179,10 @@ func readApprovalDecision(ctx context.Context, conIn, conOut *os.File, deadline 
 			fmt.Fprintf(conOut, "    [o] once  |  [c] command  |  [s] session  |  [f] forever\n")
 			fmt.Fprintf(conOut, "  > ")
 
-			scopeResult, denied := readScope(ctx, conIn, conOut, deadline, sigCh)
+			scopeResult, denied, scopeErr := readScope(ctx, conIn, conOut, deadline, sigCh)
+			if scopeErr != nil {
+				return false, "", scopeErr
+			}
 			if denied {
 				return false, "", nil
 			}
@@ -197,31 +200,34 @@ func readApprovalDecision(ctx context.Context, conIn, conOut *os.File, deadline 
 }
 
 // readScope reads the scope selection from the user.
-// Returns the scope string and whether the user denied.
-func readScope(ctx context.Context, conIn, conOut *os.File, deadline time.Time, sigCh <-chan os.Signal) (string, bool) {
+// Returns (scope, denied, error). User actions (Ctrl-C) return denied=true.
+// Infrastructure failures (timeout, WAIT_FAILED, read error) return an error
+// so the approval manager can use its fallback path instead of treating
+// failures as explicit denials.
+func readScope(ctx context.Context, conIn, conOut *os.File, deadline time.Time, sigCh <-chan os.Signal) (string, bool, error) {
 	inHandle := windows.Handle(conIn.Fd())
 	buf := make([]byte, 1)
 
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Fprintf(conOut, "\n  Denied (shutdown).\n\n")
-			return "", true
+			fmt.Fprintf(conOut, "\n  Interrupted (shutdown).\n\n")
+			return "", false, fmt.Errorf("scope selection interrupted: %w", ctx.Err())
 		case <-sigCh:
-			fmt.Fprintf(conOut, "\n  Denied (signal received).\n\n")
-			return "", true
+			fmt.Fprintf(conOut, "\n  Interrupted (signal).\n\n")
+			return "", false, fmt.Errorf("scope selection interrupted by signal")
 		default:
 		}
 
 		if time.Now().After(deadline) {
-			fmt.Fprintf(conOut, "\n  Denied (timeout).\n\n")
-			return "", true
+			fmt.Fprintf(conOut, "\n  Timed out.\n\n")
+			return "", false, errPromptTimeout
 		}
 
 		// Wait up to 100ms for input to become available.
-		event, _ := windows.WaitForSingleObject(inHandle, 100)
+		event, waitErr := windows.WaitForSingleObject(inHandle, 100)
 		if event == 0xFFFFFFFF { // WAIT_FAILED — console handle invalid
-			return "", true // deny on failure
+			return "", false, fmt.Errorf("console wait failed during scope selection: %w", waitErr)
 		}
 		if event != windows.WAIT_OBJECT_0 {
 			continue
@@ -229,8 +235,7 @@ func readScope(ctx context.Context, conIn, conOut *os.File, deadline time.Time, 
 
 		n, err := conIn.Read(buf)
 		if err != nil {
-			slog.Debug("console read failed while selecting approval scope", "error", err)
-			return "", true // console error — deny
+			return "", false, fmt.Errorf("console read failed during scope selection: %w", err)
 		}
 		if n == 0 {
 			continue
@@ -238,21 +243,21 @@ func readScope(ctx context.Context, conIn, conOut *os.File, deadline time.Time, 
 
 		ch := buf[0]
 
-		// Ctrl-C.
+		// Ctrl-C — explicit user denial.
 		if ch == 3 {
 			fmt.Fprintf(conOut, "\n  Denied (Ctrl-C).\n\n")
-			return "", true
+			return "", true, nil
 		}
 
 		switch ch {
 		case 'o', 'O':
-			return "once", false
+			return "once", false, nil
 		case 'c', 'C':
-			return "command", false
+			return "command", false, nil
 		case 's', 'S':
-			return "session", false
+			return "session", false, nil
 		case 'f', 'F':
-			return "forever", false
+			return "forever", false, nil
 		default:
 			fmt.Fprintf(conOut, "\r  Scope: [o]nce [c]ommand [s]ession [f]orever  > ")
 		}

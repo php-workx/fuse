@@ -68,6 +68,7 @@ func TestGetContextVars_SingleVar(t *testing.T) {
 }
 
 func TestGetContextVars_MultipleVars(t *testing.T) {
+	clearTrackedVars(t)
 	t.Setenv("AWS_PROFILE", "staging")
 	t.Setenv("KUBECONFIG", "/home/user/.kube/config")
 	got := getContextVars()

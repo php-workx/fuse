@@ -227,7 +227,7 @@ fuse:TIMEOUT_WAITING_FOR_USER STOP. The user did not approve this action in time
 ```
 
 ```
-fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable).
+fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (console unavailable).
 ```
 
 Stderr is plain text, not JSON. Keep it short, directive, and free of dangerous command fragments or long file-inspection excerpts. On exit 0 (allow), fuse must not write to stdout — stdout output is processed by Claude Code and would interfere. Diagnostic logging goes to stderr only via `log/slog`.
@@ -1560,7 +1560,7 @@ The prompt is for the human user, not the agent. The displayed command text must
 - Timeout:
   - Hook mode: 25 seconds of no input -> auto-deny, log timeout event, emit `fuse:TIMEOUT_WAITING_FOR_USER STOP. The user did not approve this action in time. Do not retry this exact command.`
   - `fuse run` mode: 5 minutes of no input by default -> auto-deny, log timeout event.
-- If `/dev/tty` cannot be opened (e.g., no terminal / `ENXIO`): auto-deny with the plain-text error `fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (/dev/tty unavailable).`
+- If the console cannot be opened (`/dev/tty` on Unix, `CONIN$` on Windows): auto-deny with the plain-text error `fuse:NON_INTERACTIVE_MODE STOP. Approval requires an interactive terminal (console unavailable).`
 - Restore terminal mode on every normal exit path, on deny/approve, and in panic recovery.
 - In hook mode, catch `SIGINT`, `SIGTERM`, and `SIGHUP` while the prompt is active so terminal state is restored before exiting. (`SIGKILL` cannot be caught and remains an inherent risk, reduced by the 25-second internal timeout.)
 - Wrap all TUI code in panic recovery. On panic: log error to stderr, auto-deny after restoring terminal state.

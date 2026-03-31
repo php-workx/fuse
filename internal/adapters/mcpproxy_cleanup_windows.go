@@ -21,6 +21,9 @@ func proxyChildCleanup(cmd *exec.Cmd) func() {
 		}
 	}
 
+	// Race window: between cmd.Start() (in caller) and job.assign() here,
+	// grandchildren spawned by the downstream server are not tracked.
+	// Same sub-millisecond window as runner_exec_windows.go — accepted.
 	if err := job.assign(cmd.Process.Pid); err != nil {
 		slog.Warn("proxy: job object assign failed, grandchild cleanup not guaranteed", "pid", cmd.Process.Pid, "err", err)
 	}

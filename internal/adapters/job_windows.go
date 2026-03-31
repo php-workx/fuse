@@ -93,7 +93,7 @@ func (j *jobObject) terminate(exitCode uint32) error {
 func (j *jobObject) close() {
 	if j.handle != 0 {
 		if err := windows.CloseHandle(j.handle); err != nil {
-			slog.Debug("close job object handle", "err", err)
+			slog.Warn("close job object handle failed, children may not be terminated", "err", err)
 		}
 		j.handle = 0
 	}

@@ -73,6 +73,10 @@ func TestRenderPromptPlain_RendersContent(t *testing.T) {
 
 	renderPromptPlain(f, "echo hello", "test reason")
 
+	if err := f.Sync(); err != nil {
+		t.Fatalf("sync temp file: %v", err)
+	}
+
 	content, err := os.ReadFile(f.Name())
 	if err != nil {
 		t.Fatalf("read temp file: %v", err)

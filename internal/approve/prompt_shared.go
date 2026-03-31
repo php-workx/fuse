@@ -39,7 +39,7 @@ func getContextVars() string {
 			if result != "" {
 				result += ", "
 			}
-			result += v + "=" + val
+			result += v + "=" + sanitize.String(val)
 		}
 	}
 	return result

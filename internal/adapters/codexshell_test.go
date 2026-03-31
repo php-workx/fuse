@@ -159,7 +159,7 @@ func runCodexShellServerLineRequests(t *testing.T, requests ...jsonRPCMessage) [
 
 func TestExecuteCapturedShellCommand_DoesNotInheritProcessStdin(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	origStdin := os.Stdin
 	r, w, err := os.Pipe()
@@ -192,7 +192,7 @@ func TestExecuteCapturedShellCommand_DoesNotInheritProcessStdin(t *testing.T) {
 
 func TestExecuteCodexShellCommand_AllowsBlockedCommandWhenDisabled(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enabledMarker := config.EnabledMarkerPath()
@@ -224,7 +224,7 @@ func TestExecuteCodexShellCommand_AllowsBlockedCommandWhenDisabled(t *testing.T)
 
 func TestExecuteCodexShellCommand_LogsAndPrunesEvents(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -258,7 +258,7 @@ func TestExecuteCodexShellCommand_LogsAndPrunesEvents(t *testing.T) {
 
 func TestExecuteCodexShellCommand_EnabledSafeCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -280,7 +280,7 @@ func TestExecuteCodexShellCommand_EnabledSafeCommand(t *testing.T) {
 
 func TestExecuteCodexShellCommand_EnabledBlockedCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	fuseHome := withFuseHome(t)
 	enableFuseForTest(t)
@@ -300,7 +300,7 @@ func TestExecuteCodexShellCommand_EnabledBlockedCommand(t *testing.T) {
 
 func TestExecuteCodexShellCommand_EnabledApprovalWithoutTTY(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -439,7 +439,7 @@ func TestRunCodexShellServer_InitializeAndToolsList_LineDelimited(t *testing.T) 
 
 func TestRunCodexShellServer_ToolCallSafe(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -474,7 +474,7 @@ func TestRunCodexShellServer_ToolCallSafe(t *testing.T) {
 
 func TestRunCodexShellServer_ToolCallSafe_LineDelimited(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -509,7 +509,7 @@ func TestRunCodexShellServer_ToolCallSafe_LineDelimited(t *testing.T) {
 
 func TestRunCodexShellServer_ToolCallBlocked(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	fuseHome := withFuseHome(t)
 	enableFuseForTest(t)
@@ -544,7 +544,7 @@ func TestRunCodexShellServer_ToolCallBlocked(t *testing.T) {
 
 func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -583,7 +583,7 @@ func TestRunCodexShellServer_ToolCallApprovalWithoutTTY(t *testing.T) {
 
 func TestExecuteCodexShellCommand_SessionIDAttribution(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -625,7 +625,7 @@ func TestExecuteCodexShellCommand_SessionIDAttribution(t *testing.T) {
 
 func TestExecuteCodexShellCommand_DistinctSessionIDs(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -697,7 +697,7 @@ func TestGenerateSessionID_Unique(t *testing.T) {
 
 func TestRunCodexShellServer_ConcurrentToolCalls(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -733,7 +733,7 @@ func TestRunCodexShellServer_ConcurrentToolCalls(t *testing.T) {
 
 func TestRunCodexShellServer_SlowRequestDoesNotBlockFast(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
@@ -858,7 +858,7 @@ func TestRunCodexShellServer_GracefulShutdownOnEOF(t *testing.T) {
 
 func TestRunCodexShellServer_ShutdownKillsInFlight(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)
