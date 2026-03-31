@@ -18,6 +18,11 @@ func TestSetupWorktreeLinksSharedDirectories(t *testing.T) {
 
 	repoRoot := t.TempDir()
 	runWorktreeCmd(t, repoRoot, "git", "init")
+	disabledHooksDir := filepath.Join(repoRoot, ".git-hooks-disabled")
+	if err := os.MkdirAll(disabledHooksDir, 0o755); err != nil {
+		t.Fatalf("mkdir disabled hooks dir: %v", err)
+	}
+	runWorktreeCmd(t, repoRoot, "git", "config", "core.hooksPath", disabledHooksDir)
 	runWorktreeCmd(t, repoRoot, "git", "config", "user.name", "Test User")
 	runWorktreeCmd(t, repoRoot, "git", "config", "user.email", "test@example.com")
 
@@ -58,12 +63,37 @@ func runWorktreeCmd(t *testing.T, cwd, name string, args ...string) string {
 
 	cmd := exec.Command(name, args...)
 	cmd.Dir = cwd
+	cmd.Env = filteredGitEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %v failed: %v\n%s", name, args, err, string(out))
 	}
 
 	return string(out)
+}
+
+func filteredGitEnv() []string {
+	env := os.Environ()
+	filtered := env[:0]
+	for _, item := range env {
+		if strings.HasPrefix(item, "GIT_") {
+			switch {
+			case strings.HasPrefix(item, "GIT_CONFIG_"),
+				strings.HasPrefix(item, "GIT_EXEC_PATH="),
+				strings.HasPrefix(item, "GIT_SSH="),
+				strings.HasPrefix(item, "GIT_SSH_COMMAND="),
+				strings.HasPrefix(item, "GIT_TRACE="),
+				strings.HasPrefix(item, "GIT_TRACE2="),
+				strings.HasPrefix(item, "GIT_TRACE_PACKET="),
+				strings.HasPrefix(item, "GIT_TRACE_PERFORMANCE="),
+				strings.HasPrefix(item, "GIT_TRACE_SETUP="):
+				filtered = append(filtered, item)
+			}
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
 }
 
 func writeWorktreeFile(t *testing.T, path, contents string) {
