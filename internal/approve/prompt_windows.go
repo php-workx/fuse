@@ -47,8 +47,8 @@ func PromptUser(ctx context.Context, command, reason string, hookMode, nonIntera
 
 	// Save original console modes (input and output).
 	var origMode uint32
-	if err := windows.GetConsoleMode(inHandle, &origMode); err != nil {
-		return false, "", fmt.Errorf("get console mode: %w", err)
+	if modeErr := windows.GetConsoleMode(inHandle, &origMode); modeErr != nil {
+		return false, "", fmt.Errorf("get console mode: %w", modeErr)
 	}
 	var origOutMode uint32
 	hasOutMode := windows.GetConsoleMode(outHandle, &origOutMode) == nil
@@ -284,46 +284,54 @@ func renderPrompt(conOut *os.File, command, reason string) {
 	renderPromptPlain(conOut, command, reason)
 }
 
+// promptStrings holds the format strings for the approval prompt.
+// ANSI and plain variants differ only in escape code decoration.
+type promptStrings struct {
+	header  string
+	bold    func(label string) string
+	approve string
+}
+
+var (
+	ansiPrompt = promptStrings{
+		header:  "  \033[1;33m--- fuse: approval required ---\033[0m",
+		bold:    func(label string) string { return "\033[1m" + label + "\033[0m" },
+		approve: "  \033[1;32m[A]pprove\033[0m  |  \033[1;31m[D]eny\033[0m",
+	}
+	plainPrompt = promptStrings{
+		header:  "  --- fuse: approval required ---",
+		bold:    func(label string) string { return label },
+		approve: "  [A]pprove  |  [D]eny",
+	}
+)
+
 // renderPromptANSI writes the prompt with ANSI color escape sequences.
 func renderPromptANSI(conOut *os.File, command, reason string) {
-	contextVars := getContextVars()
-	cwd, _ := os.Getwd()
-
-	fmt.Fprintf(conOut, "\n")
-	fmt.Fprintf(conOut, "  \033[1;33m--- fuse: approval required ---\033[0m\n")
-	fmt.Fprintf(conOut, "\n")
-	fmt.Fprintf(conOut, "  \033[1mAgent requested:\033[0m %s\n", sanitizePrompt(command))
-	fmt.Fprintf(conOut, "  \033[1mCwd:\033[0m            %s\n", sanitizePrompt(cwd))
-	fmt.Fprintf(conOut, "  \033[1mRisk:\033[0m           APPROVAL\n")
-	if reason != "" {
-		fmt.Fprintf(conOut, "  \033[1mReason:\033[0m         %s\n", sanitizePrompt(reason))
-	}
-	if contextVars != "" {
-		fmt.Fprintf(conOut, "  \033[1mContext:\033[0m        %s\n", sanitizePrompt(contextVars))
-	}
-	fmt.Fprintf(conOut, "\n")
-	fmt.Fprintf(conOut, "  \033[1;32m[A]pprove\033[0m  |  \033[1;31m[D]eny\033[0m\n")
-	fmt.Fprintf(conOut, "  > ")
+	writePrompt(conOut, command, reason, ansiPrompt)
 }
 
 // renderPromptPlain writes the prompt without ANSI escape sequences.
 func renderPromptPlain(conOut *os.File, command, reason string) {
+	writePrompt(conOut, command, reason, plainPrompt)
+}
+
+func writePrompt(w *os.File, command, reason string, ps promptStrings) {
 	contextVars := getContextVars()
 	cwd, _ := os.Getwd()
 
-	fmt.Fprintf(conOut, "\n")
-	fmt.Fprintf(conOut, "  --- fuse: approval required ---\n")
-	fmt.Fprintf(conOut, "\n")
-	fmt.Fprintf(conOut, "  Agent requested: %s\n", sanitizePrompt(command))
-	fmt.Fprintf(conOut, "  Cwd:             %s\n", sanitizePrompt(cwd))
-	fmt.Fprintf(conOut, "  Risk:            APPROVAL\n")
+	fmt.Fprintf(w, "\n")
+	fmt.Fprintf(w, "%s\n", ps.header)
+	fmt.Fprintf(w, "\n")
+	fmt.Fprintf(w, "  %s %s\n", ps.bold("Agent requested:"), sanitizePrompt(command))
+	fmt.Fprintf(w, "  %s %s\n", ps.bold("Cwd:           "), sanitizePrompt(cwd))
+	fmt.Fprintf(w, "  %s APPROVAL\n", ps.bold("Risk:          "))
 	if reason != "" {
-		fmt.Fprintf(conOut, "  Reason:          %s\n", sanitizePrompt(reason))
+		fmt.Fprintf(w, "  %s %s\n", ps.bold("Reason:        "), sanitizePrompt(reason))
 	}
 	if contextVars != "" {
-		fmt.Fprintf(conOut, "  Context:         %s\n", sanitizePrompt(contextVars))
+		fmt.Fprintf(w, "  %s %s\n", ps.bold("Context:       "), sanitizePrompt(contextVars))
 	}
-	fmt.Fprintf(conOut, "\n")
-	fmt.Fprintf(conOut, "  [A]pprove  |  [D]eny\n")
-	fmt.Fprintf(conOut, "  > ")
+	fmt.Fprintf(w, "\n")
+	fmt.Fprintf(w, "%s\n", ps.approve)
+	fmt.Fprintf(w, "  > ")
 }

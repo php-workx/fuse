@@ -25,7 +25,7 @@ func isValidWindowsRoot(path string) bool {
 	}
 	// First char must be a letter (drive letter)
 	drive := path[0]
-	if !((drive >= 'A' && drive <= 'Z') || (drive >= 'a' && drive <= 'z')) {
+	if (drive < 'A' || drive > 'Z') && (drive < 'a' || drive > 'z') {
 		return false
 	}
 	// Second char must be ':'

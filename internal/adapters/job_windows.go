@@ -50,7 +50,7 @@ func newJobObject() (*jobObject, error) {
 	if _, err := windows.SetInformationJobObject(
 		h,
 		windows.JobObjectExtendedLimitInformation,
-		uintptr(unsafe.Pointer(&info)),
+		uintptr(unsafe.Pointer(&info)), //nolint:gosec // SAFETY: stack-allocated, valid for syscall duration
 		uint32(unsafe.Sizeof(info)),
 	); err != nil {
 		_ = windows.CloseHandle(h)
