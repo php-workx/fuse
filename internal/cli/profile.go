@@ -2,9 +2,12 @@ package cli
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 
 	"github.com/php-workx/fuse/internal/config"
 )
@@ -25,8 +28,19 @@ var profileCmd = &cobra.Command{
 	GroupID: groupObserve,
 }
 
+var profileSetCmd = &cobra.Command{
+	Use:   "set <name>",
+	Short: "Set the active profile",
+	Long:  "Sets the active profile in config.yaml while preserving other settings where possible.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return setProfile(args[0])
+	},
+}
+
 func init() {
 	rootCmd.AddCommand(profileCmd)
+	profileCmd.AddCommand(profileSetCmd)
 }
 
 func printProfileSummary(cfg *config.Config) {
@@ -50,4 +64,97 @@ func printProfileSummary(cfg *config.Config) {
 	fmt.Printf("llm_judge.downgrade_threshold: %.2f\n", cfg.LLMJudge.DowngradeThreshold)
 	fmt.Printf("llm_judge.trigger_decisions: [%s]\n", strings.Join(cfg.LLMJudge.TriggerDecisions, " "))
 	fmt.Printf("llm_judge.max_calls_per_minute: %d\n", cfg.LLMJudge.MaxCallsPerMinute)
+}
+
+func setProfile(profile string) error {
+	normalized, err := normalizeProfileSelection(profile)
+	if err != nil {
+		return err
+	}
+
+	cfgPath := config.ConfigPath()
+	if _, loadErr := config.LoadConfig(cfgPath); loadErr != nil {
+		return loadErr
+	}
+	if ensureErr := config.EnsureDirectories(); ensureErr != nil {
+		return ensureErr
+	}
+
+	raw, err := loadProfileConfigMap(cfgPath)
+	if err != nil {
+		return err
+	}
+	raw["profile"] = normalized
+
+	if err := writeProfileConfigMap(cfgPath, raw); err != nil {
+		return err
+	}
+
+	fmt.Printf("profile set to %s\n", normalized)
+	return nil
+}
+
+func normalizeProfileSelection(profile string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case config.ProfileRelaxed:
+		return config.ProfileRelaxed, nil
+	case config.ProfileBalanced:
+		return config.ProfileBalanced, nil
+	case config.ProfileStrict:
+		return config.ProfileStrict, nil
+	default:
+		return "", fmt.Errorf("invalid profile %q (supported: relaxed, balanced, strict)", profile)
+	}
+}
+
+func loadProfileConfigMap(path string) (map[string]interface{}, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]interface{}{}, nil
+		}
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	var cfg map[string]interface{}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	if cfg == nil {
+		cfg = map[string]interface{}{}
+	}
+	return cfg, nil
+}
+
+func writeProfileConfigMap(path string, cfg map[string]interface{}) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".config-*.yaml")
+	if err != nil {
+		return fmt.Errorf("create temp config: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("write temp config: %w", err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("set temp config permissions: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp config: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("replace config: %w", err)
+	}
+	return nil
 }
