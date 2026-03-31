@@ -269,6 +269,10 @@ setup: install-dev
     git config core.hooksPath scripts
     @echo "Git hooks configured (scripts/)"
 
+# Link shared metadata directories into the current git worktree.
+worktree-setup:
+    @bash scripts/setup-worktree.sh
+
 # Install development tools and git hooks
 install-dev:
     @echo "Installing Go tools..."
