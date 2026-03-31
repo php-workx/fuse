@@ -2,7 +2,11 @@
 
 package cli
 
-import "golang.org/x/sys/windows"
+import (
+	"sync"
+
+	"golang.org/x/sys/windows"
+)
 
 func terminalWidth() int {
 	conOut, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
@@ -25,21 +29,32 @@ func isTerminal(fd int) bool {
 	return windows.GetConsoleMode(windows.Handle(fd), &mode) == nil
 }
 
+var (
+	ansiOnce      sync.Once
+	ansiSupported bool
+)
+
 // supportsANSI probes whether the console supports ANSI/VT escape sequences
-// by attempting to enable ENABLE_VIRTUAL_TERMINAL_PROCESSING. Legacy conhost
-// (pre-Windows 10 1511) does not support this flag and the call fails.
+// by enabling ENABLE_VIRTUAL_TERMINAL_PROCESSING. If the flag is accepted,
+// VT processing is left enabled so subsequent ANSI output renders correctly.
+// Legacy conhost (pre-Windows 10 1511) does not support this flag and the
+// call fails. The probe runs exactly once per process via sync.Once.
 func supportsANSI() bool {
-	conOut, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
-	if err != nil || conOut == windows.InvalidHandle {
-		return false
-	}
-	var mode uint32
-	if err := windows.GetConsoleMode(conOut, &mode); err != nil {
-		return false
-	}
-	if err := windows.SetConsoleMode(conOut, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING); err != nil {
-		return false
-	}
-	_ = windows.SetConsoleMode(conOut, mode) // restore original
-	return true
+	ansiOnce.Do(func() {
+		conOut, err := windows.GetStdHandle(windows.STD_OUTPUT_HANDLE)
+		if err != nil || conOut == windows.InvalidHandle {
+			return
+		}
+		var mode uint32
+		if err := windows.GetConsoleMode(conOut, &mode); err != nil {
+			return
+		}
+		if err := windows.SetConsoleMode(conOut, mode|windows.ENABLE_VIRTUAL_TERMINAL_PROCESSING); err != nil {
+			return
+		}
+		// VT processing is intentionally left enabled — restoring the
+		// original mode would cause ANSI codes to render as raw text.
+		ansiSupported = true
+	})
+	return ansiSupported
 }

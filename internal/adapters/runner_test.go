@@ -432,7 +432,7 @@ func TestTrustedPath_WindowsSystemRootValidation(t *testing.T) {
 
 func TestExecuteCommand_SafeCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	// This test actually executes a command, so use a safe one.
 	// We need to set up a temporary working directory.
@@ -454,7 +454,7 @@ func TestExecuteCommand_SafeCommand(t *testing.T) {
 
 func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableDryRunForTest(t)
@@ -469,7 +469,7 @@ func TestExecuteCommand_DryRunAllowsBlockedCommand(t *testing.T) {
 
 func TestExecuteCommand_DisabledPassesThrough(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	// Neither enabled nor dry-run — fully disabled.
@@ -485,7 +485,7 @@ func TestExecuteCommand_DisabledPassesThrough(t *testing.T) {
 
 func TestExecuteCommand_EnabledBlockedCommand(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("shell execution not yet supported on Windows")
+		t.Skip("test uses Unix-specific shell commands")
 	}
 	withFuseHome(t)
 	enableFuseForTest(t)

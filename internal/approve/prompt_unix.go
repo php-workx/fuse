@@ -108,7 +108,7 @@ func readApprovalDecision(ctx context.Context, tty *os.File, deadline time.Time,
 			return false, "", fmt.Errorf("approval interrupted: %w", ctx.Err())
 		case <-sigCh:
 			fmt.Fprintf(tty, "\n  Denied (signal received).\n\n")
-			return false, "", nil
+			return false, "", fmt.Errorf("approval interrupted by signal")
 		default: // non-blocking: fall through to deadline + read
 		}
 

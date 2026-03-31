@@ -132,13 +132,6 @@ func (rc *runContext) handleApprovalCommand() (int, error) {
 		return 0, nil
 	}
 
-	if runtime.GOOS == "windows" {
-		fmt.Fprintf(os.Stderr, "fuse: BLOCKED — approval not yet supported on Windows\n")
-		rc.logWithVerdict("blocked")
-		cleanupExecutionState(rc.database, rc.cfg)
-		return 1, nil
-	}
-
 	if rc.database == nil {
 		fmt.Fprintf(os.Stderr, "fuse: approval required but database unavailable\n")
 		return 1, fmt.Errorf("database unavailable for approval")

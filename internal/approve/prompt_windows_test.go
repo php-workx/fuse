@@ -3,6 +3,7 @@
 package approve
 
 import (
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -12,7 +13,7 @@ import (
 // errNonInteractive when the nonInteractive flag is set.
 func TestOpenConsole_NonInteractiveFlag(t *testing.T) {
 	conIn, conOut, err := openConsole(true)
-	if err != errNonInteractive {
+	if !errors.Is(err, errNonInteractive) {
 		t.Errorf("expected errNonInteractive, got %v", err)
 	}
 	if conIn != nil {
@@ -30,7 +31,7 @@ func TestOpenConsole_NonInteractiveFlag(t *testing.T) {
 func TestOpenConsole_NonInteractiveEnv(t *testing.T) {
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 	conIn, conOut, err := openConsole(false)
-	if err != errNonInteractive {
+	if !errors.Is(err, errNonInteractive) {
 		t.Errorf("expected errNonInteractive, got %v", err)
 	}
 	if conIn != nil {
@@ -47,7 +48,7 @@ func TestOpenConsole_NonInteractiveEnv(t *testing.T) {
 // errNonInteractive when the nonInteractive parameter is true.
 func TestPromptUser_NonInteractiveFlag(t *testing.T) {
 	_, _, err := PromptUser(t.Context(), "rm -rf /", "dangerous", false, true)
-	if err != errNonInteractive {
+	if !errors.Is(err, errNonInteractive) {
 		t.Errorf("expected errNonInteractive, got %v", err)
 	}
 }
@@ -57,7 +58,7 @@ func TestPromptUser_NonInteractiveFlag(t *testing.T) {
 func TestPromptUser_NonInteractiveEnv(t *testing.T) {
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
 	_, _, err := PromptUser(t.Context(), "rm -rf /", "dangerous", false, false)
-	if err != errNonInteractive {
+	if !errors.Is(err, errNonInteractive) {
 		t.Errorf("expected errNonInteractive, got %v", err)
 	}
 }
@@ -72,6 +73,10 @@ func TestRenderPromptPlain_RendersContent(t *testing.T) {
 	defer func() { _ = f.Close() }()
 
 	renderPromptPlain(f, "echo hello", "test reason")
+
+	if err := f.Sync(); err != nil {
+		t.Fatalf("sync temp file: %v", err)
+	}
 
 	content, err := os.ReadFile(f.Name())
 	if err != nil {

@@ -46,6 +46,11 @@ lint:
     @command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not installed (run: just install-dev)" && exit 1)
     golangci-lint run
 
+# Lint Windows-specific code with golangci-lint
+lint-windows:
+    @command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not installed (run: just install-dev)" && exit 1)
+    GOOS=windows golangci-lint run
+
 # Lint GitHub Actions workflows
 actionlint:
     @if [ -d .github/workflows ]; then \
