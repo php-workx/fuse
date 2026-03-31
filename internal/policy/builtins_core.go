@@ -16,13 +16,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:git:reset-hard",
 			Pattern: regexp.MustCompile(`\bgit\s+reset\s+--hard\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Discards all uncommitted changes",
 		},
 		BuiltinRule{
 			ID:      "builtin:git:clean",
 			Pattern: regexp.MustCompile(`\bgit\s+clean\s+-[a-zA-Z]*f`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes untracked files",
 		},
 		BuiltinRule{
@@ -40,7 +40,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:git:stash-clear",
 			Pattern: regexp.MustCompile(`\bgit\s+stash\s+clear\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes all stashed changes",
 		},
 		BuiltinRule{
@@ -58,7 +58,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:git:checkout-dot",
 			Pattern: regexp.MustCompile(`\bgit\s+checkout\s+--\s*\.`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Discards all working tree changes",
 		},
 		BuiltinRule{
@@ -77,7 +77,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:terminate-instances",
 			Pattern: regexp.MustCompile(`\baws\s+ec2\s+terminate-instances\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Terminates EC2 instances",
 		},
 		BuiltinRule{
@@ -89,31 +89,31 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-snapshot",
 			Pattern: regexp.MustCompile(`\baws\s+ec2\s+delete-snapshot\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes EC2 snapshot",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-volume",
 			Pattern: regexp.MustCompile(`\baws\s+ec2\s+delete-volume\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes EBS volume",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-vpc",
 			Pattern: regexp.MustCompile(`\baws\s+ec2\s+delete-vpc\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes VPC",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-subnet",
 			Pattern: regexp.MustCompile(`\baws\s+ec2\s+delete-subnet\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes subnet",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-sg",
 			Pattern: regexp.MustCompile(`\baws\s+ec2\s+delete-security-group\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes security group",
 		},
 		BuiltinRule{
@@ -125,7 +125,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:deregister-ami",
 			Pattern: regexp.MustCompile(`\baws\s+ec2\s+deregister-image\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deregisters AMI",
 		},
 		BuiltinRule{
@@ -137,13 +137,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-ecs-service",
 			Pattern: regexp.MustCompile(`\baws\s+ecs\s+delete-service\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes ECS service",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-ecs-cluster",
 			Pattern: regexp.MustCompile(`\baws\s+ecs\s+delete-cluster\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes ECS cluster",
 		},
 		BuiltinRule{
@@ -155,13 +155,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-eks-cluster",
 			Pattern: regexp.MustCompile(`\baws\s+eks\s+delete-cluster\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes EKS cluster",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-eks-nodegroup",
 			Pattern: regexp.MustCompile(`\baws\s+eks\s+delete-nodegroup\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes EKS node group",
 		},
 
@@ -169,19 +169,19 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-bucket",
 			Pattern: regexp.MustCompile(`\baws\s+s3\s+rb\b|aws\s+s3api\s+delete-bucket\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes S3 bucket",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:s3-rm",
 			Pattern: regexp.MustCompile(`\baws\s+s3\s+rm\s+.*--recursive\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Recursively deletes S3 objects",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-ecr-repo",
 			Pattern: regexp.MustCompile(`\baws\s+ecr\s+delete-repository\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes ECR repository",
 		},
 		BuiltinRule{
@@ -195,25 +195,25 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-db",
 			Pattern: regexp.MustCompile(`\baws\s+rds\s+delete-db-(instance|cluster)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes RDS database",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-table",
 			Pattern: regexp.MustCompile(`\baws\s+dynamodb\s+delete-table\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes DynamoDB table",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-elasticache",
 			Pattern: regexp.MustCompile(`\baws\s+elasticache\s+delete-(cache-cluster|replication-group)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes ElastiCache cluster",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-kinesis",
 			Pattern: regexp.MustCompile(`\baws\s+kinesis\s+delete-stream\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Kinesis stream",
 		},
 
@@ -221,25 +221,25 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-function",
 			Pattern: regexp.MustCompile(`\baws\s+lambda\s+delete-function\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Lambda function",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-rest-api",
 			Pattern: regexp.MustCompile(`\baws\s+apigateway\s+delete-rest-api\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes API Gateway REST API",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-apigw-v2",
 			Pattern: regexp.MustCompile(`\baws\s+apigatewayv2\s+delete-api\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes API Gateway v2 API",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-sfn",
 			Pattern: regexp.MustCompile(`\baws\s+stepfunctions\s+delete-state-machine\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Step Functions state machine",
 		},
 		BuiltinRule{
@@ -251,19 +251,19 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-sqs",
 			Pattern: regexp.MustCompile(`\baws\s+sqs\s+delete-queue\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes SQS queue",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:purge-sqs",
 			Pattern: regexp.MustCompile(`\baws\s+sqs\s+purge-queue\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Purges all messages from SQS queue",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-sns",
 			Pattern: regexp.MustCompile(`\baws\s+sns\s+delete-topic\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes SNS topic",
 		},
 		BuiltinRule{
@@ -277,55 +277,55 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-stack",
 			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack(?:\s|$)`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes CloudFormation stack",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-stack-set",
 			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack-set\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes CloudFormation stack set (multi-account/region)",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-stack-instances",
 			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-stack-instances\b.*--no-retain-stacks\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes stack set instances and their underlying stacks",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-change-set",
 			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+delete-change-set\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes CloudFormation change set",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:cancel-update-stack",
 			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+cancel-update-stack\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Cancels in-progress stack update (can leave stack in broken state)",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:disable-termination-protection",
 			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+update-termination-protection\s+.*--no-enable-termination-protection\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Disables stack termination protection",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:set-stack-policy",
 			Pattern: regexp.MustCompile(`\baws\s+cloudformation\s+set-stack-policy\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Modifies stack policy (can weaken resource protections)",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-cloudfront",
 			Pattern: regexp.MustCompile(`\baws\s+cloudfront\s+delete-distribution\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes CloudFront distribution",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:delete-elb",
 			Pattern: regexp.MustCompile(`\baws\s+elbv2\s+delete-load-balancer\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes ALB/NLB",
 		},
 		BuiltinRule{
@@ -337,7 +337,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-route53",
 			Pattern: regexp.MustCompile(`\baws\s+route53\s+delete-hosted-zone\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Route53 hosted zone",
 		},
 		BuiltinRule{
@@ -351,13 +351,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:iam-delete",
 			Pattern: regexp.MustCompile(`\baws\s+iam\s+delete-(user|role|policy|group)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes IAM entity",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:iam-attach",
 			Pattern: regexp.MustCompile(`\baws\s+iam\s+(attach|detach|put)-(user|role|group)-policy\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Modifies IAM policy attachment",
 		},
 		BuiltinRule{
@@ -369,19 +369,19 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:aws:delete-secret",
 			Pattern: regexp.MustCompile(`\baws\s+secretsmanager\s+delete-secret\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes secret",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:kms-disable",
 			Pattern: regexp.MustCompile(`\baws\s+kms\s+(disable-key|schedule-key-deletion)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Disables or schedules KMS key deletion",
 		},
 		BuiltinRule{
 			ID:      "builtin:aws:cognito-delete",
 			Pattern: regexp.MustCompile(`\baws\s+cognito-idp\s+delete-user-pool\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Cognito user pool",
 		},
 
@@ -405,49 +405,49 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-project",
 			Pattern: regexp.MustCompile(`\bgcloud\s+projects\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes entire GCP project",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-instance",
 			Pattern: regexp.MustCompile(`\bgcloud\s+compute\s+instances\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes compute instance",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-disk",
 			Pattern: regexp.MustCompile(`\bgcloud\s+compute\s+disks\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes persistent disk",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-snapshot",
 			Pattern: regexp.MustCompile(`\bgcloud\s+compute\s+snapshots\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes disk snapshot",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-image",
 			Pattern: regexp.MustCompile(`\bgcloud\s+compute\s+images\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes compute image",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-cluster",
 			Pattern: regexp.MustCompile(`\bgcloud\s+container\s+clusters\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes GKE cluster",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-cloud-run",
 			Pattern: regexp.MustCompile(`\bgcloud\s+run\s+services\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Cloud Run service",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-function",
 			Pattern: regexp.MustCompile(`\bgcloud\s+functions\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Cloud Function",
 		},
 		BuiltinRule{
@@ -461,7 +461,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-bucket",
 			Pattern: regexp.MustCompile(`\bgsutil\s+rb\b|gcloud\s+storage\s+buckets\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes GCS bucket",
 		},
 		BuiltinRule{
@@ -473,7 +473,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-artifact",
 			Pattern: regexp.MustCompile(`\bgcloud\s+artifacts\s+(repositories|docker\s+images)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Artifact Registry resource",
 		},
 
@@ -481,43 +481,43 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:gcp:sql-delete",
 			Pattern: regexp.MustCompile(`\bgcloud\s+sql\s+instances\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Cloud SQL instance",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-dataset",
 			Pattern: regexp.MustCompile(`\bgcloud\s+bigquery\s+.*\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes BigQuery resource",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:bq-rm",
 			Pattern: regexp.MustCompile(`\bbq\s+rm\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes BigQuery table/dataset via bq CLI",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-firestore",
 			Pattern: regexp.MustCompile(`\bgcloud\s+firestore\s+databases\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Firestore database",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-spanner",
 			Pattern: regexp.MustCompile(`\bgcloud\s+spanner\s+(instances|databases)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Spanner resource",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-pubsub",
 			Pattern: regexp.MustCompile(`\bgcloud\s+pubsub\s+(topics|subscriptions)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Pub/Sub topic or subscription",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-memorystore",
 			Pattern: regexp.MustCompile(`\bgcloud\s+redis\s+instances\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Memorystore Redis instance",
 		},
 
@@ -525,31 +525,31 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-network",
 			Pattern: regexp.MustCompile(`\bgcloud\s+compute\s+(networks|firewall-rules|routers|addresses)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes VPC networking resource",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-dns",
 			Pattern: regexp.MustCompile(`\bgcloud\s+dns\s+managed-zones\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Cloud DNS zone",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:iam-binding",
 			Pattern: regexp.MustCompile(`\bgcloud\s+.*\s+(add|remove)-iam-policy-binding\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Modifies IAM binding",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:kms-destroy",
 			Pattern: regexp.MustCompile(`\bgcloud\s+kms\s+keys\s+versions\s+destroy\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Destroys KMS key version",
 		},
 		BuiltinRule{
 			ID:      "builtin:gcp:delete-sa",
 			Pattern: regexp.MustCompile(`\bgcloud\s+iam\s+service-accounts\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes service account",
 		},
 		BuiltinRule{
@@ -565,43 +565,43 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:az:group-delete",
 			Pattern: regexp.MustCompile(`\baz\s+group\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes entire resource group (cascading)",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:vm-delete",
 			Pattern: regexp.MustCompile(`\baz\s+vm\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes virtual machine",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:vmss-delete",
 			Pattern: regexp.MustCompile(`\baz\s+vmss\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes VM scale set",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:aks-delete",
 			Pattern: regexp.MustCompile(`\baz\s+aks\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes AKS cluster",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:webapp-delete",
 			Pattern: regexp.MustCompile(`\baz\s+webapp\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes App Service web app",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:functionapp-delete",
 			Pattern: regexp.MustCompile(`\baz\s+functionapp\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Azure Function app",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:acr-delete",
 			Pattern: regexp.MustCompile(`\baz\s+acr\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes container registry",
 		},
 
@@ -609,37 +609,37 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:az:storage-delete",
 			Pattern: regexp.MustCompile(`\baz\s+storage\s+(account|container|blob)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes storage resource",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:cosmosdb-delete",
 			Pattern: regexp.MustCompile(`\baz\s+cosmosdb\s+(delete|database\s+delete|collection\s+delete)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes CosmosDB resource",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:sql-delete",
 			Pattern: regexp.MustCompile(`\baz\s+sql\s+(server|db)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Azure SQL resource",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:redis-delete",
 			Pattern: regexp.MustCompile(`\baz\s+redis\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Azure Cache for Redis",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:servicebus-delete",
 			Pattern: regexp.MustCompile(`\baz\s+servicebus\s+(namespace|queue|topic)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Service Bus resource",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:eventhubs-delete",
 			Pattern: regexp.MustCompile(`\baz\s+eventhubs\s+(namespace|eventhub)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Event Hubs resource",
 		},
 
@@ -647,19 +647,19 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:az:network-delete",
 			Pattern: regexp.MustCompile(`\baz\s+network\s+(vnet|nsg|public-ip|lb|application-gateway)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes networking resource",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:dns-delete",
 			Pattern: regexp.MustCompile(`\baz\s+network\s+dns\s+zone\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes DNS zone",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:keyvault-delete",
 			Pattern: regexp.MustCompile(`\baz\s+keyvault\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Key Vault",
 		},
 		BuiltinRule{
@@ -671,13 +671,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:az:ad-delete",
 			Pattern: regexp.MustCompile(`\baz\s+ad\s+(app|sp|group)\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Azure AD entity",
 		},
 		BuiltinRule{
 			ID:      "builtin:az:role-assignment",
 			Pattern: regexp.MustCompile(`\baz\s+role\s+assignment\s+(create|delete)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Modifies role assignment",
 		},
 
@@ -695,13 +695,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:terraform:destroy",
 			Pattern: regexp.MustCompile(`\b(terraform|tofu)\s+destroy\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Destroys Terraform-managed infrastructure",
 		},
 		BuiltinRule{
 			ID:      "builtin:terraform:apply",
 			Pattern: regexp.MustCompile(`\b(terraform|tofu)\s+apply\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Applies Terraform changes",
 		},
 		BuiltinRule{
@@ -719,7 +719,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:terraform:state-rm",
 			Pattern: regexp.MustCompile(`\b(terraform|tofu)\s+state\s+rm\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Removes resource from state",
 		},
 		BuiltinRule{
@@ -731,13 +731,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:terraform:force-unlock",
 			Pattern: regexp.MustCompile(`\b(terraform|tofu)\s+force-unlock\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Force-unlocks state lock",
 		},
 		BuiltinRule{
 			ID:      "builtin:terraform:workspace-delete",
 			Pattern: regexp.MustCompile(`\b(terraform|tofu)\s+workspace\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Terraform workspace",
 		},
 		BuiltinRule{
@@ -751,7 +751,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:cdk:destroy",
 			Pattern: regexp.MustCompile(`\bcdk\s+destroy\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Destroys CDK stack",
 		},
 		BuiltinRule{
@@ -771,19 +771,19 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:pulumi:destroy",
 			Pattern: regexp.MustCompile(`\bpulumi\s+destroy\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Destroys Pulumi stack",
 		},
 		BuiltinRule{
 			ID:      "builtin:pulumi:up",
 			Pattern: regexp.MustCompile(`\bpulumi\s+up\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Applies Pulumi changes",
 		},
 		BuiltinRule{
 			ID:      "builtin:pulumi:up-yes",
 			Pattern: regexp.MustCompile(`\bpulumi\s+up\s+.*(-y|--yes)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Applies Pulumi changes non-interactively",
 		},
 		BuiltinRule{
@@ -801,13 +801,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:pulumi:stack-rm",
 			Pattern: regexp.MustCompile(`\bpulumi\s+stack\s+rm\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Removes Pulumi stack",
 		},
 		BuiltinRule{
 			ID:      "builtin:pulumi:state-delete",
 			Pattern: regexp.MustCompile(`\bpulumi\s+state\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes resource from state",
 		},
 
@@ -831,13 +831,13 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:k8s:delete",
 			Pattern: regexp.MustCompile(`\bkubectl\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Kubernetes resources",
 		},
 		BuiltinRule{
 			ID:      "builtin:k8s:drain",
 			Pattern: regexp.MustCompile(`\bkubectl\s+drain\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Drains a node",
 		},
 		BuiltinRule{
@@ -849,7 +849,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:k8s:replace-force",
 			Pattern: regexp.MustCompile(`\bkubectl\s+replace\s+--force\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Force-replaces resources",
 		},
 		BuiltinRule{
@@ -861,7 +861,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:helm:uninstall",
 			Pattern: regexp.MustCompile(`\bhelm\s+(uninstall|delete)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Uninstalls Helm release",
 		},
 
@@ -899,25 +899,25 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:db:drop-database",
 			Pattern: regexp.MustCompile(`\bDROP\s+DATABASE\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Drops entire database",
 		},
 		BuiltinRule{
 			ID:      "builtin:db:drop-table",
 			Pattern: regexp.MustCompile(`\bDROP\s+TABLE\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Drops table",
 		},
 		BuiltinRule{
 			ID:      "builtin:db:truncate",
 			Pattern: regexp.MustCompile(`\bTRUNCATE\s+TABLE\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Truncates table",
 		},
 		BuiltinRule{
 			ID:      "builtin:db:delete-no-where",
 			Pattern: regexp.MustCompile(`\bDELETE\s+FROM\s+\S+\s*;`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "DELETE without WHERE clause",
 		},
 		BuiltinRule{
@@ -929,7 +929,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:db:mongo-drop",
 			Pattern: regexp.MustCompile(`\b\.drop(Database|Collection)\(\)`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "MongoDB drop operations",
 		},
 
@@ -951,7 +951,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:rsync:delete",
 			Pattern: regexp.MustCompile(`\brsync\s+.*--delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Rsync with delete flag",
 		},
 
@@ -979,7 +979,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:db:redis-flush",
 			Pattern: regexp.MustCompile(`\bredis-cli\s+.*(FLUSHALL|FLUSHDB)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Redis flush operations",
 		},
 		BuiltinRule{
@@ -1007,7 +1007,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:sys:kill-pid",
 			Pattern: regexp.MustCompile(`\bkill\s+(-9\s+)?1\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Killing PID 1 (init/systemd)",
 		},
 		BuiltinRule{
@@ -1025,7 +1025,7 @@ func init() {
 		BuiltinRule{
 			ID:      "builtin:sys:iptables-flush",
 			Pattern: regexp.MustCompile(`\biptables\s+-F\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Flushing all firewall rules",
 		},
 		BuiltinRule{

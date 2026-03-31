@@ -12,23 +12,25 @@ import (
 
 // EventRecord represents one persisted fuse event.
 type EventRecord struct {
-	ID                int64  `json:"id"`
-	Timestamp         string `json:"timestamp"`
-	SessionID         string `json:"session_id,omitempty"`
-	Command           string `json:"command,omitempty"`
-	Decision          string `json:"decision,omitempty"`
-	RuleID            string `json:"rule_id,omitempty"`
-	Reason            string `json:"reason,omitempty"`
-	DurationMs        int64  `json:"duration_ms,omitempty"`
-	Metadata          string `json:"metadata,omitempty"`
-	Source            string `json:"source,omitempty"`
-	Agent             string `json:"agent,omitempty"`
-	Cwd               string `json:"cwd,omitempty"`
-	WorkspaceRoot     string `json:"workspace_root,omitempty"`
-	FileInspected     bool   `json:"file_inspected,omitempty"`
-	ApprovalID        string `json:"approval_id,omitempty"`
-	UserResponse      string `json:"user_response,omitempty"`
-	ExecutionExitCode *int64 `json:"execution_exit_code,omitempty"`
+	ID                 int64  `json:"id"`
+	Timestamp          string `json:"timestamp"`
+	SessionID          string `json:"session_id,omitempty"`
+	Command            string `json:"command,omitempty"`
+	Decision           string `json:"decision,omitempty"`
+	StructuralDecision string `json:"structural_decision,omitempty"`
+	Profile            string `json:"profile,omitempty"`
+	RuleID             string `json:"rule_id,omitempty"`
+	Reason             string `json:"reason,omitempty"`
+	DurationMs         int64  `json:"duration_ms,omitempty"`
+	Metadata           string `json:"metadata,omitempty"`
+	Source             string `json:"source,omitempty"`
+	Agent              string `json:"agent,omitempty"`
+	Cwd                string `json:"cwd,omitempty"`
+	WorkspaceRoot      string `json:"workspace_root,omitempty"`
+	FileInspected      bool   `json:"file_inspected,omitempty"`
+	ApprovalID         string `json:"approval_id,omitempty"`
+	UserResponse       string `json:"user_response,omitempty"`
+	ExecutionExitCode  *int64 `json:"execution_exit_code,omitempty"`
 
 	// LLM judge fields (empty when judge is off or not triggered).
 	JudgeDecision   string  `json:"judge_decision,omitempty"`
@@ -147,6 +149,9 @@ func (d *DB) LogEvent(record *EventRecord) error {
 	record.JudgeReasoning = ScrubCredentials(record.JudgeReasoning)
 	record.JudgeError = ScrubCredentials(record.JudgeError)
 	record.Cwd = normalizeEventPath(record.Cwd)
+	if record.StructuralDecision == "" {
+		record.StructuralDecision = record.Decision
+	}
 	if record.WorkspaceRoot == "" {
 		record.WorkspaceRoot = detectWorkspaceRoot(record.Cwd)
 	} else {
@@ -160,15 +165,17 @@ func (d *DB) LogEvent(record *EventRecord) error {
 
 	_, err := d.db.Exec(`
 		INSERT INTO events (
-			session_id, command, decision, rule_id, reason, duration_ms, metadata,
+			session_id, command, decision, structural_decision, profile, rule_id, reason, duration_ms, metadata,
 			source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code,
 			judge_decision, judge_confidence, judge_reasoning, judge_applied, judge_provider, judge_latency_ms, judge_error
 		)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		record.SessionID,
 		record.Command,
 		record.Decision,
+		record.StructuralDecision,
+		record.Profile,
 		record.RuleID,
 		record.Reason,
 		record.DurationMs,
@@ -226,7 +233,7 @@ func (d *DB) ListEvents(filter *EventFilter) ([]EventRecord, error) {
 	}
 
 	var qb strings.Builder
-	qb.WriteString(`SELECT id, timestamp, session_id, command, decision, rule_id, reason, duration_ms, metadata,
+	qb.WriteString(`SELECT id, timestamp, session_id, command, decision, structural_decision, profile, rule_id, reason, duration_ms, metadata,
 		source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code,
 		judge_decision, judge_confidence, judge_reasoning, judge_applied, judge_provider, judge_latency_ms, judge_error
 		FROM events`)
@@ -260,7 +267,7 @@ func (d *DB) ListEvents(filter *EventFilter) ([]EventRecord, error) {
 // scanEventRow scans a single row from an events query into an EventRecord.
 func scanEventRow(rows *sql.Rows) (EventRecord, error) {
 	var event EventRecord
-	var sessionID, command, decision, ruleID, reason, metadata sql.NullString
+	var sessionID, command, decision, structuralDecision, profile, ruleID, reason, metadata sql.NullString
 	var source, agent, cwd, workspaceRoot, approvalID, userResponse sql.NullString
 	var fileInspected sql.NullInt64
 	var executionExitCode sql.NullInt64
@@ -273,6 +280,8 @@ func scanEventRow(rows *sql.Rows) (EventRecord, error) {
 		&sessionID,
 		&command,
 		&decision,
+		&structuralDecision,
+		&profile,
 		&ruleID,
 		&reason,
 		&event.DurationMs,
@@ -298,6 +307,8 @@ func scanEventRow(rows *sql.Rows) (EventRecord, error) {
 	event.SessionID = sessionID.String
 	event.Command = command.String
 	event.Decision = decision.String
+	event.StructuralDecision = structuralDecision.String
+	event.Profile = profile.String
 	event.RuleID = ruleID.String
 	event.Reason = reason.String
 	event.Metadata = metadata.String

@@ -185,22 +185,24 @@ func handleMCPTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *
 	}
 	var mcpVerdict *judge.Verdict
 	mcpResult, mcpVerdict = judge.MaybeJudge(ctx, cfg, mcpResult, mcpPromptCtx)
-	decision = mcpResult.Decision
+	structuralDecision := StructuralDecision(mcpResult, mcpVerdict)
+	effectiveDecision := EffectiveDecision(mcpResult, mcpVerdict, cfg)
+	decision = effectiveDecision
 
 	// MCP tools don't use tag_overrides — dryrun always allows.
 	if dryRun {
-		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, structuralDecision, effectiveDecision, resolvedProfile(cfg), mcpVerdict)
 		return 0
 	}
 
 	switch decision {
 	case core.DecisionBlocked:
 		fmt.Fprintln(stderr, "fuse:POLICY_BLOCK STOP. MCP tool call blocked by policy. Do not retry this exact command. Ask the user for guidance.")
-		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, structuralDecision, effectiveDecision, resolvedProfile(cfg), mcpVerdict)
 		return 2
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s classified as CAUTION\n", req.ToolName)
-		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, structuralDecision, effectiveDecision, resolvedProfile(cfg), mcpVerdict)
 		return 0
 	case core.DecisionApproval:
 		result := &core.ClassifyResult{
@@ -218,7 +220,7 @@ func handleMCPTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *
 		return handleApproval(req, result, mcpVerdict, stderr, cfg, dryRun)
 	default:
 		// SAFE
-		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, mcpVerdict)
+		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, structuralDecision, effectiveDecision, resolvedProfile(cfg), mcpVerdict)
 		return 0
 	}
 }
@@ -288,6 +290,8 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 		promptCtx := buildJudgeContext(input.Command, req.Cwd, "Bash", result)
 		result, verdict = judge.MaybeJudge(ctx, cfg, result, promptCtx)
 	}
+	structuralDecision := StructuralDecision(result, verdict)
+	effectiveDecision := EffectiveDecision(result, verdict, cfg)
 
 	// Log per-tag dryrun matches for observability.
 	for i := range result.DryRunMatches {
@@ -299,16 +303,16 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 	// In dryrun mode, only enforce decisions from tag_overrides.
 	// Without TagOverrideEnforced, log and allow all commands.
 	if dryRun && !result.TagOverrideEnforced {
-		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
-		if result.Decision == core.DecisionCaution {
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, structuralDecision, effectiveDecision, resolvedProfile(cfg), verdict)
+		if effectiveDecision == core.DecisionCaution {
 			fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
 		}
 		return 0
 	}
 
-	switch result.Decision {
+	switch effectiveDecision {
 	case core.DecisionSafe:
-		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, structuralDecision, effectiveDecision, resolvedProfile(cfg), verdict)
 		return 0
 
 	case core.DecisionBlocked:
@@ -316,12 +320,12 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 		scrubbed := db.ScrubCredentials(result.Reason)
 		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", scrubbed)
 		fmt.Fprintln(stderr, msg)
-		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, structuralDecision, effectiveDecision, resolvedProfile(cfg), verdict)
 		return 2
 
 	case core.DecisionCaution:
 		fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
-		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, verdict)
+		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, structuralDecision, effectiveDecision, resolvedProfile(cfg), verdict)
 		return 0
 
 	case core.DecisionApproval:
@@ -508,6 +512,9 @@ func readScriptSafe(cwd, scriptPath string) string {
 // the enforced decision = judge_decision; otherwise enforced = decision.
 func applyVerdict(event *db.EventRecord, verdict *judge.Verdict) {
 	if verdict != nil {
+		if event.StructuralDecision == "" && verdict.OriginalDecision != "" {
+			event.StructuralDecision = string(verdict.OriginalDecision)
+		}
 		event.JudgeDecision = string(verdict.JudgeDecision)
 		event.JudgeConfidence = verdict.Confidence
 		event.JudgeReasoning = verdict.Reasoning
@@ -515,28 +522,33 @@ func applyVerdict(event *db.EventRecord, verdict *judge.Verdict) {
 		event.JudgeProvider = verdict.ProviderName
 		event.JudgeLatencyMs = verdict.LatencyMs
 		event.JudgeError = verdict.Error
-		if verdict.Applied {
-			event.Decision = string(verdict.OriginalDecision)
-		}
 	}
 }
 
 // logHookEventWithVerdict logs a hook event with judge verdict fields. Best-effort.
-func logHookEventWithVerdict(sessionID, command, cwd string, result *core.ClassifyResult, verdict *judge.Verdict) {
+func logHookEventWithVerdict(
+	sessionID, command, cwd string,
+	result *core.ClassifyResult,
+	structuralDecision, effectiveDecision core.Decision,
+	profile string,
+	verdict *judge.Verdict,
+) {
 	database, err := db.OpenDB(config.DBPath())
 	if err != nil {
 		return // best-effort: skip if DB unavailable
 	}
 	defer func() { _ = database.Close() }()
 	event := &db.EventRecord{
-		SessionID: sessionID,
-		Command:   command,
-		Decision:  string(result.Decision),
-		RuleID:    result.RuleID,
-		Reason:    result.Reason,
-		Source:    "hook",
-		Agent:     "claude",
-		Cwd:       cwd,
+		SessionID:          sessionID,
+		Command:            command,
+		Decision:           string(effectiveDecision),
+		StructuralDecision: string(structuralDecision),
+		Profile:            profile,
+		RuleID:             result.RuleID,
+		Reason:             result.Reason,
+		Source:             "hook",
+		Agent:              "claude",
+		Cwd:                cwd,
 	}
 	applyVerdict(event, verdict)
 	_ = database.LogEvent(event)

@@ -21,6 +21,7 @@ var migrationSteps = []migrationStep{
 	{"3", applyV4, "4"},
 	{"4", applyV5, "5"},
 	{"5", applyV6, "6"},
+	{"6", applyV7, "7"},
 }
 
 func currentSchemaVersion() string {
@@ -108,6 +109,8 @@ func applyV1(db *sql.DB) error {
 			session_id   TEXT,
 			command      TEXT,
 			decision     TEXT,
+			structural_decision TEXT,
+			profile      TEXT,
 			rule_id      TEXT,
 			reason       TEXT,
 			duration_ms  INTEGER,
@@ -217,6 +220,21 @@ func applyV6(db *sql.DB) error {
 		`ALTER TABLE events ADD COLUMN judge_latency_ms INTEGER DEFAULT 0`,
 		`ALTER TABLE events ADD COLUMN judge_error TEXT DEFAULT ''`,
 		`INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', '6')`,
+	}
+
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil && !isDuplicateColumnError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func applyV7(db *sql.DB) error {
+	stmts := []string{
+		`ALTER TABLE events ADD COLUMN structural_decision TEXT DEFAULT ''`,
+		`ALTER TABLE events ADD COLUMN profile TEXT DEFAULT ''`,
+		`INSERT OR REPLACE INTO schema_meta (key, value) VALUES ('version', '7')`,
 	}
 
 	for _, stmt := range stmts {

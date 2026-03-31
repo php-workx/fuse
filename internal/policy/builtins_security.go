@@ -17,31 +17,31 @@ func init() {
 		{
 			ID:      "builtin:paas:heroku-destroy",
 			Pattern: regexp.MustCompile(`\bheroku\s+apps:destroy\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Destroys Heroku app",
 		},
 		{
 			ID:      "builtin:paas:fly-destroy",
 			Pattern: regexp.MustCompile(`\bfly(ctl)?\s+destroy\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Destroys Fly.io app",
 		},
 		{
 			ID:      "builtin:paas:vercel-rm",
 			Pattern: regexp.MustCompile(`\bvercel\s+rm\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Vercel project",
 		},
 		{
 			ID:      "builtin:paas:netlify-delete",
 			Pattern: regexp.MustCompile(`\bnetlify\s+sites:delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Netlify site",
 		},
 		{
 			ID:      "builtin:paas:railway-delete",
 			Pattern: regexp.MustCompile(`\brailway\s+delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Deletes Railway project",
 		},
 
@@ -51,31 +51,31 @@ func init() {
 		{
 			ID:      "builtin:fs:rm-rf",
 			Pattern: regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Recursive force-remove (non-root paths)",
 		},
 		{
 			ID:      "builtin:fs:rm-split-rf",
 			Pattern: regexp.MustCompile(`\brm\s+.*-r\b.*-f\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "rm with split -r -f flags",
 		},
 		{
 			ID:      "builtin:fs:rm-long-rf",
 			Pattern: regexp.MustCompile(`\brm\s+.*--recursive\b.*--force\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "rm with long-form flags",
 		},
 		{
 			ID:      "builtin:fs:find-delete",
 			Pattern: regexp.MustCompile(`\bfind\b.*\s-delete\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Find with delete",
 		},
 		{
 			ID:      "builtin:fs:find-exec-rm",
 			Pattern: regexp.MustCompile(`\bfind\b.*-exec\s+rm\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Find with exec rm",
 		},
 		{
@@ -125,7 +125,7 @@ func init() {
 		{
 			ID:      "builtin:cred:cat-cloud-creds",
 			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*(credentials|\.aws\/config|\.boto|\.gcloud|\.azure|service.account\.json|kubeconfig)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Reads cloud credential files",
 		},
 		{
@@ -161,7 +161,7 @@ func init() {
 		{
 			ID:      "builtin:cred:base64-key",
 			Pattern: regexp.MustCompile(`\bbase64\s+.*\.(pem|key|crt|p12)\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Base64-encodes credential files",
 		},
 
@@ -202,13 +202,13 @@ func init() {
 		{
 			ID:      "builtin:cred:cat-gpg-key",
 			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*\.gnupg/`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Reads GPG key material - requires approval (native file path classification will be tightened separately)",
 		},
 		{
 			ID:      "builtin:cred:cat-pypirc",
 			Pattern: regexp.MustCompile(`\b(cat|less|more|head|tail)\s+.*\.pypirc\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Reads PyPI credentials - requires approval (native file path classification will be tightened separately)",
 		},
 
@@ -248,7 +248,7 @@ func init() {
 		{
 			ID:      "builtin:exfil:nc-connect",
 			Pattern: regexp.MustCompile(`\b(nc|ncat|netcat)\s+.*\d+\.\d+\.\d+\.\d+`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Netcat connection to IP (potential exfiltration)",
 			Predicate: func(cmd string) bool {
 				return !reNetcatScanMode.MatchString(cmd)
@@ -263,7 +263,7 @@ func init() {
 		{
 			ID:      "builtin:exfil:dns-exfil",
 			Pattern: regexp.MustCompile(`\b(dig|nslookup|host)\s+.*\$\(`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "DNS lookup with command substitution (DNS exfiltration)",
 		},
 		{
@@ -285,7 +285,7 @@ func init() {
 		{
 			ID:      "builtin:revshell:python",
 			Pattern: regexp.MustCompile(`\bpython[23]?\s+.*socket\..*connect\b`),
-			Action:  core.DecisionApproval, // kept: socket.connect appears in legitimate client code
+			Action:  core.DecisionBlocked,
 			Reason:  "Python reverse shell",
 		},
 		{
@@ -315,7 +315,7 @@ func init() {
 		{
 			ID:      "builtin:persist:cron-write",
 			Pattern: regexp.MustCompile(`(>|>>)\s*.*(/etc/cron|/var/spool/cron)`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionBlocked,
 			Reason:  "Writes to cron directories",
 		},
 		{
@@ -355,13 +355,13 @@ func init() {
 		{
 			ID:      "builtin:container:privileged",
 			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*--privileged\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Runs privileged container (host access)",
 		},
 		{
 			ID:      "builtin:container:host-pid",
 			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*--pid=host\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Container with host PID namespace",
 		},
 		{
@@ -385,7 +385,7 @@ func init() {
 		{
 			ID:      "builtin:container:nsenter",
 			Pattern: regexp.MustCompile(`\bnsenter\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Enters namespace (container escape)",
 		},
 		{
@@ -403,7 +403,7 @@ func init() {
 		{
 			ID:      "builtin:privesc:cap-add",
 			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*--cap-add\s+(ALL|SYS_ADMIN|SYS_PTRACE)`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Adds dangerous Linux capabilities",
 		},
 
@@ -437,13 +437,13 @@ func init() {
 		{
 			ID:      "builtin:obfusc:curl-exec",
 			Pattern: regexp.MustCompile(`\bcurl\s+.*\|\s*(ba)?sh\b`),
-			Action:  core.DecisionApproval, // kept: curl | bash is a common install pattern
+			Action:  core.DecisionBlocked,
 			Reason:  "curl piped to shell",
 		},
 		{
 			ID:      "builtin:obfusc:wget-exec",
 			Pattern: regexp.MustCompile(`\bwget\s+.*-O\s*-.*\|\s*(ba)?sh\b`),
-			Action:  core.DecisionApproval, // kept: wget | bash is a common install pattern
+			Action:  core.DecisionBlocked,
 			Reason:  "wget piped to shell",
 		},
 		{
@@ -455,7 +455,7 @@ func init() {
 		{
 			ID:      "builtin:indirect:find-exec",
 			Pattern: regexp.MustCompile(`\bfind\b.*-exec\s+(sh|bash)\s+-c\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "find -exec with shell",
 		},
 
@@ -480,7 +480,7 @@ func init() {
 		{
 			ID:      "builtin:pkg:pip-install-url",
 			Pattern: regexp.MustCompile(`\bpip[3]?\s+install\s+.*https?://`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "pip install from URL",
 		},
 		{
@@ -526,13 +526,13 @@ func init() {
 		{
 			ID:      "builtin:recon:masscan",
 			Pattern: regexp.MustCompile(`\bmasscan\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Aggressive network scanning",
 		},
 		{
 			ID:      "builtin:recon:nikto",
 			Pattern: regexp.MustCompile(`\bnikto\b`),
-			Action:  core.DecisionApproval,
+			Action:  core.DecisionCaution,
 			Reason:  "Web server vulnerability scanning",
 		},
 		{

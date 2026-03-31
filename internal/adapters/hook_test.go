@@ -114,24 +114,20 @@ func TestRunHook_MCP(t *testing.T) {
 func TestRunHook_MCP_DestructiveAction(t *testing.T) {
 	enableHookForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
-	// MCP tool with a destructive-prefix action should trigger caution/approval path.
+	// MCP tool with a destructive-prefix action should emit CAUTION and continue.
 	input := `{"tool_name":"mcp__server__delete_items","tool_input":{"id":"123"},"session_id":"test","cwd":"/tmp"}`
 	stdin := strings.NewReader(input)
 	stderr := &bytes.Buffer{}
 
 	exitCode := RunHook(stdin, stderr)
 
-	if exitCode != 2 {
-		t.Errorf("expected exit code 2 for MCP approval tool without interactive tty, got %d", exitCode)
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0 for MCP caution tool, got %d", exitCode)
 	}
 
 	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "PENDING_APPROVAL") &&
-		!strings.Contains(stderrStr, "APPROVAL_NOT_AVAILABLE") &&
-		!strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") &&
-		!strings.Contains(stderrStr, "USER_DENIED") &&
-		!strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
-		t.Errorf("expected approval-related directive in stderr, got: %s", stderrStr)
+	if !strings.Contains(stderrStr, "CAUTION") {
+		t.Errorf("expected CAUTION directive in stderr, got: %s", stderrStr)
 	}
 }
 

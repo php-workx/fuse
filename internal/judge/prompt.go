@@ -27,7 +27,7 @@ Your job: evaluate whether a shell command's current safety classification is co
 
 Classifications (ordered by severity):
 - SAFE: routine development command, no risk of data loss or security exposure
-- CAUTION: worth logging but safe to auto-approve (e.g., git push to feature branch)
+- CAUTION: suspicious but usually acceptable; auto-approved unless you escalate it
 - APPROVAL: requires explicit human approval — could cause data loss, expose secrets,
   affect production, or modify critical infrastructure
 
@@ -39,6 +39,9 @@ Important:
 - Read-only commands are almost always SAFE.
 - Commands targeting production, secrets, or irreversible state changes need APPROVAL.
 - Never classify as SAFE if the command could delete data outside the working directory.
+- CAUTION is the judge triage tier. Keep a command at CAUTION when it is risky enough to log
+  but not risky enough to interrupt the user.
+- When downgrading APPROVAL, use CAUTION, not SAFE.
 - If script contents are provided, read them fully before deciding. Do not assess risk
   from just the first few lines — dangerous operations can appear anywhere in a script.
 - If script contents are marked as TRUNCATED, you cannot fully assess the script.

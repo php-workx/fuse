@@ -175,7 +175,7 @@ func inferDecisionFromSignals(signals []inspect.Signal) Decision {
 		switch s.Category {
 		case "subprocess", "cloud_cli", "http_control_plane",
 			"dynamic_exec", "dynamic_import":
-			return DecisionApproval
+			return DecisionCaution
 		case "cloud_sdk":
 			hasCloudSDK = true
 		case "destructive_fs", "destructive_verb":
@@ -185,7 +185,7 @@ func inferDecisionFromSignals(signals []inspect.Signal) Decision {
 		}
 	}
 	if hasCloudSDK && hasDestructive {
-		return DecisionApproval
+		return DecisionCaution
 	}
 	return decision
 }

@@ -2,18 +2,28 @@ package config
 
 import (
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
+const (
+	ProfileRelaxed  = "relaxed"
+	ProfileBalanced = "balanced"
+	ProfileStrict   = "strict"
+	ProfileCustom   = "custom"
+)
+
 // Config represents the fuse configuration from config.yaml.
 type Config struct {
+	Profile         string               `yaml:"profile"`
 	LogLevel        string               `yaml:"log_level"`
 	MaxEventLogRows int                  `yaml:"max_event_log_rows"`
 	MCPProxies      []MCPProxy           `yaml:"mcp_proxies"`
 	LLMJudge        LLMJudgeConfig       `yaml:"llm_judge"`
 	URLTrustPolicy  URLTrustPolicyConfig `yaml:"url_trust_policy"`
 	PolicyLKG       PolicyLKGConfig      `yaml:"policy_lkg"`
+	CautionFallback string               `yaml:"caution_fallback"`
 }
 
 // URLTrustPolicyConfig controls URL inspection behavior.
@@ -51,22 +61,59 @@ type MCPProxy struct {
 
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() *Config {
-	return &Config{
+	return ProfileDefaults(ProfileRelaxed)
+}
+
+// ProfileDefaults returns a Config seeded with defaults for the given profile.
+func ProfileDefaults(profile string) *Config {
+	profile = normalizeProfile(profile)
+	cfg := &Config{
+		Profile:         profile,
 		LogLevel:        "warn",
 		MaxEventLogRows: 10000,
+		CautionFallback: "log",
 		LLMJudge: LLMJudgeConfig{
 			Mode:               "off",
 			Provider:           "auto",
 			Timeout:            "10s",
 			UpgradeThreshold:   0.7,
 			DowngradeThreshold: 0.95,
-			TriggerDecisions:   []string{"approval", "caution"},
+			TriggerDecisions:   []string{},
 			MaxCallsPerMinute:  30,
 		},
 		PolicyLKG: PolicyLKGConfig{
 			Enabled:    true,
 			MaxAgeDays: 7,
 		},
+	}
+
+	switch profile {
+	case ProfileBalanced:
+		cfg.LLMJudge.Mode = "active"
+		cfg.LLMJudge.DowngradeThreshold = 0.9
+		cfg.LLMJudge.TriggerDecisions = []string{"caution", "approval"}
+	case ProfileStrict:
+		cfg.LLMJudge.Mode = "active"
+		cfg.LLMJudge.TriggerDecisions = []string{"caution"}
+	case ProfileCustom:
+		cfg.Profile = ProfileCustom
+	}
+
+	return cfg
+}
+
+func normalizeProfile(profile string) string {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case "", ProfileRelaxed:
+		return ProfileRelaxed
+	case ProfileBalanced:
+		return ProfileBalanced
+	case ProfileStrict:
+		return ProfileStrict
+	case ProfileCustom:
+		return ProfileCustom
+	default:
+		return ProfileCustom
 	}
 }
 
@@ -80,9 +127,39 @@ func LoadConfig(path string) (*Config, error) {
 		}
 		return nil, err
 	}
-	cfg := DefaultConfig()
+	var overlay Config
+	if err := yaml.Unmarshal(data, &overlay); err != nil {
+		return nil, err
+	}
+
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+
+	profile := resolveProfile(raw, &overlay)
+	cfg := ProfileDefaults(profile)
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
 	}
+	cfg.Profile = profile
 	return cfg, nil
+}
+
+func resolveProfile(raw map[string]interface{}, overlay *Config) string {
+	if raw != nil {
+		if value, ok := raw["profile"]; ok {
+			profile, ok := value.(string)
+			if !ok {
+				return ProfileCustom
+			}
+			return normalizeProfile(profile)
+		}
+	}
+
+	if overlay != nil && strings.EqualFold(strings.TrimSpace(overlay.LLMJudge.Mode), "active") {
+		return ProfileBalanced
+	}
+
+	return ProfileRelaxed
 }

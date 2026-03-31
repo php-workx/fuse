@@ -204,13 +204,13 @@ func inspectNetworkCommandFlags(cmd string, escalate func(Decision, string)) {
 		escalate(DecisionCaution, "insecure TLS flag detected")
 	}
 	if reDestructiveHTTPMethod.MatchString(cmd) {
-		escalate(DecisionApproval, "destructive HTTP method detected")
+		escalate(DecisionCaution, "destructive HTTP method detected")
 	}
 	if hasDataUploadFlag(cmd) {
 		escalate(DecisionCaution, "data upload/exfiltration flag detected")
 	}
 	if reFileUploadFlag.MatchString(cmd) {
-		escalate(DecisionApproval, "file upload flag detected (exfiltration risk)")
+		escalate(DecisionCaution, "file upload flag detected (exfiltration risk)")
 	}
 	if hasRedirectFlags(cmd) {
 		escalate(DecisionCaution, "HTTP redirect following enabled")
@@ -224,7 +224,7 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 	// Check for shell expansion tokens BEFORE url.Parse (SEC-001).
 	// url.Parse fails on $() and backtick syntax, so this must come first.
 	if isShellExpansion(rawURL) {
-		return DecisionApproval, "URL contains shell variable expansion"
+		return DecisionCaution, "URL contains shell variable expansion"
 	}
 
 	parsed, err := url.Parse(rawURL)
