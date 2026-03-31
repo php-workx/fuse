@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/php-workx/fuse/internal/config"
 )
 
 func TestMergeCodexConfig(t *testing.T) {
@@ -177,6 +179,58 @@ func TestInstallClaudePreservesCurrentBehaviorByDefault(t *testing.T) {
 	}
 }
 
+func TestInstallClaudeWritesProfileAwareConfigScaffold(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+
+	if err := installClaude(false); err != nil {
+		t.Fatalf("installClaude(false): %v", err)
+	}
+
+	assertProfileAwareConfigScaffold(t, config.ConfigPath())
+}
+
+func TestInstallCodexWritesProfileAwareConfigScaffold(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("CODEX_HOME", filepath.Join(tmpHome, ".codex"))
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+
+	if err := installCodex(); err != nil {
+		t.Fatalf("installCodex(): %v", err)
+	}
+
+	assertProfileAwareConfigScaffold(t, config.ConfigPath())
+}
+
+func TestInstallPreservesExistingFuseConfigScaffold(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+
+	configPath := config.ConfigPath()
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	want := []byte("profile: strict\ncustom_key: keep\n")
+	if err := os.WriteFile(configPath, want, 0o644); err != nil {
+		t.Fatalf("write existing config: %v", err)
+	}
+
+	if err := installClaude(false); err != nil {
+		t.Fatalf("installClaude(false): %v", err)
+	}
+
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("config.yaml changed unexpectedly:\n--- want ---\n%s--- got ---\n%s", want, got)
+	}
+}
+
 func TestInstallClaude_RejectsSymlinkedSettingsPath(t *testing.T) {
 	tmpHome := t.TempDir()
 	targetPath := filepath.Join(t.TempDir(), "target.json")
@@ -313,4 +367,26 @@ func claudeMatchersFromHooks(t *testing.T, preToolUse []interface{}) []string {
 	}
 	sort.Strings(matchers)
 	return matchers
+}
+
+func assertProfileAwareConfigScaffold(t *testing.T, configPath string) {
+	t.Helper()
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read scaffold: %v", err)
+	}
+
+	for _, want := range []string{
+		"# Fuse configuration",
+		"# Profile sets defaults. Override individual settings below.",
+		"profile: relaxed",
+		"# llm_judge:",
+		"#   provider: auto",
+		"# caution_fallback: log",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("config scaffold missing %q:\n%s", want, string(data))
+		}
+	}
 }

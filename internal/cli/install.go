@@ -155,6 +155,10 @@ func installClaude(secure bool) error {
 		return fmt.Errorf("writing %s: %w", settingsPath, err)
 	}
 
+	if err := ensureFuseConfigScaffold(); err != nil {
+		return err
+	}
+
 	fmt.Printf("fuse hook installed in %s\n", settingsPath)
 	fmt.Println("Claude Code will now use fuse for command safety checks.")
 	return nil
@@ -372,6 +376,10 @@ func installCodex() error {
 	}
 	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", configPath, err)
+	}
+
+	if err := ensureFuseConfigScaffold(); err != nil {
+		return err
 	}
 
 	fmt.Printf("fuse Codex MCP server installed in %s\n", configPath)
