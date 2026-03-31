@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -128,38 +129,83 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 	var overlay Config
-	if err := yaml.Unmarshal(data, &overlay); err != nil {
+	err = yaml.Unmarshal(data, &overlay)
+	if err != nil {
 		return nil, err
 	}
 
 	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	err = yaml.Unmarshal(data, &raw)
+	if err != nil {
 		return nil, err
 	}
 
-	profile := resolveProfile(raw, &overlay)
+	profile, err := resolveProfile(raw, &overlay)
+	if err != nil {
+		return nil, err
+	}
+	validationErr := validateCautionFallback(raw)
+	if validationErr != nil {
+		return nil, validationErr
+	}
 	cfg := ProfileDefaults(profile)
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	err = yaml.Unmarshal(data, cfg)
+	if err != nil {
 		return nil, err
 	}
 	cfg.Profile = profile
 	return cfg, nil
 }
 
-func resolveProfile(raw map[string]interface{}, overlay *Config) string {
+func resolveProfile(raw map[string]interface{}, overlay *Config) (string, error) {
 	if raw != nil {
 		if value, ok := raw["profile"]; ok {
 			profile, ok := value.(string)
 			if !ok {
-				return ProfileCustom
+				return "", fmt.Errorf("invalid profile: must be one of %s, %s, %s, %s", ProfileRelaxed, ProfileBalanced, ProfileStrict, ProfileCustom)
 			}
-			return normalizeProfile(profile)
+			return parseProfile(profile)
 		}
 	}
 
 	if overlay != nil && strings.EqualFold(strings.TrimSpace(overlay.LLMJudge.Mode), "active") {
-		return ProfileBalanced
+		return ProfileBalanced, nil
 	}
 
-	return ProfileRelaxed
+	return ProfileRelaxed, nil
+}
+
+func parseProfile(profile string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(profile)) {
+	case ProfileRelaxed:
+		return ProfileRelaxed, nil
+	case ProfileBalanced:
+		return ProfileBalanced, nil
+	case ProfileStrict:
+		return ProfileStrict, nil
+	case ProfileCustom:
+		return ProfileCustom, nil
+	default:
+		return "", fmt.Errorf("invalid profile %q: must be one of %s, %s, %s, %s", profile, ProfileRelaxed, ProfileBalanced, ProfileStrict, ProfileCustom)
+	}
+}
+
+func validateCautionFallback(raw map[string]interface{}) error {
+	if raw == nil {
+		return nil
+	}
+	value, ok := raw["caution_fallback"]
+	if !ok {
+		return nil
+	}
+	fallback, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("invalid caution_fallback: must be %q or %q", "log", "approve")
+	}
+	switch strings.ToLower(strings.TrimSpace(fallback)) {
+	case "log", "approve":
+		return nil
+	default:
+		return fmt.Errorf("invalid caution_fallback %q: must be %q or %q", fallback, "log", "approve")
+	}
 }

@@ -100,6 +100,28 @@ profile: strict
 	}
 }
 
+func TestLoadConfig_InvalidProfileReturnsError(t *testing.T) {
+	path := writeConfigFixture(t, `
+profile: turbo
+`)
+
+	cfg, err := LoadConfig(path)
+	if err == nil {
+		t.Fatalf("LoadConfig() error = nil, want invalid profile error; cfg=%#v", cfg)
+	}
+}
+
+func TestLoadConfig_InvalidCautionFallbackReturnsError(t *testing.T) {
+	path := writeConfigFixture(t, `
+caution_fallback: prompt
+`)
+
+	cfg, err := LoadConfig(path)
+	if err == nil {
+		t.Fatalf("LoadConfig() error = nil, want invalid caution_fallback error; cfg=%#v", cfg)
+	}
+}
+
 func writeConfigFixture(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.yaml")

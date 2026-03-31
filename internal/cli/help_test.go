@@ -133,7 +133,7 @@ func TestRootHelpGrouped(t *testing.T) {
 		"╭", "╮", "│", "╰", "╯",
 		"install", "uninstall", "enable", "disable", "dryrun",
 		"run", "hook", "proxy",
-		"events", "stats", "monitor", "doctor", "test",
+		"events", "stats", "monitor", "doctor", "profile", "test",
 		"Additional Commands:",
 		"version", "help", "completion",
 	} {
@@ -145,7 +145,7 @@ func TestRootHelpGrouped(t *testing.T) {
 	// Verify command ordering within groups by extracting each box.
 	assertGroupOrder(t, output, "Setup", []string{"install", "uninstall", "enable", "disable", "dryrun"})
 	assertGroupOrder(t, output, "Runtime", []string{"run", "hook", "proxy"})
-	assertGroupOrder(t, output, "Observe", []string{"events", "stats", "monitor", "doctor", "test"})
+	assertGroupOrder(t, output, "Observe", []string{"events", "stats", "monitor", "doctor", "profile", "test"})
 }
 
 // extractGroupBox returns the text between "╭─ <title>" and the next "╯" (inclusive).

@@ -38,6 +38,71 @@ func TestRunDoctor_ReportsMCPProxyChecks(t *testing.T) {
 	}
 }
 
+func TestRunDoctor_ReportsCurrentProfile(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	configPath := configPathForTest(t)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("profile: strict\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	binDir := t.TempDir()
+	mustWriteExecutable(t, binDir, "fuse")
+	mustWriteExecutable(t, binDir, "claude")
+	t.Setenv("PATH", binDir)
+
+	stdout, stderr, err := captureDoctorOutput(t, func() error {
+		return runDoctor(false, false)
+	})
+	if err != nil {
+		t.Fatalf("unexpected doctor error: %v\nstdout:\n%s", err, stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no stderr, got %q", stderr)
+	}
+	for _, want := range []string{"Current profile", "strict", "Judge availability", "claude"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected doctor output to include %q, got:\n%s", want, stdout)
+		}
+	}
+}
+
+func TestRunDoctor_WarnsWhenBalancedProfileHasNoJudgeProvider(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+
+	configPath := configPathForTest(t)
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(configPath, []byte("profile: balanced\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	binDir := t.TempDir()
+	mustWriteExecutable(t, binDir, "fuse")
+	t.Setenv("PATH", binDir)
+
+	stdout, stderr, err := captureDoctorOutput(t, func() error {
+		return runDoctor(false, false)
+	})
+	if err != nil {
+		t.Fatalf("unexpected doctor error: %v\nstdout:\n%s", err, stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no stderr, got %q", stderr)
+	}
+	for _, want := range []string{"Judge availability", "balanced", "no judge provider"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected doctor output to include %q, got:\n%s", want, stdout)
+		}
+	}
+}
+
 func TestRunDoctorSecurity_WarnsWhenClaudeHookExistsWithoutSecureSettings(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
@@ -540,6 +605,16 @@ func mustClaudeSettings(t *testing.T, entries []map[string]interface{}) map[stri
 		t.Fatalf("unmarshal settings: %v", err)
 	}
 	return settings
+}
+
+func mustWriteExecutable(t *testing.T, dir, name string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", path, err)
+	}
+	return path
 }
 
 // defaultFuseHookEntries returns the standard Bash + mcp__ hook entries

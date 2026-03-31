@@ -16,6 +16,7 @@ import (
 
 	"github.com/php-workx/fuse/internal/config"
 	"github.com/php-workx/fuse/internal/db"
+	"github.com/php-workx/fuse/internal/judge"
 	"github.com/php-workx/fuse/internal/policy"
 )
 
@@ -27,6 +28,8 @@ const (
 	checkNameClaudeSecurityPosture = "Claude security posture"
 	checkNameSQLiteDatabase        = "SQLite database"
 	checkNameMCPProxyConfig        = "MCP proxy configuration"
+	checkNameCurrentProfile        = "Current profile"
+	checkNameJudgeAvailability     = "Judge availability"
 	checkNameCodexSecurityPosture  = "Codex security posture"
 	checkNameApprovalTerminalTrust = "Approval terminal trust"
 	checkNameLiveForegroundHandoff = "Live foreground process-group handoff"
@@ -103,6 +106,8 @@ func gatherDoctorChecks(live, security bool) []checkResult {
 	results = append(results, checkGoVersion())
 	results = append(results, checkDirectoryStructure())
 	results = append(results, checkConfigYAML())
+	results = append(results, checkCurrentProfile())
+	results = append(results, checkJudgeAvailability())
 	results = append(results, checkPolicyYAML())
 	results = append(results, checkClaudeSettings())
 	results = append(results, checkSQLiteDB())
@@ -321,6 +326,80 @@ func checkConfigYAML() checkResult {
 		name:   checkNameConfiguration,
 		status: "PASS",
 		detail: cfgPath,
+	}
+}
+
+// checkCurrentProfile reports the resolved active profile.
+func checkCurrentProfile() checkResult {
+	cfg, err := config.LoadConfig(config.ConfigPath())
+	if err != nil {
+		return checkResult{
+			name:   checkNameCurrentProfile,
+			status: "FAIL",
+			detail: fmt.Sprintf("error loading config: %v", err),
+		}
+	}
+
+	profile := strings.TrimSpace(cfg.Profile)
+	if profile == "" {
+		profile = config.ProfileRelaxed
+	}
+
+	return checkResult{
+		name:   checkNameCurrentProfile,
+		status: "PASS",
+		detail: profile,
+	}
+}
+
+// checkJudgeAvailability reports whether a judge provider can be detected
+// for the active configuration, and warns when balanced/strict profiles
+// expect a provider that is unavailable.
+func checkJudgeAvailability() checkResult {
+	cfg, err := config.LoadConfig(config.ConfigPath())
+	if err != nil {
+		return checkResult{
+			name:   checkNameJudgeAvailability,
+			status: "FAIL",
+			detail: fmt.Sprintf("error loading config: %v", err),
+		}
+	}
+
+	profile := strings.TrimSpace(cfg.Profile)
+	if profile == "" {
+		profile = config.ProfileRelaxed
+	}
+
+	if strings.EqualFold(strings.TrimSpace(cfg.LLMJudge.Mode), "off") {
+		return checkResult{
+			name:   checkNameJudgeAvailability,
+			status: "PASS",
+			detail: "judge disabled; no provider required",
+		}
+	}
+
+	provider, detectErr := judge.DetectProvider(cfg.LLMJudge.Provider, cfg.LLMJudge.Model)
+	if detectErr == nil {
+		return checkResult{
+			name:   checkNameJudgeAvailability,
+			status: "PASS",
+			detail: fmt.Sprintf("provider detected: %s", provider.Name()),
+		}
+	}
+
+	detail := fmt.Sprintf("no judge provider detected: %v", detectErr)
+	if strings.EqualFold(profile, config.ProfileBalanced) || strings.EqualFold(profile, config.ProfileStrict) {
+		return checkResult{
+			name:   checkNameJudgeAvailability,
+			status: "WARN",
+			detail: detail + fmt.Sprintf(" (profile: %s)", profile),
+		}
+	}
+
+	return checkResult{
+		name:   checkNameJudgeAvailability,
+		status: "PASS",
+		detail: detail,
 	}
 }
 
