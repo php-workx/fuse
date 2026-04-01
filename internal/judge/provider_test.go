@@ -183,6 +183,7 @@ func TestProbeProviderReadiness_CodexDefaultAuthFile(t *testing.T) {
 
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
+	t.Setenv("USERPROFILE", homeDir)
 	authPath := filepath.Join(homeDir, ".codex", "auth.json")
 	if err := os.MkdirAll(filepath.Dir(authPath), 0o755); err != nil {
 		t.Fatalf("mkdir .codex: %v", err)

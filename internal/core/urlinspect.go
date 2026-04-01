@@ -29,6 +29,8 @@ var BlockedIPRanges []net.IPNet
 // CautionIPRanges are private/internal IP ranges → CAUTION.
 var CautionIPRanges []net.IPNet
 
+var expandedURLIPPattern = regexp.MustCompile(`\b\d{1,3}(?:\.\d{1,3}){3}\b`)
+
 // BlockedSchemes are always-blocked URL schemes → BLOCKED.
 var BlockedSchemes = map[string]bool{
 	"file": true, "gopher": true, "dict": true,
@@ -179,8 +181,11 @@ func InspectCommandURLs(cmd string) (Decision, string) {
 	}
 
 	// Extract and inspect literal URLs.
-	urls := reURLPatternExpanded.FindAllString(cmd, -1)
-	for _, rawURL := range urls {
+	urlSpans := reURLPatternExpanded.FindAllStringIndex(cmd, -1)
+	urls := make([]string, 0, len(urlSpans))
+	for _, span := range urlSpans {
+		rawURL := extendExpandedURLSpan(cmd, span[0], span[1])
+		urls = append(urls, rawURL)
 		if d, reason := inspectSingleURL(rawURL, cmd, false); d != "" {
 			escalate(d, reason)
 		}
@@ -224,6 +229,9 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 	// Check for shell expansion tokens BEFORE url.Parse (SEC-001).
 	// url.Parse fails on $() and backtick syntax, so this must come first.
 	if isShellExpansion(rawURL) {
+		if d, reason := classifyExpandedURLHost(rawURL); d != "" {
+			return d, reason
+		}
 		return DecisionCaution, "URL contains shell variable expansion"
 	}
 
@@ -268,6 +276,101 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 	}
 
 	return "", ""
+}
+
+func classifyExpandedURLHost(rawURL string) (Decision, string) {
+	lower := strings.ToLower(rawURL)
+	for host := range BlockedHostnames {
+		if strings.Contains(lower, host) {
+			return DecisionBlocked, "blocked hostname: " + host
+		}
+	}
+	for _, match := range expandedURLIPPattern.FindAllString(rawURL, -1) {
+		if ip := net.ParseIP(match); ip != nil {
+			if d, reason := matchIPRanges(ip, match); d != "" {
+				return d, reason
+			}
+		}
+	}
+	return "", ""
+}
+
+func extendExpandedURLSpan(cmd string, start, end int) string {
+	inBacktick, dollarDepth := shellExpansionState(cmd[start:end])
+	if !inBacktick && dollarDepth == 0 {
+		return cmd[start:end]
+	}
+
+	i := end
+	for i < len(cmd) {
+		ch := cmd[i]
+		switch {
+		case inBacktick:
+			if ch == '`' {
+				inBacktick = false
+			}
+			i++
+			continue
+		case dollarDepth > 0:
+			switch ch {
+			case '(':
+				dollarDepth++
+			case ')':
+				dollarDepth--
+			}
+			i++
+			continue
+		case ch == '`':
+			inBacktick = true
+			i++
+			continue
+		case ch == '$' && i+1 < len(cmd) && cmd[i+1] == '(':
+			dollarDepth = 1
+			i += 2
+			continue
+		case isExpandedURLTerminator(ch):
+			return cmd[start:i]
+		default:
+			i++
+		}
+	}
+	return cmd[start:i]
+}
+
+func shellExpansionState(segment string) (bool, int) {
+	inBacktick := false
+	dollarDepth := 0
+	for i := 0; i < len(segment); i++ {
+		ch := segment[i]
+		switch {
+		case inBacktick:
+			if ch == '`' {
+				inBacktick = false
+			}
+		case dollarDepth > 0:
+			switch ch {
+			case '(':
+				dollarDepth++
+			case ')':
+				dollarDepth--
+			}
+		case ch == '`':
+			inBacktick = true
+		case ch == '$' && i+1 < len(segment) && segment[i+1] == '(':
+			dollarDepth = 1
+			i++
+		}
+	}
+	return inBacktick, dollarDepth
+}
+
+func isExpandedURLTerminator(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\n', '\r', '\'', '"', '<', '>', '|':
+		return true
+	default:
+		return false
+	}
 }
 
 // classifyNonCanonicalHost decodes a non-canonical numeric IP and checks it

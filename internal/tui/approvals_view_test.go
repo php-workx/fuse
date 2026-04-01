@@ -279,6 +279,21 @@ func TestApprovalsView_ApproveCmdLogsProfileAndStructuralDecision(t *testing.T) 
 	}
 }
 
+func TestCurrentProfile_ConfigLoadErrorReturnsEmpty(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	if err := os.WriteFile(config.ConfigPath(), []byte("profile: [\n"), 0o644); err != nil {
+		t.Fatalf("write invalid config: %v", err)
+	}
+
+	if got := currentProfile(); got != "" {
+		t.Fatalf("currentProfile() = %q, want empty on config load error", got)
+	}
+}
+
 func TestApprovalsView_RevokeConfirmation(t *testing.T) {
 	m := NewApprovalsModel(nil, nil)
 	m.width = 80

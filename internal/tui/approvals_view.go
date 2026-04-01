@@ -606,7 +606,10 @@ func (m ApprovalsModel) denyCmd() tea.Cmd {
 
 func currentProfile() string {
 	cfg, err := config.LoadConfig(config.ConfigPath())
-	if err != nil || cfg == nil || strings.TrimSpace(cfg.Profile) == "" {
+	if err != nil || cfg == nil {
+		return ""
+	}
+	if strings.TrimSpace(cfg.Profile) == "" {
 		return config.ProfileRelaxed
 	}
 	return strings.TrimSpace(cfg.Profile)

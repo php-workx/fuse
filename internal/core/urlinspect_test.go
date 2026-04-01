@@ -88,8 +88,8 @@ func TestInspectURLs_WrapperPrefixedNetworkCommand(t *testing.T) {
 
 func TestInspectURLs_BacktickExpandedURL(t *testing.T) {
 	d, _ := InspectCommandURLs("curl http://`echo 169.254.169.254`/")
-	if d != DecisionCaution {
-		t.Errorf("got %s, want CAUTION for backtick-expanded URL", d)
+	if d != DecisionBlocked {
+		t.Errorf("got %s, want BLOCKED for backtick-expanded metadata URL", d)
 	}
 }
 
@@ -242,9 +242,9 @@ func TestInspectURLs_DestructiveHTTPMethod_PUT(t *testing.T) {
 }
 
 func TestInspectURLs_SafeHTTPMethod_GET(t *testing.T) {
-	d, r := InspectCommandURLs("curl -X GET https://api.example.com/status")
+	_, r := InspectCommandURLs("curl -X GET https://api.example.com/status")
 	// GET is not destructive and should not trigger the destructive-method caution.
-	if d == DecisionCaution && r == "destructive HTTP method detected" {
+	if r == "destructive HTTP method detected" {
 		t.Errorf("GET should not be flagged as destructive")
 	}
 }

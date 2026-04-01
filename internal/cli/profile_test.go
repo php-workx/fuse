@@ -155,8 +155,9 @@ log_level: warn
 	if err != nil {
 		t.Fatalf("read config after failed update: %v", err)
 	}
-	if got := strings.TrimSpace(string(after)); got != strings.TrimSpace(original) {
-		t.Fatalf("config changed after failed update:\n--- got ---\n%s\n--- want ---\n%s", got, strings.TrimSpace(original))
+	want := strings.TrimSpace(original) + "\n"
+	if string(after) != want {
+		t.Fatalf("config changed after failed update:\n--- got ---\n%s\n--- want ---\n%s", string(after), want)
 	}
 }
 

@@ -171,6 +171,9 @@ func TestProfileBehavior_JudgeRouting(t *testing.T) {
 }
 
 func TestProfileBehavior_RunHook_CautionCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix shell commands")
+	}
 	enableHookForTest(t)
 	logFile := setFakeJudgePathForBehaviorTest(t)
 
