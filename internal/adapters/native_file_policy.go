@@ -52,7 +52,16 @@ func handleNativeFileTool(req HookRequest, stderr io.Writer, cfg *config.Config,
 		return 0
 	case core.DecisionBlocked:
 		fmt.Fprintf(stderr, "fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.\n", result.Reason)
-		logHookEvent(req.SessionID, extractCommandFromResult(result), req.Cwd, result)
+		logHookEventWithVerdict(
+			req.SessionID,
+			extractCommandFromResult(result),
+			req.Cwd,
+			result,
+			result.Decision,
+			result.Decision,
+			resolvedProfile(cfg),
+			nil,
+		)
 		return 2
 	case core.DecisionApproval:
 		return handleApproval(req, result, nil, stderr, cfg, dryRun)

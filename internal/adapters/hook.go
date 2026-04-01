@@ -406,10 +406,13 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 	cleanupExecutionState(database, cfg)
 
 	cmd := extractCommandFromResult(result)
+	structuralDecision := StructuralDecision(result, verdict)
+	profile := resolvedProfile(cfg)
 	switch decision {
 	case core.DecisionApproval, core.DecisionSafe, core.DecisionCaution:
 		event := &db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: string(decision),
+			StructuralDecision: string(structuralDecision), Profile: profile,
 			RuleID: result.RuleID, Reason: result.Reason, Source: "hook", Agent: "claude", Cwd: req.Cwd,
 		}
 		applyVerdict(event, verdict)
@@ -419,6 +422,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 	default:
 		event := &db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: "BLOCKED",
+			StructuralDecision: string(structuralDecision), Profile: profile,
 			RuleID: result.RuleID, Reason: "user denied", Source: "hook", Agent: "claude", Cwd: req.Cwd,
 		}
 		applyVerdict(event, verdict)
@@ -426,11 +430,6 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 		fmt.Fprintln(stderr, "fuse:USER_DENIED STOP. Do not retry this exact command without new user input.")
 		return 2
 	}
-}
-
-// logHookEvent logs a classification event best-effort (non-blocking).
-func logHookEvent(sessionID, command, cwd string, result *core.ClassifyResult) {
-	logHookEventFields(sessionID, command, cwd, string(result.Decision), result.RuleID, result.Reason)
 }
 
 // logHookEventFields logs a hook event with individual fields. Best-effort.

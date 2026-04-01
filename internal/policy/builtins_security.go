@@ -7,7 +7,10 @@ import (
 	"github.com/php-workx/fuse/internal/core"
 )
 
-var reNetcatScanMode = regexp.MustCompile(`(^|\s)-[a-zA-Z]*z[a-zA-Z]*(\s|$)`)
+var (
+	reNetcatScanMode = regexp.MustCompile(`(^|\s)-[a-zA-Z]*z[a-zA-Z]*(\s|$)`)
+	reNetcatExecMode = regexp.MustCompile(`\b(nc|ncat|netcat)\s+.*-e\s+`)
+)
 
 func init() {
 	BuiltinRules = append(BuiltinRules, []BuiltinRule{
@@ -251,7 +254,7 @@ func init() {
 			Action:  core.DecisionCaution,
 			Reason:  "Netcat connection to IP (potential exfiltration)",
 			Predicate: func(cmd string) bool {
-				return !reNetcatScanMode.MatchString(cmd)
+				return !reNetcatScanMode.MatchString(cmd) && !reNetcatExecMode.MatchString(cmd)
 			},
 		},
 		{
@@ -268,7 +271,7 @@ func init() {
 		},
 		{
 			ID:      "builtin:exfil:redirect-tcp",
-			Pattern: regexp.MustCompile(`>\s*/dev/tcp/`),
+			Pattern: regexp.MustCompile(`(?:>&|>)\s*/dev/tcp/`),
 			Action:  core.DecisionBlocked,
 			Reason:  "Redirect to /dev/tcp (network exfiltration)",
 		},
@@ -278,7 +281,7 @@ func init() {
 		// ---------------------------------------------------------------
 		{
 			ID:      "builtin:revshell:bash-tcp",
-			Pattern: regexp.MustCompile(`\bbash\s+.*-i\s+.*>/dev/tcp/`),
+			Pattern: regexp.MustCompile(`\bbash\s+.*-i\b.*(?:>&|>)\s*/dev/tcp/`),
 			Action:  core.DecisionBlocked,
 			Reason:  "Bash reverse shell via /dev/tcp",
 		},

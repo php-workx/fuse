@@ -200,11 +200,11 @@ func TestInstallClaudePromptsForBalancedProfileAndWarnsWhenNoProvider(t *testing
 		"profile selected: balanced",
 	} {
 		if !strings.Contains(stdout, want) {
-			t.Fatalf("expected stdout to contain %q, got:\\n%s", want, stdout)
+			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
 		}
 	}
 	if !strings.Contains(stderr, "judge provider") {
-		t.Fatalf("expected stderr warning about missing judge provider, got:\\n%s", stderr)
+		t.Fatalf("expected stderr warning about missing judge provider, got:\n%s", stderr)
 	}
 	assertProfileAwareConfigScaffold(t, config.ConfigPath(), config.ProfileBalanced)
 }
@@ -227,7 +227,7 @@ func TestInstallCodexDefaultsToRelaxedProfileWhenInputIsEmpty(t *testing.T) {
 		t.Fatalf("install codex: %v", err)
 	}
 	if !strings.Contains(stdout, "profile selected: relaxed") {
-		t.Fatalf("expected relaxed selection output, got:\\n%s", stdout)
+		t.Fatalf("expected relaxed selection output, got:\n%s", stdout)
 	}
 	if stderr != "" {
 		t.Fatalf("expected no stderr for relaxed default, got %q", stderr)
@@ -402,6 +402,14 @@ func claudeMatchersFromHooks(t *testing.T, preToolUse []interface{}) []string {
 
 func assertProfileAwareConfigScaffold(t *testing.T, configPath, wantProfile string) {
 	t.Helper()
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat scaffold: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("scaffold permissions = %o, want %o", got, 0o600)
+	}
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {

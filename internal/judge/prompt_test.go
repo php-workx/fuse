@@ -116,6 +116,25 @@ func TestBuildUserPrompt_ScrubsContextFields(t *testing.T) {
 	}
 }
 
+func TestSystemPrompt_DescribesRiskNotRuntimeEnforcement(t *testing.T) {
+	for _, forbidden := range []string{
+		"auto-approved unless you escalate it",
+		"When downgrading APPROVAL, use CAUTION, not SAFE.",
+	} {
+		if strings.Contains(systemPrompt, forbidden) {
+			t.Fatalf("systemPrompt should not contain %q:\n%s", forbidden, systemPrompt)
+		}
+	}
+	for _, want := range []string{
+		"potentially risky or state-changing",
+		"extra scrutiny but does not justify APPROVAL",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("systemPrompt missing %q:\n%s", want, systemPrompt)
+		}
+	}
+}
+
 func TestParseResponse_ValidJSON(t *testing.T) {
 	resp, err := ParseResponse(`{"decision":"SAFE","confidence":0.92,"reasoning":"safe command"}`)
 	if err != nil {

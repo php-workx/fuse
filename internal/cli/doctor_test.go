@@ -679,9 +679,21 @@ func mustClaudeSettings(t *testing.T, entries []map[string]interface{}) map[stri
 func mustWriteExecutable(t *testing.T, dir, name string) string {
 	t.Helper()
 
+	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
+		name += ".bat"
+	}
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+	content := []byte("#!/bin/sh\nexit 0\n")
+	if runtime.GOOS == "windows" {
+		content = []byte("@echo off\r\nexit /b 0\r\n")
+	}
+	if err := os.WriteFile(path, content, 0o755); err != nil {
 		t.Fatalf("write executable %s: %v", path, err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(path, 0o755); err != nil {
+			t.Fatalf("chmod executable %s: %v", path, err)
+		}
 	}
 	return path
 }

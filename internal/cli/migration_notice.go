@@ -24,7 +24,10 @@ func maybePrintProfileMigrationNotice(cmd *cobra.Command) error {
 	if err := writeMigrationNotice(cmd.ErrOrStderr()); err != nil {
 		return err
 	}
-	return markProfileMigrationNoticeSeen()
+	if err := markProfileMigrationNoticeSeen(); err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "warning: unable to persist profile migration notice: %v\n", err)
+	}
+	return nil
 }
 
 func shouldSkipProfileMigrationNotice(cmd *cobra.Command) bool {
