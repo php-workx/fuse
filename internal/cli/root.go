@@ -19,6 +19,9 @@ var rootCmd = &cobra.Command{
 	Use:   "fuse",
 	Short: "Command-safety runtime for AI coding agents",
 	Long:  "fuse classifies shell commands from AI coding agents as SAFE, CAUTION, APPROVAL, or BLOCKED.",
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		return maybePrintProfileMigrationNotice(cmd)
+	},
 }
 
 var versionCmd = &cobra.Command{

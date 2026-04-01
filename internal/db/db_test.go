@@ -50,6 +50,51 @@ func TestDBPermissions(t *testing.T) {
 	}
 }
 
+func TestEventsSchema_DefaultsMatchMigratedColumns(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	d, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer d.Close()
+
+	rows, err := d.db.Query("PRAGMA table_info(events)")
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(events): %v", err)
+	}
+	defer rows.Close()
+
+	defaults := map[string]string{}
+	for rows.Next() {
+		var cid int
+		var name, colType string
+		var notNull int
+		var dfltValue any
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &dfltValue, &pk); err != nil {
+			t.Fatalf("scan pragma row: %v", err)
+		}
+		if dfltValue != nil {
+			defaults[name] = dfltValue.(string)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate pragma rows: %v", err)
+	}
+
+	for _, col := range []string{"structural_decision", "profile"} {
+		got, ok := defaults[col]
+		if !ok {
+			t.Fatalf("%s default missing", col)
+		}
+		if got != "''" {
+			t.Fatalf("%s default = %q, want %q", col, got, "''")
+		}
+	}
+}
+
 func TestCreateAndConsumeApproval(t *testing.T) {
 	d := openTestDB(t)
 

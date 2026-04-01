@@ -6,7 +6,9 @@ package judge
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -16,6 +18,17 @@ type Provider interface {
 	Query(ctx context.Context, systemPrompt, userPrompt string) (string, error)
 	// Name returns the provider name for logging (e.g., "claude", "codex").
 	Name() string
+}
+
+// ProviderReadiness summarizes whether a judge provider is installed and
+// whether local auth signals indicate it can be used without immediate setup.
+type ProviderReadiness struct {
+	ProviderName       string
+	Detected           bool
+	DetectionError     string
+	AuthConfigured     bool
+	AuthSource         string
+	CheckedAuthSources []string
 }
 
 // claudeProvider invokes the Claude Code CLI in print mode.
@@ -98,4 +111,77 @@ func DetectProvider(preferred, model string) (Provider, error) {
 		}
 	}
 	return nil, fmt.Errorf("no LLM provider found (install claude or codex CLI)")
+}
+
+// ProbeProviderReadiness reports whether a provider can be detected and whether
+// local auth configuration signals suggest it is ready to use.
+func ProbeProviderReadiness(preferred, model string) ProviderReadiness {
+	p, err := DetectProvider(preferred, model)
+	if err != nil {
+		return ProviderReadiness{DetectionError: err.Error()}
+	}
+
+	readiness := ProviderReadiness{
+		ProviderName: p.Name(),
+		Detected:     true,
+	}
+	readiness.AuthConfigured, readiness.AuthSource, readiness.CheckedAuthSources = probeProviderAuth(readiness.ProviderName)
+	return readiness
+}
+
+func probeProviderAuth(providerName string) (bool, string, []string) {
+	switch providerName {
+	case "claude":
+		return probeEnvAuth("ANTHROPIC_API_KEY", "CLAUDE_API_KEY")
+	case "codex":
+		configured, source, checked := probeEnvAuth("OPENAI_API_KEY")
+		if configured {
+			return configured, source, checked
+		}
+		authPath, authSource, ok := codexAuthTarget()
+		if authSource != "" {
+			checked = append(checked, authSource)
+		}
+		if !ok {
+			return false, "", checked
+		}
+		if info, err := os.Stat(authPath); err == nil && !info.IsDir() && info.Mode().IsRegular() && info.Size() > 0 {
+			return true, authSource, checked
+		}
+		return false, "", checked
+	default:
+		return false, "", nil
+	}
+}
+
+func probeEnvAuth(names ...string) (bool, string, []string) {
+	checked := make([]string, 0, len(names))
+	for _, name := range names {
+		checked = append(checked, name)
+		if strings.TrimSpace(os.Getenv(name)) != "" {
+			return true, name, checked
+		}
+	}
+	return false, "", checked
+}
+
+func codexAuthTarget() (string, string, bool) {
+	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
+		return codexAuthTargetFrom(home, "", false)
+	}
+	home, err := os.UserHomeDir()
+	return codexAuthTargetFrom("", home, err == nil)
+}
+
+func codexAuthTargetFrom(codexHome, userHome string, hasUserHome bool) (string, string, bool) {
+	if codexHome = strings.TrimSpace(codexHome); codexHome != "" {
+		return filepath.Join(codexHome, "auth.json"), "CODEX_HOME/auth.json", true
+	}
+	if hasUserHome {
+		userHome = strings.TrimSpace(userHome)
+		if userHome != "" {
+			return filepath.Join(userHome, ".codex", "auth.json"), "~/.codex/auth.json", true
+		}
+	}
+	return filepath.Join(os.TempDir(), ".codex", "auth.json"), "", false
 }

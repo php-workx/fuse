@@ -54,13 +54,8 @@ func TestInspectFile_DangerousPython(t *testing.T) {
 	if len(result.Signals) == 0 {
 		t.Fatal("expected signals for dangerous Python file, got 0")
 	}
-	if result.Decision != DecisionApproval && result.Decision != DecisionCaution {
-		t.Errorf("expected decision APPROVAL or CAUTION, got %s", result.Decision)
-	}
-	// The file imports boto3 and subprocess, which should trigger cloud_sdk
-	// and subprocess signals, leading to APPROVAL.
-	if result.Decision != DecisionApproval {
-		t.Errorf("expected APPROVAL for boto3/subprocess file, got %s", result.Decision)
+	if result.Decision != DecisionCaution {
+		t.Errorf("expected CAUTION for boto3/subprocess file, got %s", result.Decision)
 	}
 }
 
@@ -432,8 +427,8 @@ func TestInferDecisionFromSignals_CloudSDKPlusDestructiveIsApproval(t *testing.T
 		{Category: "destructive_fs", Pattern: "rm -rf", Line: 2, Match: "rm -rf /tmp"},
 	}
 	got := inferDecisionFromSignals(signals)
-	if got != DecisionApproval {
-		t.Errorf("expected APPROVAL for cloud_sdk + destructive_fs, got %s", got)
+	if got != DecisionCaution {
+		t.Errorf("expected CAUTION for cloud_sdk + destructive_fs, got %s", got)
 	}
 }
 

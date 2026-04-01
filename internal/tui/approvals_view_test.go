@@ -2,11 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/php-workx/fuse/internal/config"
 	"github.com/php-workx/fuse/internal/db"
 )
 
@@ -215,6 +217,80 @@ func TestApprovalsView_DenyPendingRequest(t *testing.T) {
 	_, cmd := m.Update(makeKeyMsg('d'))
 	if cmd == nil {
 		t.Error("expected non-nil cmd after pressing 'd' on pending request")
+	}
+}
+
+func TestApprovalsView_ApproveCmdLogsProfileAndStructuralDecision(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	if err := os.WriteFile(config.ConfigPath(), []byte("profile: strict\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	d := openTestDB(t)
+	req := db.PendingRequest{
+		ID:          "req-1",
+		DecisionKey: "key-1",
+		Command:     "terraform destroy",
+		Reason:      "dangerous operation",
+		Source:      "hook",
+		SessionID:   "sess-1",
+		CreatedAt:   time.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+	}
+	if err := d.InsertPendingRequest(req); err != nil {
+		t.Fatalf("InsertPendingRequest: %v", err)
+	}
+
+	m := NewApprovalsModel(d, []byte("01234567890123456789012345678901"))
+	m.SetPending([]db.PendingRequest{req})
+
+	cmd := m.approveCmd("once")
+	if cmd == nil {
+		t.Fatal("approveCmd returned nil")
+	}
+	msg := cmd()
+	result, ok := msg.(approveResultMsg)
+	if !ok {
+		t.Fatalf("approveCmd returned %T, want approveResultMsg", msg)
+	}
+	if result.err != nil {
+		t.Fatalf("approveCmd error: %v", result.err)
+	}
+
+	events, err := d.ListEvents(&db.EventFilter{Limit: 10})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one event")
+	}
+	event := events[0]
+	if event.Profile != config.ProfileStrict {
+		t.Fatalf("Profile = %q, want %q", event.Profile, config.ProfileStrict)
+	}
+	if event.StructuralDecision != "APPROVAL" {
+		t.Fatalf("StructuralDecision = %q, want APPROVAL", event.StructuralDecision)
+	}
+	if event.Decision != "APPROVAL" {
+		t.Fatalf("Decision = %q, want APPROVAL", event.Decision)
+	}
+}
+
+func TestCurrentProfile_ConfigLoadErrorReturnsEmpty(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+	if err := os.WriteFile(config.ConfigPath(), []byte("profile: [\n"), 0o644); err != nil {
+		t.Fatalf("write invalid config: %v", err)
+	}
+
+	if got := currentProfile(); got != "" {
+		t.Fatalf("currentProfile() = %q, want empty on config load error", got)
 	}
 }
 

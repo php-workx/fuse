@@ -80,7 +80,7 @@ func classifyMCPByName(toolName string) Decision {
 	// Check all prefix sets. Most restrictive match wins.
 	best := matchPrefixDecision(lower, mcpSafePrefixes, DecisionSafe)
 	best = MaxDecision(best, matchPrefixDecision(lower, mcpCautionPrefixes, DecisionCaution))
-	best = MaxDecision(best, matchPrefixDecision(lower, mcpApprovalPrefixes, DecisionApproval))
+	best = MaxDecision(best, matchPrefixDecision(lower, mcpApprovalPrefixes, DecisionCaution))
 
 	if best == "" {
 		return DecisionCaution // fallback for unmatched tool names

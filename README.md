@@ -27,9 +27,9 @@ AI coding agents run shell commands on your machine. Without a safety layer,
 a single bad command can delete your files, data, or cloud resources before
 you notice.
 
-Fuse sits between your AI agent and your shell. It classifies every command,
-blocks the dangerous ones, and asks for approval before running anything risky.
-No cloud, no API keys, everything local.
+Fuse sits between your AI agent and your shell. It classifies every command
+into SAFE, CAUTION, APPROVAL, or BLOCKED, then applies your selected profile to
+decide when risky commands need review. No cloud, no API keys, everything local.
 
 ## Install
 

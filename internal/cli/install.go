@@ -29,14 +29,7 @@ var installCmd = &cobra.Command{
 		if installClaudeSecure && target != "claude" {
 			return fmt.Errorf("--secure is only supported for the 'claude' target")
 		}
-		switch target {
-		case "claude":
-			return installClaude(installClaudeSecure)
-		case "codex":
-			return installCodex()
-		default:
-			return fmt.Errorf("unknown install target %q (supported: claude, codex)", target)
-		}
+		return runInstallWithSelectedProfile(cmd, target, installClaudeSecure)
 	},
 }
 
@@ -118,6 +111,10 @@ func checkAncestorSymlink(candidate string) (string, error) {
 
 // installClaude installs fuse as a Claude Code PreToolUse hook.
 func installClaude(secure bool) error {
+	return installClaudeWithProfile(secure, "")
+}
+
+func installClaudeWithProfile(secure bool, profile string) error {
 	settingsPath := claudeSettingsPath()
 	if err := rejectSymlinkedClaudeSettingsPath(settingsPath); err != nil {
 		return err
@@ -153,6 +150,10 @@ func installClaude(secure bool) error {
 	// Write back.
 	if err := writeJSONFile(settingsPath, settings); err != nil {
 		return fmt.Errorf("writing %s: %w", settingsPath, err)
+	}
+
+	if err := ensureFuseConfigScaffold(profile); err != nil {
+		return err
 	}
 
 	fmt.Printf("fuse hook installed in %s\n", settingsPath)
@@ -357,6 +358,10 @@ func rejectSymlinkedCodexConfigPath(configPath string) error {
 }
 
 func installCodex() error {
+	return installCodexWithProfile("")
+}
+
+func installCodexWithProfile(profile string) error {
 	configPath := codexConfigPath()
 	if err := rejectSymlinkedCodexConfigPath(configPath); err != nil {
 		return err
@@ -372,6 +377,10 @@ func installCodex() error {
 	}
 	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", configPath, err)
+	}
+
+	if err := ensureFuseConfigScaffold(profile); err != nil {
+		return err
 	}
 
 	fmt.Printf("fuse Codex MCP server installed in %s\n", configPath)

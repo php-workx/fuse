@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/php-workx/fuse/internal/approve"
+	"github.com/php-workx/fuse/internal/config"
 	"github.com/php-workx/fuse/internal/db"
 )
 
@@ -558,12 +559,14 @@ func (m ApprovalsModel) approveCmd(scope string) tea.Cmd {
 		if err == nil {
 			_ = database.DeletePendingRequest(req.ID)
 			_ = database.LogEvent(&db.EventRecord{
-				Command:      req.Command,
-				Decision:     "APPROVAL",
-				Reason:       req.Reason,
-				Source:       "tui",
-				SessionID:    req.SessionID,
-				UserResponse: "approved_via_tui (scope: " + scope + ")",
+				Command:            req.Command,
+				Decision:           "APPROVAL",
+				StructuralDecision: "APPROVAL",
+				Profile:            currentProfile(),
+				Reason:             req.Reason,
+				Source:             "tui",
+				SessionID:          req.SessionID,
+				UserResponse:       "approved_via_tui (scope: " + scope + ")",
 			})
 		}
 		return approveResultMsg{scope: scope, err: err}
@@ -587,16 +590,29 @@ func (m ApprovalsModel) denyCmd() tea.Cmd {
 		if err == nil {
 			_ = database.DeletePendingRequest(req.ID)
 			_ = database.LogEvent(&db.EventRecord{
-				Command:      req.Command,
-				Decision:     "BLOCKED",
-				Reason:       req.Reason,
-				Source:       "tui",
-				SessionID:    req.SessionID,
-				UserResponse: "denied_via_tui",
+				Command:            req.Command,
+				Decision:           "BLOCKED",
+				StructuralDecision: "BLOCKED",
+				Profile:            currentProfile(),
+				Reason:             req.Reason,
+				Source:             "tui",
+				SessionID:          req.SessionID,
+				UserResponse:       "denied_via_tui",
 			})
 		}
 		return denyResultMsg{err: err}
 	}
+}
+
+func currentProfile() string {
+	cfg, err := config.LoadConfig(config.ConfigPath())
+	if err != nil || cfg == nil {
+		return ""
+	}
+	if strings.TrimSpace(cfg.Profile) == "" {
+		return config.ProfileRelaxed
+	}
+	return strings.TrimSpace(cfg.Profile)
 }
 
 func (m ApprovalsModel) deleteCmd(id string) tea.Cmd {

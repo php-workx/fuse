@@ -19,6 +19,8 @@ firebase-debug.log
 *.db
 .env
 
+.worktrees
+.tickets
 .attest/runs
 
 # SonarQube

@@ -96,20 +96,33 @@ func BuildChildEnv(environ []string) []string {
 
 // runContext bundles parameters shared across ExecuteCommand helper functions.
 type runContext struct {
-	command   string
-	cwd       string
-	result    *core.ClassifyResult
-	verdict   *judge.Verdict
-	database  *db.DB
-	cfg       *config.Config
-	evaluator core.PolicyEvaluator
-	req       core.ShellRequest
-	dryRun    bool
+	command            string
+	cwd                string
+	result             *core.ClassifyResult
+	structuralDecision core.Decision
+	effectiveDecision  core.Decision
+	verdict            *judge.Verdict
+	database           *db.DB
+	cfg                *config.Config
+	evaluator          core.PolicyEvaluator
+	req                core.ShellRequest
+	dryRun             bool
 }
 
 // logWithVerdict logs an event with judge verdict fields.
 func (rc *runContext) logWithVerdict(outcome string) {
-	event := newEvent(rc.result, "run", "manual", "", rc.command, rc.cwd, outcome)
+	event := newEvent(
+		rc.result,
+		rc.structuralDecision,
+		rc.effectiveDecision,
+		resolvedProfile(rc.cfg),
+		"run",
+		"manual",
+		"",
+		rc.command,
+		rc.cwd,
+		outcome,
+	)
 	applyVerdict(event, rc.verdict)
 	logEvent(rc.database, event)
 }
@@ -201,6 +214,8 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	promptCtx := buildJudgeContext(command, cwd, "Bash", result)
 	var verdict *judge.Verdict
 	result, verdict = judge.MaybeJudge(context.Background(), cfg, result, promptCtx)
+	structuralDecision := StructuralDecision(result, verdict)
+	effectiveDecision := EffectiveDecision(result, verdict, cfg)
 
 	// Open database for event logging and approvals.
 	database, dbErr := db.OpenDB(config.DBPath())
@@ -213,15 +228,17 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 	}
 
 	rc := &runContext{
-		command:   command,
-		cwd:       cwd,
-		result:    result,
-		verdict:   verdict,
-		database:  database,
-		cfg:       cfg,
-		evaluator: evaluator,
-		req:       req,
-		dryRun:    mode == config.ModeDryRun,
+		command:            command,
+		cwd:                cwd,
+		result:             result,
+		structuralDecision: structuralDecision,
+		effectiveDecision:  effectiveDecision,
+		verdict:            verdict,
+		database:           database,
+		cfg:                cfg,
+		evaluator:          evaluator,
+		req:                req,
+		dryRun:             mode == config.ModeDryRun,
 	}
 
 	// Handle classification result.
@@ -252,7 +269,7 @@ func ExecuteCommand(command, cwd string, timeout time.Duration) (exitCode int, e
 // handleDecision dispatches to the appropriate handler based on the classification decision.
 // Returns (0, nil) when execution should proceed normally.
 func (rc *runContext) handleDecision() (int, error) {
-	switch rc.result.Decision {
+	switch rc.effectiveDecision {
 	case core.DecisionBlocked:
 		return rc.handleBlockedCommand()
 	case core.DecisionApproval:
@@ -287,17 +304,24 @@ func logEvent(database *db.DB, record *db.EventRecord) {
 }
 
 // newEvent builds an EventRecord from a ClassifyResult and context.
-func newEvent(result *core.ClassifyResult, source, agent, sessionID, command, cwd, outcome string) *db.EventRecord {
+func newEvent(
+	result *core.ClassifyResult,
+	structuralDecision core.Decision,
+	effectiveDecision core.Decision,
+	profile, source, agent, sessionID, command, cwd, outcome string,
+) *db.EventRecord {
 	return &db.EventRecord{
-		SessionID: sessionID,
-		Command:   command,
-		Decision:  string(result.Decision),
-		RuleID:    result.RuleID,
-		Reason:    result.Reason,
-		Metadata:  outcome,
-		Source:    source,
-		Agent:     agent,
-		Cwd:       cwd,
+		SessionID:          sessionID,
+		Command:            command,
+		Decision:           string(effectiveDecision),
+		StructuralDecision: string(structuralDecision),
+		Profile:            profile,
+		RuleID:             result.RuleID,
+		Reason:             result.Reason,
+		Metadata:           outcome,
+		Source:             source,
+		Agent:              agent,
+		Cwd:                cwd,
 	}
 }
 

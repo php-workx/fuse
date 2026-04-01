@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/php-workx/fuse/internal/approve"
+	"github.com/php-workx/fuse/internal/config"
 	"github.com/php-workx/fuse/internal/core"
 	"github.com/php-workx/fuse/internal/db"
 	"github.com/php-workx/fuse/internal/judge"
@@ -114,24 +116,20 @@ func TestRunHook_MCP(t *testing.T) {
 func TestRunHook_MCP_DestructiveAction(t *testing.T) {
 	enableHookForTest(t)
 	t.Setenv("FUSE_NON_INTERACTIVE", "1")
-	// MCP tool with a destructive-prefix action should trigger caution/approval path.
+	// MCP tool with a destructive-prefix action should emit CAUTION and continue.
 	input := `{"tool_name":"mcp__server__delete_items","tool_input":{"id":"123"},"session_id":"test","cwd":"/tmp"}`
 	stdin := strings.NewReader(input)
 	stderr := &bytes.Buffer{}
 
 	exitCode := RunHook(stdin, stderr)
 
-	if exitCode != 2 {
-		t.Errorf("expected exit code 2 for MCP approval tool without interactive tty, got %d", exitCode)
+	if exitCode != 0 {
+		t.Errorf("expected exit code 0 for MCP caution tool, got %d", exitCode)
 	}
 
 	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "PENDING_APPROVAL") &&
-		!strings.Contains(stderrStr, "APPROVAL_NOT_AVAILABLE") &&
-		!strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") &&
-		!strings.Contains(stderrStr, "USER_DENIED") &&
-		!strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
-		t.Errorf("expected approval-related directive in stderr, got: %s", stderrStr)
+	if !strings.Contains(stderrStr, "CAUTION") {
+		t.Errorf("expected CAUTION directive in stderr, got: %s", stderrStr)
 	}
 }
 
@@ -418,6 +416,122 @@ func TestRunHook_NativeFileParentTraversalSecretsRequiresApproval(t *testing.T) 
 
 	if exitCode != 2 {
 		t.Fatalf("expected exit code 2 for ../secrets/prod.json traversal, got %d; stderr: %s", exitCode, stderr.String())
+	}
+}
+
+func TestRunHook_NativeFileBlockedLogsProfileAndStructuralDecision(t *testing.T) {
+	enableHookForTest(t)
+	writeProfileConfigForBehaviorTest(t, profileConfigContents(config.ProfileBalanced, "22s"))
+
+	projectDir := filepath.Join(t.TempDir(), "project")
+	subdir := filepath.Join(projectDir, "src")
+	protectedPath := filepath.Join(projectDir, ".claude", "settings.json")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+
+	input := `{"tool_name":"Edit","tool_input":{"file_path":"` + filepath.ToSlash(protectedPath) + `"},"session_id":"native-file-log","cwd":"` + filepath.ToSlash(subdir) + `"}`
+	stderr := &bytes.Buffer{}
+	exitCode := RunHook(strings.NewReader(input), stderr)
+	if exitCode != 2 {
+		t.Fatalf("expected exit code 2 for blocked native file access, got %d; stderr: %s", exitCode, stderr.String())
+	}
+
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer database.Close()
+
+	events, err := database.ListEvents(&db.EventFilter{Limit: 10, Source: "hook"})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one hook event")
+	}
+
+	event := events[0]
+	if event.Profile != config.ProfileBalanced {
+		t.Fatalf("Profile = %q, want %q", event.Profile, config.ProfileBalanced)
+	}
+	if event.StructuralDecision != string(core.DecisionBlocked) {
+		t.Fatalf("StructuralDecision = %q, want %q", event.StructuralDecision, core.DecisionBlocked)
+	}
+	if event.Decision != string(core.DecisionBlocked) {
+		t.Fatalf("Decision = %q, want %q", event.Decision, core.DecisionBlocked)
+	}
+}
+
+func TestRunHook_ApprovalLogsProfileAndStructuralDecision(t *testing.T) {
+	enableHookForTest(t)
+	writeProfileConfigForBehaviorTest(t, profileConfigContents(config.ProfileStrict, "53s"))
+
+	projectDir := t.TempDir()
+	req := core.ShellRequest{
+		RawCommand: "HOME=/tmp /bin/pwd",
+		Cwd:        projectDir,
+		Source:     "hook",
+		SessionID:  "approval-log",
+	}
+	result, err := core.Classify(req, loadPolicyEvaluator())
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	defer database.Close()
+
+	secret, err := db.EnsureSecret(config.SecretPath())
+	if err != nil {
+		t.Fatalf("EnsureSecret: %v", err)
+	}
+	manager, err := approve.NewManager(database, secret)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if err := manager.CreateApproval(result.DecisionKey, string(core.DecisionApproval), "once", "approval-log"); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+
+	input := `{"tool_name":"Bash","tool_input":{"command":"HOME=/tmp /bin/pwd"},"session_id":"approval-log","cwd":"` + filepath.ToSlash(projectDir) + `"}`
+	stderr := &bytes.Buffer{}
+	exitCode := RunHook(strings.NewReader(input), stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected approved command to exit 0, got %d; stderr: %s", exitCode, stderr.String())
+	}
+
+	events, err := database.ListEvents(&db.EventFilter{Limit: 10, Source: "hook"})
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected at least one hook event")
+	}
+
+	var event db.EventRecord
+	found := false
+	for _, candidate := range events {
+		if strings.Contains(candidate.Command, "HOME=/tmp /bin/pwd") {
+			event = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected approval event for command, got %#v", events)
+	}
+	if event.Profile != config.ProfileStrict {
+		t.Fatalf("Profile = %q, want %q", event.Profile, config.ProfileStrict)
+	}
+	if event.StructuralDecision != string(core.DecisionApproval) {
+		t.Fatalf("StructuralDecision = %q, want %q", event.StructuralDecision, core.DecisionApproval)
+	}
+	if event.Decision != string(core.DecisionApproval) {
+		t.Fatalf("Decision = %q, want %q", event.Decision, core.DecisionApproval)
 	}
 }
 

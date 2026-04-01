@@ -292,6 +292,8 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 	// LLM judge: get a second opinion on the classification.
 	var verdict *judge.Verdict
 	result, verdict = judge.MaybeJudge(ctx, cfg, result, buildJudgeContext(command, cwd, "Bash", result))
+	structuralDecision := StructuralDecision(result, verdict)
+	effectiveDecision := EffectiveDecision(result, verdict, cfg)
 
 	if ctx.Err() != nil {
 		return "", "", 0, ctx.Err()
@@ -307,21 +309,33 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 
 	// logWithVerdict is a helper to log events with judge verdict fields.
 	logWithVerdict := func(outcome string) {
-		event := newEvent(result, "codex-shell", "codex", sessionID, command, cwd, outcome)
+		event := newEvent(
+			result,
+			structuralDecision,
+			effectiveDecision,
+			resolvedProfile(cfg),
+			"codex-shell",
+			"codex",
+			sessionID,
+			command,
+			cwd,
+			outcome,
+		)
 		applyVerdict(event, verdict)
 		logEvent(database, event)
 	}
 
 	proceed, err := handleCodexDecision(codexDecisionContext{
-		ctx:            ctx,
-		result:         result,
-		command:        command,
-		sessionID:      sessionID,
-		database:       database,
-		cfg:            cfg,
-		verdict:        verdict,
-		dryRun:         dryRun,
-		logWithVerdict: logWithVerdict,
+		ctx:               ctx,
+		result:            result,
+		effectiveDecision: effectiveDecision,
+		command:           command,
+		sessionID:         sessionID,
+		database:          database,
+		cfg:               cfg,
+		verdict:           verdict,
+		dryRun:            dryRun,
+		logWithVerdict:    logWithVerdict,
 	})
 	if !proceed {
 		return "", "", 0, err
@@ -349,15 +363,16 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 
 // codexDecisionContext bundles the parameters needed by handleCodexDecision.
 type codexDecisionContext struct {
-	ctx            context.Context
-	result         *core.ClassifyResult
-	command        string
-	sessionID      string
-	database       *db.DB
-	cfg            *config.Config
-	verdict        *judge.Verdict
-	dryRun         bool
-	logWithVerdict func(string)
+	ctx               context.Context
+	result            *core.ClassifyResult
+	effectiveDecision core.Decision
+	command           string
+	sessionID         string
+	database          *db.DB
+	cfg               *config.Config
+	verdict           *judge.Verdict
+	dryRun            bool
+	logWithVerdict    func(string)
 }
 
 // handleCodexDecision handles the decision switch for codex shell commands.
@@ -368,7 +383,7 @@ func handleCodexDecision(dc codexDecisionContext) (bool, error) {
 	database := dc.database
 	cfg := dc.cfg
 	dryRun := dc.dryRun
-	switch result.Decision {
+	switch dc.effectiveDecision {
 	case core.DecisionBlocked:
 		logWithVerdict("blocked")
 		cleanupExecutionState(database, cfg)

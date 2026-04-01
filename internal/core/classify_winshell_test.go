@@ -116,17 +116,17 @@ func TestClassify_WindowsPowerShell(t *testing.T) {
 		{
 			name:    "PS wrapper powershell.exe -Command inner extracted",
 			command: "powershell.exe -Command Get-Process",
-			want:    core.DecisionCaution,
+			want:    core.DecisionSafe,
 		},
 		{
 			name:    "PS wrapper pwsh -Command inner extracted",
 			command: "pwsh -Command Get-ChildItem",
-			want:    core.DecisionCaution,
+			want:    core.DecisionSafe,
 		},
 		{
 			name:    "PS wrapper powershell -NoProfile inner extracted",
 			command: "powershell -NoProfile -Command Get-Date",
-			want:    core.DecisionCaution,
+			want:    core.DecisionSafe,
 		},
 		// Wrapper with destructive inner command should be BLOCKED
 		// (inner command escalates past the wrapper's CAUTION).
@@ -194,7 +194,7 @@ func TestClassify_WindowsPowerShell(t *testing.T) {
 		{
 			name:    "PS Remove-Item non-system path is not blocked",
 			command: "Remove-Item C:\\Users\\me\\temp\\file.txt",
-			want:    core.DecisionCaution, // not blocked (no catastrophic path), not safe (not in safe list)
+			want:    core.DecisionSafe, // unknown command fallback is SAFE
 		},
 		{
 			name:    "PS Remove-Item with WhatIf is safe",
@@ -240,17 +240,17 @@ func TestClassify_WindowsCMD(t *testing.T) {
 		{
 			name:    "CMD wrapper cmd.exe /c dir inner extracted",
 			command: "cmd.exe /c dir /b",
-			want:    core.DecisionCaution,
+			want:    core.DecisionSafe,
 		},
 		{
 			name:    "CMD wrapper cmd /c echo inner extracted",
 			command: "cmd /c echo hello",
-			want:    core.DecisionCaution,
+			want:    core.DecisionSafe,
 		},
 		{
 			name:    "CMD wrapper cmd /C type inner extracted",
 			command: "cmd /C type file.txt",
-			want:    core.DecisionCaution,
+			want:    core.DecisionSafe,
 		},
 
 		// --- CMD destructive ---

@@ -142,7 +142,7 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 		}
 	})
 
-	t.Run("destructive MCP delete tool returns caution/approval", func(t *testing.T) {
+	t.Run("destructive MCP delete tool returns caution", func(t *testing.T) {
 		t.Setenv("FUSE_NON_INTERACTIVE", "1")
 		t.Setenv("FUSE_HOOK_TIMEOUT", "3.5s") // short timeout for tests (must be > 3s)
 		input := `{"tool_name":"mcp__server__delete_database","tool_input":{"name":"prod"},"session_id":"integ-test","cwd":"/tmp"}`
@@ -150,15 +150,12 @@ func TestIntegration_HookFlow_MCP(t *testing.T) {
 		stderr := &bytes.Buffer{}
 
 		exitCode := adapters.RunHook(stdin, stderr)
-		if exitCode != 2 {
-			t.Errorf("expected exit code 2 for MCP delete without interactive approval, got %d; stderr: %s", exitCode, stderr.String())
+		if exitCode != 0 {
+			t.Errorf("expected exit code 0 for MCP delete CAUTION, got %d; stderr: %s", exitCode, stderr.String())
 		}
 		stderrStr := stderr.String()
-		if !strings.Contains(stderrStr, "PENDING_APPROVAL") &&
-			!strings.Contains(stderrStr, "NON_INTERACTIVE_MODE") &&
-			!strings.Contains(stderrStr, "USER_DENIED") &&
-			!strings.Contains(stderrStr, "TIMEOUT_WAITING_FOR_USER") {
-			t.Errorf("expected PENDING_APPROVAL or approval denial directive, got: %s", stderrStr)
+		if !strings.Contains(stderrStr, "CAUTION") {
+			t.Errorf("expected CAUTION directive, got: %s", stderrStr)
 		}
 	})
 
@@ -195,8 +192,8 @@ func TestIntegration_FileInspection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("classify error: %v", err)
 		}
-		if result.Decision != core.DecisionApproval {
-			t.Errorf("expected APPROVAL for dangerous python script execution, got %s (reason: %s)", result.Decision, result.Reason)
+		if result.Decision != core.DecisionCaution {
+			t.Errorf("expected CAUTION for dangerous python script execution, got %s (reason: %s)", result.Decision, result.Reason)
 		}
 	})
 
@@ -213,8 +210,8 @@ func TestIntegration_FileInspection(t *testing.T) {
 		if len(inspection.Signals) == 0 {
 			t.Error("expected signals for dangerous boto3 file")
 		}
-		if inspection.Decision != core.DecisionApproval {
-			t.Errorf("expected APPROVAL from file inspection, got %s", inspection.Decision)
+		if inspection.Decision != core.DecisionCaution {
+			t.Errorf("expected CAUTION from file inspection, got %s", inspection.Decision)
 		}
 	})
 
@@ -798,13 +795,13 @@ func TestIntegration_V2_SSRFMetadataBlocked(t *testing.T) {
 	}
 }
 
-func TestIntegration_V2_DestructiveHTTPMethodApproval(t *testing.T) {
+func TestIntegration_V2_DestructiveHTTPMethodCaution(t *testing.T) {
 	skipIfShort(t)
 	withIsolatedHome(t)
 	core.ResetBinaryTOFU()
 	t.Cleanup(core.ResetBinaryTOFU)
 
-	// curl -X DELETE should require APPROVAL (L7 progressive enforcement).
+	// curl -X DELETE should now land in the structural CAUTION tier.
 	evaluator := policy.NewEvaluator(nil)
 	req := core.ShellRequest{
 		RawCommand: "curl -X DELETE https://api.example.com/users/123",
@@ -816,8 +813,8 @@ func TestIntegration_V2_DestructiveHTTPMethodApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("classify error: %v", err)
 	}
-	if result.Decision != core.DecisionApproval {
-		t.Errorf("expected APPROVAL for curl -X DELETE, got %s (reason: %s)",
+	if result.Decision != core.DecisionCaution {
+		t.Errorf("expected CAUTION for curl -X DELETE, got %s (reason: %s)",
 			result.Decision, result.Reason)
 	}
 }

@@ -76,8 +76,8 @@ func TestMCPClassify_DestructivePrefix(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := ClassifyMCPTool(tt.toolName, nil)
-			if got != DecisionApproval {
-				t.Errorf("ClassifyMCPTool(%q, nil) = %q, want %q", tt.toolName, got, DecisionApproval)
+			if got != DecisionCaution {
+				t.Errorf("ClassifyMCPTool(%q, nil) = %q, want %q", tt.toolName, got, DecisionCaution)
 			}
 		})
 	}
@@ -176,8 +176,8 @@ func TestMCPClassify_NoArgs(t *testing.T) {
 
 	// Empty args map should also work.
 	got = ClassifyMCPTool("delete_resource", map[string]interface{}{})
-	if got != DecisionApproval {
-		t.Errorf("ClassifyMCPTool with empty args = %q, want %q", got, DecisionApproval)
+	if got != DecisionCaution {
+		t.Errorf("ClassifyMCPTool with empty args = %q, want %q", got, DecisionCaution)
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/php-workx/fuse/internal/config"
 )
 
 func TestMergeCodexConfig(t *testing.T) {
@@ -177,6 +179,89 @@ func TestInstallClaudePreservesCurrentBehaviorByDefault(t *testing.T) {
 	}
 }
 
+func TestInstallClaudePromptsForBalancedProfileAndWarnsWhenNoProvider(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+	t.Setenv("PATH", t.TempDir())
+
+	stdout, stderr, err := captureCLIOutput(t, func() error {
+		rootCmd.SetArgs([]string{"install", "claude"})
+		rootCmd.SetIn(strings.NewReader("2\n"))
+		defer rootCmd.SetArgs(nil)
+		defer rootCmd.SetIn(nil)
+		return rootCmd.Execute()
+	})
+	if err != nil {
+		t.Fatalf("install claude: %v", err)
+	}
+	for _, want := range []string{
+		"Pick a profile [1-3] (default: 1):",
+		"profile selected: balanced",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
+		}
+	}
+	if !strings.Contains(stderr, "judge provider") {
+		t.Fatalf("expected stderr warning about missing judge provider, got:\n%s", stderr)
+	}
+	assertProfileAwareConfigScaffold(t, config.ConfigPath(), config.ProfileBalanced)
+}
+
+func TestInstallCodexDefaultsToRelaxedProfileWhenInputIsEmpty(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("CODEX_HOME", filepath.Join(tmpHome, ".codex"))
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+	t.Setenv("PATH", t.TempDir())
+
+	stdout, stderr, err := captureCLIOutput(t, func() error {
+		rootCmd.SetArgs([]string{"install", "codex"})
+		rootCmd.SetIn(strings.NewReader("\n"))
+		defer rootCmd.SetArgs(nil)
+		defer rootCmd.SetIn(nil)
+		return rootCmd.Execute()
+	})
+	if err != nil {
+		t.Fatalf("install codex: %v", err)
+	}
+	if !strings.Contains(stdout, "profile selected: relaxed") {
+		t.Fatalf("expected relaxed selection output, got:\n%s", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("expected no stderr for relaxed default, got %q", stderr)
+	}
+	assertProfileAwareConfigScaffold(t, config.ConfigPath(), config.ProfileRelaxed)
+}
+
+func TestInstallPreservesExistingFuseConfigScaffold(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+
+	configPath := config.ConfigPath()
+	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	want := []byte("profile: strict\ncustom_key: keep\n")
+	if err := os.WriteFile(configPath, want, 0o644); err != nil {
+		t.Fatalf("write existing config: %v", err)
+	}
+
+	if err := installClaude(false); err != nil {
+		t.Fatalf("installClaude(false): %v", err)
+	}
+
+	got, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("config.yaml changed unexpectedly:\n--- want ---\n%s--- got ---\n%s", want, got)
+	}
+}
+
 func TestInstallClaude_RejectsSymlinkedSettingsPath(t *testing.T) {
 	tmpHome := t.TempDir()
 	targetPath := filepath.Join(t.TempDir(), "target.json")
@@ -313,4 +398,34 @@ func claudeMatchersFromHooks(t *testing.T, preToolUse []interface{}) []string {
 	}
 	sort.Strings(matchers)
 	return matchers
+}
+
+func assertProfileAwareConfigScaffold(t *testing.T, configPath, wantProfile string) {
+	t.Helper()
+
+	info, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("stat scaffold: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("scaffold permissions = %o, want %o", got, 0o600)
+	}
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("read scaffold: %v", err)
+	}
+
+	for _, want := range []string{
+		"# Fuse configuration",
+		"# Profile sets defaults. Override individual settings below.",
+		"profile: " + wantProfile,
+		"# llm_judge:",
+		"#   provider: auto",
+		"# caution_fallback: log",
+	} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("config scaffold missing %q:\n%s", want, string(data))
+		}
+	}
 }

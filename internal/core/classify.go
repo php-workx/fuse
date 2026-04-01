@@ -694,8 +694,8 @@ func classifyFallbackLayers(
 		return commandClassificationResult{decision: DecisionSafe, reason: "safe Python inline (read-only modules)", dryRunMatches: dryRunMatches}
 	}
 
-	// Fallback: CAUTION for unknown commands (enables judge triage).
-	return commandClassificationResult{decision: DecisionCaution, reason: "unknown command (no matching rule)", dryRunMatches: dryRunMatches}
+	// Fallback: SAFE for unknown commands (preserves the default-safe contract).
+	return commandClassificationResult{decision: DecisionSafe, reason: "unknown command (no matching rule)", dryRunMatches: dryRunMatches}
 }
 
 func inspectionIsFailClosed(fileInspection *FileInspection) bool {

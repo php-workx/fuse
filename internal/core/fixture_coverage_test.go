@@ -47,8 +47,8 @@ func TestGoldenFixtures_HighRiskFamilyCoverage(t *testing.T) {
 			minTotal: 8,
 			requiredByDec: map[string]int{
 				string(core.DecisionSafe):     2,
-				string(core.DecisionCaution):  1,
-				string(core.DecisionApproval): 5,
+				string(core.DecisionCaution):  8,
+				string(core.DecisionApproval): 2,
 			},
 		},
 		{
@@ -56,8 +56,8 @@ func TestGoldenFixtures_HighRiskFamilyCoverage(t *testing.T) {
 			pattern:  regexp.MustCompile(`\bpulumi\b`),
 			minTotal: 5,
 			requiredByDec: map[string]int{
-				string(core.DecisionSafe):     1,
-				string(core.DecisionApproval): 4,
+				string(core.DecisionSafe):    1,
+				string(core.DecisionCaution): 4,
 			},
 		},
 		{
@@ -65,8 +65,8 @@ func TestGoldenFixtures_HighRiskFamilyCoverage(t *testing.T) {
 			pattern:  regexp.MustCompile(`\b(kubectl|helm)\b`),
 			minTotal: 4,
 			requiredByDec: map[string]int{
-				string(core.DecisionSafe):     1,
-				string(core.DecisionApproval): 3,
+				string(core.DecisionSafe):    1,
+				string(core.DecisionCaution): 3,
 			},
 		},
 		{
@@ -74,9 +74,8 @@ func TestGoldenFixtures_HighRiskFamilyCoverage(t *testing.T) {
 			pattern:  regexp.MustCompile(`\baws\b`),
 			minTotal: 10,
 			requiredByDec: map[string]int{
-				string(core.DecisionSafe):     1,
-				string(core.DecisionCaution):  2,
-				string(core.DecisionApproval): 6,
+				string(core.DecisionSafe):    1,
+				string(core.DecisionCaution): 10,
 			},
 		},
 		{
@@ -84,8 +83,8 @@ func TestGoldenFixtures_HighRiskFamilyCoverage(t *testing.T) {
 			pattern:  regexp.MustCompile(`\bgcloud\b`),
 			minTotal: 7,
 			requiredByDec: map[string]int{
-				string(core.DecisionSafe):     1,
-				string(core.DecisionApproval): 6,
+				string(core.DecisionSafe):    1,
+				string(core.DecisionCaution): 6,
 			},
 		},
 		{
@@ -93,8 +92,8 @@ func TestGoldenFixtures_HighRiskFamilyCoverage(t *testing.T) {
 			pattern:  regexp.MustCompile(`\baz\b`),
 			minTotal: 5,
 			requiredByDec: map[string]int{
-				string(core.DecisionSafe):     1,
-				string(core.DecisionApproval): 4,
+				string(core.DecisionSafe):    1,
+				string(core.DecisionCaution): 4,
 			},
 		},
 		{
