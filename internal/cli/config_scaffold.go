@@ -8,7 +8,7 @@ import (
 	"github.com/php-workx/fuse/internal/config"
 )
 
-func ensureFuseConfigScaffold() error {
+func ensureFuseConfigScaffold(profile string) error {
 	path := config.ConfigPath()
 
 	info, err := os.Stat(path)
@@ -26,18 +26,23 @@ func ensureFuseConfigScaffold() error {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	if err := os.WriteFile(path, []byte(profileAwareConfigScaffold()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(profileAwareConfigScaffold(profile)), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
 }
 
-func profileAwareConfigScaffold() string {
-	return strings.TrimSpace(`
+func profileAwareConfigScaffold(profile string) string {
+	if profile == "" {
+		profile = config.ProfileRelaxed
+	}
+	profile = config.ProfileDefaults(profile).Profile
+
+	return strings.TrimSpace(fmt.Sprintf(`
 # Fuse configuration
 # Profile sets defaults. Override individual settings below.
 # See: https://github.com/php-workx/fuse/docs/profiles.md
-profile: relaxed
+profile: %s
 
 # LLM Judge settings (set by profile, customize as needed)
 # llm_judge:
@@ -49,5 +54,5 @@ profile: relaxed
 # log:     auto-approve and log (default)
 # approve: ask for confirmation
 # caution_fallback: log
-`) + "\n"
+`, profile)) + "\n"
 }
