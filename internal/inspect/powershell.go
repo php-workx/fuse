@@ -23,7 +23,7 @@ func init() {
 	}{
 		{`(?i)\b(Invoke-Expression|iex)\b`, "dynamic_exec"},
 		{`(?i)\b(DownloadString|DownloadFile|Invoke-WebRequest|iwr|Invoke-RestMethod|irm|Start-BitsTransfer)\b`, "http_download"},
-		{`(?i)\b(Start-Process|saps)\b`, "process_spawn"},
+		{`(?i)\b(Start-Process|saps|start)\b`, "process_spawn"},
 		{`(?i)\b(Invoke-WmiMethod|Invoke-Command|icm|New-PSSession|nsn|Enter-PSSession|etsn)\b`, "process_spawn"},
 		{`(?i)\bwmic\b.*\bprocess\b.*\bcall\b.*\bcreate\b`, "process_spawn"},
 		{
@@ -54,7 +54,8 @@ func init() {
 
 // ScanPowerShell scans PowerShell content for dangerous patterns.
 // It performs a line-by-line regex scan, skipping single-line comments and
-// tracking <# ... #> block comments.
+// tracking <# ... #> block comments. Like the Unix scanners, it does not track
+// here-strings, splatted arguments, or commands split across multiple lines.
 func ScanPowerShell(content []byte) []Signal {
 	var signals []Signal
 	lines := bytes.Split(content, []byte("\n"))

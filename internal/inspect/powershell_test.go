@@ -63,6 +63,17 @@ certutil -decode payload.b64 payload.exe
 	}
 }
 
+func TestScanPowerShell_DetectsStartAliasProcessSpawn(t *testing.T) {
+	content := []byte(`start powershell.exe -Verb RunAs`)
+
+	signals := ScanPowerShell(content)
+	categories := powerShellSignalCategories(signals)
+
+	if !categories["process_spawn"] {
+		t.Fatalf("expected process_spawn for start alias, got %#v", signals)
+	}
+}
+
 func powerShellSignalCategories(signals []Signal) map[string]bool {
 	categories := make(map[string]bool, len(signals))
 	for _, s := range signals {

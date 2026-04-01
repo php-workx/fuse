@@ -79,6 +79,23 @@ Teach fuse to understand Windows-specific threats. Without this, fuse classifies
 
 **Done when:** ~~Fuse detects common Windows attack patterns with the same coverage quality as the Unix rule set.~~ **DONE** — Windows hardcoded protections, builtin download/LOLBin/persistence/security rules, PowerShell/CMD alias and safe-command coverage, and `.ps1` / `.bat` / `.cmd` inspection are all implemented and verified.
 
+**Recommended `tag_overrides` for Windows-heavy development workflows:**
+- `tag_overrides` accepts `enabled`, `dryrun`, or `disabled` per builtin tag.
+- Prefer `dryrun` for noisy-but-legitimate developer activity and keep execution-oriented tags enforced.
+- Example:
+
+```yaml
+tag_overrides:
+  windows:download: dryrun
+  windows:registry: dryrun
+  windows:lolbin: enabled
+  windows:persistence: enabled
+```
+
+**Accepted scanner limitations:**
+- PowerShell scanning is line-oriented; here-strings, splatting, and commands split across multiple lines are not reconstructed before matching.
+- Batch scanning is line-oriented; commands continued with `^` across lines are not reconstructed before matching.
+
 ## Dependency Graph
 
 ```text

@@ -131,7 +131,11 @@ var inlineScriptPatterns = []struct {
 var reSensitiveEnvVar = regexp.MustCompile(
 	`\$\{?(AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|GITHUB_TOKEN|GH_TOKEN|DATABASE_URL|DB_PASSWORD|API_KEY|SECRET_KEY|PRIVATE_KEY)`,
 )
-var rePowerShellDownloadPipeIEX = regexp.MustCompile(`(?i)\b(Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\b.*\|\s*(Invoke-Expression|iex)\b`)
+
+var (
+	rePowerShellDownloadPipeIEX    = regexp.MustCompile(`(?i)\b(Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\b.*\|\s*(Invoke-Expression|iex)\b`)
+	rePowerShellDownloadContentIEX = regexp.MustCompile(`(?i)\b(Invoke-Expression|iex)\b.*\b(Invoke-WebRequest|iwr)\b.*\.Content\b`)
+)
 
 // Security-sensitive environment variable prefixes that trigger APPROVAL
 // when used as command-line env assignments (§5.3 from spec).
@@ -273,6 +277,14 @@ func collectFileHash(fileHashes []string, fileHash string) []string {
 // applyCompoundModifiers applies compound-level modifiers: inline pipe-script
 // detection and CWD change escalation.
 func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string) {
+	if rePowerShellDownloadContentIEX.MatchString(displayNorm) {
+		result.Decision = DecisionBlocked
+		result.Reason = "PowerShell Invoke-WebRequest content executed via Invoke-Expression"
+		result.RuleID = "builtin:windows:iex-webrequest-content"
+		result.FailClosed = false
+		return
+	}
+
 	if rePowerShellDownloadPipeIEX.MatchString(displayNorm) {
 		result.Decision = DecisionBlocked
 		result.Reason = "PowerShell download piped to Invoke-Expression"

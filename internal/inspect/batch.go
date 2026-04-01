@@ -55,7 +55,8 @@ func init() {
 
 // ScanBatch scans Windows batch content for dangerous patterns.
 // It performs a line-by-line regex scan, skipping REM comments (with a trailing
-// space requirement) and :: comment lines.
+// space requirement) and :: comment lines. Commands split across lines with ^
+// continuation are not reconstructed.
 func ScanBatch(content []byte) []Signal {
 	var signals []Signal
 	lines := bytes.Split(content, []byte("\n"))

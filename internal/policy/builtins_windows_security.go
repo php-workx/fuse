@@ -46,6 +46,12 @@ func init() {
 			Reason:  "Dangerous COM object creation: Shell.Application",
 		},
 		{
+			ID:      "builtin:windows:comobject-shellbrowserwindow",
+			Pattern: regexp.MustCompile(`(?i)\bNew-Object\b.*\s-ComObject\s+ShellBrowserWindow\b`),
+			Action:  core.DecisionApproval,
+			Reason:  "Dangerous COM object creation: ShellBrowserWindow",
+		},
+		{
 			ID:      "builtin:windows:comobject-mmc20",
 			Pattern: regexp.MustCompile(`(?i)\bNew-Object\b.*\s-ComObject\s+MMC20\.Application\b`),
 			Action:  core.DecisionApproval,
@@ -53,7 +59,7 @@ func init() {
 		},
 		{
 			ID:      "builtin:windows:start-process-runas",
-			Pattern: regexp.MustCompile(`(?i)\b(Start-Process|saps)\b.*\s-Verb\s+RunAs\b`),
+			Pattern: regexp.MustCompile(`(?i)\b(Start-Process|saps|start)\b.*\s-Verb\s+RunAs\b`),
 			Action:  core.DecisionApproval,
 			Reason:  "PowerShell process launch with elevation",
 		},
@@ -138,6 +144,18 @@ func init() {
 			Pattern: regexp.MustCompile(`(?i)\bStop-Service\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Stops a Windows service",
+		},
+		{
+			ID:      "builtin:windows:restart-computer",
+			Pattern: regexp.MustCompile(`(?i)\bRestart-Computer\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Restarts the computer",
+		},
+		{
+			ID:      "builtin:windows:stop-computer",
+			Pattern: regexp.MustCompile(`(?i)\bStop-Computer\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Shuts down the computer",
 		},
 		{
 			ID:      "builtin:windows:set-executionpolicy",

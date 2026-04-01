@@ -262,6 +262,10 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag
 			tags:     []string{"windows:download", "windows:obfuscation", "security"},
 			keywords: []string{"iex", "invoke-expression", "iwr", "irm"},
 		},
+		"builtin:windows:iex-webrequest-content": {
+			tags:     []string{"windows:download", "security"},
+			keywords: []string{"iex", "invoke-expression", "invoke-webrequest", "iwr", ".content"},
+		},
 		"builtin:windows:downloadstring-type": {
 			tags:     []string{"windows:download", "security"},
 			keywords: []string{"system.net.webclient", "downloadstring", "downloadfile"},
@@ -372,13 +376,17 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag
 			tags:     []string{"windows:execution", "security"},
 			keywords: []string{"new-object", "comobject", "shell.application"},
 		},
+		"builtin:windows:comobject-shellbrowserwindow": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"new-object", "comobject", "shellbrowserwindow"},
+		},
 		"builtin:windows:comobject-mmc20": {
 			tags:     []string{"windows:execution", "security"},
 			keywords: []string{"new-object", "comobject", "mmc20.application"},
 		},
 		"builtin:windows:start-process-runas": {
 			tags:     []string{"windows:execution", "security"},
-			keywords: []string{"start-process", "saps", "runas"},
+			keywords: []string{"start-process", "saps", "start", "runas"},
 		},
 		"builtin:windows:invoke-wmimethod-create": {
 			tags:     []string{"windows:execution", "security"},
@@ -431,6 +439,14 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag
 		"builtin:windows:stop-service": {
 			tags:     []string{"windows:service", "security"},
 			keywords: []string{"stop-service"},
+		},
+		"builtin:windows:restart-computer": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"restart-computer"},
+		},
+		"builtin:windows:stop-computer": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"stop-computer"},
 		},
 		"builtin:windows:set-executionpolicy": {
 			tags:     []string{"windows:execution", "security"},
