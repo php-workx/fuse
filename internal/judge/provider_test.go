@@ -124,3 +124,52 @@ func TestDetectProvider_ModelPassedThrough(t *testing.T) {
 		t.Errorf("model = %q, want claude-haiku-4-5-20251001", cp.model)
 	}
 }
+
+func TestProbeProviderReadiness_ClaudeMissingAuth(t *testing.T) {
+	dir := t.TempDir()
+	createFakeBinary(t, dir, "claude")
+	t.Setenv("PATH", dir)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("CLAUDE_API_KEY", "")
+
+	readiness := ProbeProviderReadiness("claude", "")
+	if readiness.ProviderName != "claude" {
+		t.Fatalf("ProviderName = %q, want claude", readiness.ProviderName)
+	}
+	if !readiness.Detected {
+		t.Fatal("Detected = false, want true")
+	}
+	if readiness.AuthConfigured {
+		t.Fatal("AuthConfigured = true, want false")
+	}
+	if readiness.AuthSource != "" {
+		t.Fatalf("AuthSource = %q, want empty", readiness.AuthSource)
+	}
+}
+
+func TestProbeProviderReadiness_CodexAuthFile(t *testing.T) {
+	dir := t.TempDir()
+	createFakeBinary(t, dir, "codex")
+	t.Setenv("PATH", dir)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	if err := os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte("{\"access_token\":\"test\"}\n"), 0o600); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+
+	readiness := ProbeProviderReadiness("codex", "")
+	if readiness.ProviderName != "codex" {
+		t.Fatalf("ProviderName = %q, want codex", readiness.ProviderName)
+	}
+	if !readiness.Detected {
+		t.Fatal("Detected = false, want true")
+	}
+	if !readiness.AuthConfigured {
+		t.Fatal("AuthConfigured = false, want true")
+	}
+	if readiness.AuthSource != "CODEX_HOME/auth.json" {
+		t.Fatalf("AuthSource = %q, want CODEX_HOME/auth.json", readiness.AuthSource)
+	}
+}

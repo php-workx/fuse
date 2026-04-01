@@ -378,17 +378,12 @@ func checkJudgeAvailability() checkResult {
 		}
 	}
 
-	provider, detectErr := judge.DetectProvider(cfg.LLMJudge.Provider, cfg.LLMJudge.Model)
-	if detectErr == nil {
-		return checkResult{
-			name:   checkNameJudgeAvailability,
-			status: "PASS",
-			detail: fmt.Sprintf("provider detected: %s", provider.Name()),
+	readiness := judge.ProbeProviderReadiness(cfg.LLMJudge.Provider, cfg.LLMJudge.Model)
+	if !readiness.Detected {
+		detail := "no judge provider detected"
+		if readiness.DetectionError != "" {
+			detail += ": " + readiness.DetectionError
 		}
-	}
-
-	detail := fmt.Sprintf("no judge provider detected: %v", detectErr)
-	if strings.EqualFold(profile, config.ProfileBalanced) || strings.EqualFold(profile, config.ProfileStrict) {
 		return checkResult{
 			name:   checkNameJudgeAvailability,
 			status: "WARN",
@@ -396,9 +391,25 @@ func checkJudgeAvailability() checkResult {
 		}
 	}
 
+	detail := fmt.Sprintf("provider detected: %s", readiness.ProviderName)
+	if readiness.AuthConfigured {
+		detail += fmt.Sprintf("; auth configured via %s", readiness.AuthSource)
+		return checkResult{
+			name:   checkNameJudgeAvailability,
+			status: "PASS",
+			detail: detail,
+		}
+	}
+
+	if len(readiness.CheckedAuthSources) > 0 {
+		detail += fmt.Sprintf("; auth not detected (checked %s)", strings.Join(readiness.CheckedAuthSources, ", "))
+	} else {
+		detail += "; auth not detected"
+	}
+
 	return checkResult{
 		name:   checkNameJudgeAvailability,
-		status: "PASS",
+		status: "WARN",
 		detail: detail,
 	}
 }

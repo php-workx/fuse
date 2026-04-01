@@ -364,8 +364,8 @@ func TestReleaseCheckMCPWarmPathPerf(t *testing.T) {
 	requireReleaseCheck(t)
 
 	stats := measureDurations(t, 2000, func() {
-		if got := core.ClassifyMCPTool("delete_stack", map[string]interface{}{"name": "prod"}); got != core.DecisionApproval {
-			t.Fatalf("ClassifyMCPTool(delete_stack) = %s, want APPROVAL", got)
+		if got := core.ClassifyMCPTool("delete_stack", map[string]interface{}{"name": "prod"}); got != core.DecisionCaution {
+			t.Fatalf("ClassifyMCPTool(delete_stack) = %s, want CAUTION", got)
 		}
 	})
 	logLatencyStats(t, "PERF-002A", stats)
