@@ -33,6 +33,9 @@ func EffectiveDecision(result *core.ClassifyResult, verdict *judge.Verdict, cfg 
 	if cfg == nil || !strings.EqualFold(strings.TrimSpace(cfg.CautionFallback), "approve") {
 		return decision
 	}
+	if verdict != nil && verdict.Error != "" {
+		return decision
+	}
 	if judgeReviewedActively(cfg, verdict) {
 		return decision
 	}
