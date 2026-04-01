@@ -506,10 +506,9 @@ func readScriptSafe(cwd, scriptPath string) string {
 }
 
 // applyVerdict populates the LLM judge fields on an EventRecord from a Verdict.
-// When the verdict was applied, event.Decision is set to the original classifier
-// output (pre-judge) so accuracy queries can compare judge_decision vs the
-// classifier's opinion. The enforced outcome is recoverable: if judge_applied,
-// the enforced decision = judge_decision; otherwise enforced = decision.
+// Structural and effective decisions are recorded separately by the caller, so
+// this helper only copies the judge-specific fields and preserves existing
+// structural_decision/profile values on the event.
 func applyVerdict(event *db.EventRecord, verdict *judge.Verdict) {
 	if verdict != nil {
 		if event.StructuralDecision == "" && verdict.OriginalDecision != "" {

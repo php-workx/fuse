@@ -5,6 +5,7 @@
 | Document | Description |
 |----------|-------------|
 | [QUICKSTART.md](QUICKSTART.md) | Install fuse and try it in under a minute |
+| [profiles.md](profiles.md) | Profile defaults, install choices, and config behavior |
 | [TRUST_MODEL.md](TRUST_MODEL.md) | What fuse touches on disk, network behavior, security boundaries, uninstall |
 
 ## Internal Development

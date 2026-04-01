@@ -298,7 +298,7 @@ fixtures:
     description: "git restore with --staged suppresses caution"
 
   # =======================================================================
-  # Built-in CAUTION commands migrated from the old approval tier
+  # Built-in CAUTION commands migrated from the old APPROVAL-heavy tier
   # =======================================================================
   - command: "terraform destroy my-stack"
     expected: "CAUTION"
