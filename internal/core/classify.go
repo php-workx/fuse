@@ -308,16 +308,24 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 // classifySubCommand runs the per-sub-command pipeline (steps 4-11).
 func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) SubCommandResult {
 	sub := SubCommandResult{Command: subCmd}
+	var rawPolicyMatch *policyResult
 
-	// Pre-normalization hardcoded check: the tokenizer treats backslashes as
-	// escape characters (Bash semantics), which mangles Windows paths like
-	// C:\Windows into C:Windows. Check hardcoded rules against the raw
-	// sub-command before normalization strips the backslashes.
+	// Pre-normalization rule checks: tokenization can treat backslashes as escape
+	// characters, which mangles Windows paths like C:\Windows into C:Windows.
+	// Check raw command text before normalization strips those separators.
 	if evaluator != nil {
 		if d, reason := evaluator.EvaluateHardcoded(subCmd); d != "" {
 			sub.Decision = d
 			sub.Reason = reason
 			return sub
+		}
+
+		if DetectShellType(subCmd) != ShellBash || strings.Contains(subCmd, `\`) {
+			rawBasename := extractBasename(subCmd)
+			rawSanitized := SanitizeForClassification(subCmd, KnownSafeVerbs[rawBasename])
+			if pr := evaluatePolicyRules(subCmd, rawSanitized, evaluator, nil, nil); pr.matched {
+				rawPolicyMatch = &pr
+			}
 		}
 	}
 
@@ -339,6 +347,17 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 
 	// Classify all commands (outer + inner), take most restrictive.
 	classifyAllNormalizedCommands(&sub, classified, evaluator, cwd, fileInspection)
+
+	if rawPolicyMatch != nil {
+		sub.DryRunMatches = append(sub.DryRunMatches, rawPolicyMatch.dryRunMatches...)
+		if combined := MaxDecision(sub.Decision, rawPolicyMatch.decision); combined != sub.Decision {
+			sub.Decision = combined
+			sub.Reason = rawPolicyMatch.reason
+			sub.RuleID = rawPolicyMatch.ruleID
+			sub.TagOverrideEnforced = rawPolicyMatch.tagOverrideEnforced
+			sub.FailClosed = rawPolicyMatch.failClosed
+		}
+	}
 
 	// Apply post-classification modifiers.
 	applyEnvVarEscalations(&sub, subCmd, classified)

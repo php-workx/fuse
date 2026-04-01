@@ -77,7 +77,7 @@ Teach fuse to understand Windows-specific threats. Without this, fuse classifies
 **Depends on:** Phase 2 (needs to know how commands are parsed)
 **Can run in parallel with:** Phase 3, Phase 4
 
-**Done when:** Fuse detects common Windows attack patterns with the same coverage quality as the Unix rule set.
+**Done when:** ~~Fuse detects common Windows attack patterns with the same coverage quality as the Unix rule set.~~ **DONE** — Windows hardcoded protections, builtin download/LOLBin/persistence/security rules, PowerShell/CMD alias and safe-command coverage, and `.ps1` / `.bat` / `.cmd` inspection are all implemented and verified.
 
 ## Dependency Graph
 

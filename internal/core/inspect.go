@@ -130,6 +130,10 @@ func dispatchScannerAndInfer(result *FileInspection, resolved string, content []
 		signals = inspect.ScanPython(content)
 	case ".sh", ".bash":
 		signals = inspect.ScanShell(content)
+	case ".ps1":
+		signals = inspect.ScanPowerShell(content)
+	case ".bat", ".cmd":
+		signals = inspect.ScanBatch(content)
 	case ".js", ".ts", ".mjs", ".mts":
 		signals = inspect.ScanJavaScript(content)
 	case ".rb", ".pl", ".go":
@@ -164,30 +168,44 @@ func inferSignalDecision(result *FileInspection, signals []inspect.Signal, trunc
 }
 
 // inferDecisionFromSignals returns the decision based on the highest-severity
-// signal category found. Network/process signals yield APPROVAL; cloud_sdk
-// alone yields CAUTION but combined with destructive or subprocess signals
-// yields APPROVAL; anything else yields CAUTION.
+// signal category found. Windows defender tampering/AMSI bypass and explicit
+// blocked-behavior signals are unconditionally BLOCKED. Dynamic execution
+// combined with network download is also BLOCKED to prevent download-exec
+// downgrade in script inspection.
 func inferDecisionFromSignals(signals []inspect.Signal) Decision {
-	decision := DecisionCaution
+	hasApproval := false
 	hasCloudSDK := false
 	hasDestructive := false
+	hasDynamicExec := false
+	hasHTTPDownload := false
 	for _, s := range signals {
 		switch s.Category {
+		case "defender_tamper", "amsi_bypass", "blocked_behavior", "destructive_block":
+			return DecisionBlocked
 		case "subprocess", "cloud_cli", "http_control_plane",
-			"dynamic_exec", "dynamic_import":
-			return DecisionCaution
+			"dynamic_import",
+			"lolbin", "process_spawn", "persistence",
+			"firewall_modify", "user_modify":
+			hasApproval = true
+		case "dynamic_exec":
+			hasDynamicExec = true
+			hasApproval = true
+		case "http_download":
+			hasHTTPDownload = true
+			hasApproval = true
 		case "cloud_sdk":
 			hasCloudSDK = true
 		case "destructive_fs", "destructive_verb":
 			hasDestructive = true
-		default:
-			decision = DecisionCaution
 		}
 	}
-	if hasCloudSDK && hasDestructive {
-		return DecisionCaution
+	if hasDynamicExec && hasHTTPDownload {
+		return DecisionBlocked
 	}
-	return decision
+	if hasApproval || (hasCloudSDK && hasDestructive) {
+		return DecisionApproval
+	}
+	return DecisionCaution
 }
 
 // DetectReferencedFile extracts the first positional argument that looks like
@@ -202,12 +220,12 @@ func DetectReferencedFile(subCommand string) string {
 		return ""
 	}
 
-	parts, unbalancedQuotes := tokenizeQuoteAware(subCommand)
+	parts, unbalancedQuotes := tokenizeInspectArgs(subCommand)
 	if unbalancedQuotes || len(parts) == 0 {
 		return ""
 	}
 
-	invoker := filepath.Base(parts[0])
+	invoker := strings.ToLower(filepath.Base(strings.ReplaceAll(parts[0], `\`, "/")))
 	args := parts[1:]
 
 	switch invoker {
@@ -217,6 +235,13 @@ func DetectReferencedFile(subCommand string) string {
 		return extractFile(args, []string{".js", ".ts"}, []string{"-e", "--eval", "-p", "--print"})
 	case "bash", "sh":
 		return extractFile(args, []string{".sh"}, []string{"-c"})
+	case "powershell", "powershell.exe", "pwsh", "pwsh.exe":
+		return extractFile(args, []string{".ps1"}, []string{"-c", "-command", "-encodedcommand", "-enc"})
+	case "cmd", "cmd.exe":
+		if len(args) == 0 || !strings.EqualFold(args[0], "/c") {
+			return ""
+		}
+		return extractFile(args[1:], []string{".bat", ".cmd"}, nil)
 	case "ruby":
 		return extractFile(args, []string{".rb"}, nil)
 	case "perl":
@@ -226,18 +251,60 @@ func DetectReferencedFile(subCommand string) string {
 	}
 }
 
+// tokenizeInspectArgs splits command text into tokens while preserving
+// backslashes so Windows paths like C:\Temp\foo.cmd remain intact.
+func tokenizeInspectArgs(s string) ([]string, bool) {
+	var tokens []string
+	var current strings.Builder
+	inSingle := false
+	inDouble := false
+
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		tokens = append(tokens, current.String())
+		current.Reset()
+	}
+
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch ch {
+		case '\'':
+			if !inDouble {
+				inSingle = !inSingle
+				continue
+			}
+		case '"':
+			if !inSingle {
+				inDouble = !inDouble
+				continue
+			}
+		case ' ', '\t':
+			if !inSingle && !inDouble {
+				flush()
+				continue
+			}
+		}
+		current.WriteByte(ch)
+	}
+
+	flush()
+	return tokens, inSingle || inDouble
+}
+
 // extractFile walks the argument list looking for the first positional argument
 // ending with one of the allowed extensions. If any of the scriptless flags is
 // encountered before a positional file, it returns "".
 func extractFile(args, exts, scriptlessFlags []string) string {
 	scriptlessSet := make(map[string]bool, len(scriptlessFlags))
 	for _, f := range scriptlessFlags {
-		scriptlessSet[f] = true
+		scriptlessSet[strings.ToLower(f)] = true
 	}
 
 	for _, arg := range args {
 		// If we encounter a scriptless flag, abort.
-		if scriptlessSet[arg] {
+		if scriptlessSet[strings.ToLower(arg)] {
 			return ""
 		}
 
@@ -266,7 +333,7 @@ func detectExecutablePath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if !strings.Contains(path, "/") {
+	if !strings.Contains(path, "/") && !strings.Contains(path, `\`) {
 		return ""
 	}
 	info, err := os.Stat(path)

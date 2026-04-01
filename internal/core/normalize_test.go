@@ -976,6 +976,7 @@ func TestResolvePowerShellAlias(t *testing.T) {
 		{"iex", "Invoke-Expression"},
 		{"iwr", "Invoke-WebRequest"},
 		{"irm", "Invoke-RestMethod"},
+		{"icm", "Invoke-Command"},
 		{"curl", "Invoke-WebRequest"},
 		{"wget", "Invoke-WebRequest"},
 		{"ps", "Get-Process"},
@@ -984,6 +985,9 @@ func TestResolvePowerShellAlias(t *testing.T) {
 		{"cp", "Copy-Item"},
 		{"mv", "Move-Item"},
 		{"echo", "Write-Output"},
+		{"nsn", "New-PSSession"},
+		{"etsn", "Enter-PSSession"},
+		{"saps", "Start-Process"},
 		{"start", "Start-Process"},
 		// Not an alias — returned unchanged.
 		{"Get-Process", "Get-Process"},

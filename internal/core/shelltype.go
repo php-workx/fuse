@@ -55,6 +55,10 @@ func init() {
 		"Out-File", "Out-String", "Out-Null",
 		"Start-Process", "Stop-Process", "Start-Service", "Stop-Service",
 		"Start-BitsTransfer",
+		"Compress-Archive", "Get-Credential", "New-ItemProperty",
+		"Enter-PSSession", "Invoke-WmiMethod", "New-NetFirewallRule",
+		"New-PSSession",
+		"Set-ExecutionPolicy",
 		"Add-Content", "Clear-Content",
 		"Compare-Object", "Measure-Object", "Group-Object",
 		"ConvertTo-Json", "ConvertFrom-Json",
@@ -92,6 +96,34 @@ var cmdOnlyBuiltins = map[string]bool{
 	"del":  true,
 	"rd":   true,
 	"md":   true,
+}
+
+// windowsCommandUtilities are standalone Windows executables whose command-line
+// syntax should be preserved instead of sent through the Bash parser.
+var windowsCommandUtilities = map[string]bool{
+	"auditpol":  true,
+	"bitsadmin": true,
+	"certutil":  true,
+	"cmdkey":    true,
+	"cscript":   true,
+	"forfiles":  true,
+	"hh.exe":    true,
+	"logman":    true,
+	"mshta":     true,
+	"msiexec":   true,
+	"net":       true,
+	"netsh":     true,
+	"ntdsutil":  true,
+	"pcalua":    true,
+	"reg":       true,
+	"regsvr32":  true,
+	"rundll32":  true,
+	"sc":        true,
+	"schtasks":  true,
+	"vaultcmd":  true,
+	"wevtutil":  true,
+	"wmic":      true,
+	"wscript":   true,
 }
 
 // DetectShellType classifies the command string as Bash, PowerShell, or CMD.
@@ -135,13 +167,19 @@ func DetectShellType(command string) ShellType {
 		return ShellPowerShell
 	}
 
-	// Step 5: On Windows only, check if the first token is a CMD-only builtin.
+	// Step 5: Standalone Windows utilities should also bypass the Bash parser so
+	// backslashes survive on non-Windows hosts classifying Windows commands.
+	if windowsCommandUtilities[first] {
+		return ShellCMD
+	}
+
+	// Step 6: On Windows only, check if the first token is a CMD-only builtin.
 	if runtime.GOOS == "windows" {
 		if cmdOnlyBuiltins[first] {
 			return ShellCMD
 		}
 	}
 
-	// Step 6: Default to Bash.
+	// Step 7: Default to Bash.
 	return ShellBash
 }

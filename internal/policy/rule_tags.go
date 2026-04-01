@@ -272,6 +272,222 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag
 			tags:     []string{"windows:download"},
 			keywords: []string{"invoke-restmethod", "irm", "-method"},
 		},
+		"builtin:windows:certutil-decode": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"certutil", "-decode", "-urlcache"},
+		},
+		"builtin:windows:bitsadmin-transfer": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"bitsadmin", "/transfer"},
+		},
+		"builtin:windows:mshta-remote": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"mshta", "http://", "https://", "vbscript:"},
+		},
+		"builtin:windows:regsvr32-remote": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"regsvr32", "/i:http"},
+		},
+		"builtin:windows:rundll32-javascript": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"rundll32", "javascript:"},
+		},
+		"builtin:windows:cmstp-inf": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"cmstp", ".inf"},
+		},
+		"builtin:windows:msiexec-remote": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"msiexec", "http://", "https://"},
+		},
+		"builtin:windows:wscript-engine": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"wscript", "cscript", "//e:"},
+		},
+		"builtin:windows:forfiles-command": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"forfiles", "/c"},
+		},
+		"builtin:windows:certutil-general": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"certutil"},
+		},
+		"builtin:windows:wscript-general": {
+			tags:     []string{"windows:lolbin"},
+			keywords: []string{"wscript", "cscript"},
+		},
+		"builtin:windows:schtasks-create": {
+			tags:     []string{"windows:persistence"},
+			keywords: []string{"schtasks", "/create"},
+		},
+		"builtin:windows:sc-create-config": {
+			tags:     []string{"windows:persistence"},
+			keywords: []string{"sc", "create", "config"},
+		},
+		"builtin:windows:reg-run-key": {
+			tags:     []string{"windows:persistence"},
+			keywords: []string{"reg add", "\\run"},
+		},
+		"builtin:windows:new-service": {
+			tags:     []string{"windows:persistence"},
+			keywords: []string{"new-service"},
+		},
+		"builtin:windows:scheduledtask-register": {
+			tags:     []string{"windows:persistence"},
+			keywords: []string{"new-scheduledtask", "register-scheduledtask"},
+		},
+		"builtin:windows:startup-folder": {
+			tags:     []string{"windows:persistence"},
+			keywords: []string{"startup", "shell:startup"},
+		},
+		"builtin:windows:wmi-event-persistence": {
+			tags:     []string{"windows:persistence"},
+			keywords: []string{"register-wmievent", "set-wmiinstance", "__eventfilter"},
+		},
+		"builtin:windows:logman-tamper": {
+			tags:     []string{"windows:persistence"},
+			keywords: []string{"logman", "delete", "stop"},
+		},
+		"builtin:windows:cmdkey-add": {
+			tags:     []string{"windows:credential", "security"},
+			keywords: []string{"cmdkey", "/add"},
+		},
+		"builtin:windows:net-user-add": {
+			tags:     []string{"windows:user-management", "security"},
+			keywords: []string{"net", "user", "/add"},
+		},
+		"builtin:windows:net-localgroup-admin-add": {
+			tags:     []string{"windows:user-management", "security"},
+			keywords: []string{"net", "localgroup", "administrators", "/add"},
+		},
+		"builtin:windows:ntdsutil": {
+			tags:     []string{"windows:credential", "security"},
+			keywords: []string{"ntdsutil"},
+		},
+		"builtin:windows:comobject-wscript-shell": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"new-object", "comobject", "wscript.shell"},
+		},
+		"builtin:windows:comobject-shell-application": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"new-object", "comobject", "shell.application"},
+		},
+		"builtin:windows:comobject-mmc20": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"new-object", "comobject", "mmc20.application"},
+		},
+		"builtin:windows:start-process-runas": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"start-process", "saps", "runas"},
+		},
+		"builtin:windows:invoke-wmimethod-create": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"invoke-wmimethod", "create"},
+		},
+		"builtin:windows:wmic-process-create": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"wmic", "process", "create"},
+		},
+		"builtin:windows:invoke-command-remote": {
+			tags:     []string{"windows:network", "security"},
+			keywords: []string{"invoke-command", "icm", "computername"},
+		},
+		"builtin:windows:new-pssession": {
+			tags:     []string{"windows:network", "security"},
+			keywords: []string{"new-pssession", "nsn", "computername"},
+		},
+		"builtin:windows:enter-pssession": {
+			tags:     []string{"windows:network", "security"},
+			keywords: []string{"enter-pssession", "etsn", "computername"},
+		},
+		"builtin:windows:wmic-node-remote": {
+			tags:     []string{"windows:network", "security"},
+			keywords: []string{"wmic", "/node:"},
+		},
+		"builtin:windows:netsh-advfirewall-rule": {
+			tags:     []string{"windows:network", "security"},
+			keywords: []string{"netsh", "advfirewall", "rule"},
+		},
+		"builtin:windows:new-netfirewallrule": {
+			tags:     []string{"windows:network", "security"},
+			keywords: []string{"new-netfirewallrule"},
+		},
+		"builtin:windows:auditpol-disable": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"auditpol", "disable"},
+		},
+		"builtin:windows:reg-add-general": {
+			tags:     []string{"windows:registry", "security"},
+			keywords: []string{"reg add"},
+		},
+		"builtin:windows:reg-delete-general": {
+			tags:     []string{"windows:registry", "security"},
+			keywords: []string{"reg delete"},
+		},
+		"builtin:windows:reg-import-general": {
+			tags:     []string{"windows:registry", "security"},
+			keywords: []string{"reg import"},
+		},
+		"builtin:windows:stop-service": {
+			tags:     []string{"windows:service", "security"},
+			keywords: []string{"stop-service"},
+		},
+		"builtin:windows:set-executionpolicy": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"set-executionpolicy"},
+		},
+		"builtin:windows:get-credential": {
+			tags:     []string{"windows:credential", "security"},
+			keywords: []string{"get-credential"},
+		},
+		"builtin:windows:vaultcmd": {
+			tags:     []string{"windows:credential", "security"},
+			keywords: []string{"vaultcmd"},
+		},
+		"builtin:windows:compress-archive": {
+			tags:     []string{"windows:archive", "security"},
+			keywords: []string{"compress-archive"},
+		},
+		"builtin:windows:pcalua-launch": {
+			tags:     []string{"windows:lolbin", "security"},
+			keywords: []string{"pcalua", "-a"},
+		},
+		"builtin:windows:hh-remote": {
+			tags:     []string{"windows:lolbin", "security"},
+			keywords: []string{"hh.exe", "http://", "https://"},
+		},
+		"builtin:windows:invoke-mimikatz": {
+			tags:     []string{"windows:credential", "security"},
+			keywords: []string{"invoke-mimikatz"},
+		},
+		"builtin:windows:wevtutil-set-log": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"wevtutil", "sl"},
+		},
+		"builtin:windows:new-itemproperty-registry": {
+			tags:     []string{"windows:registry", "security"},
+			keywords: []string{"new-itemproperty", "registry"},
+		},
+		"builtin:windows:set-itemproperty-registry": {
+			tags:     []string{"windows:registry", "security"},
+			keywords: []string{"set-itemproperty", "registry"},
+		},
+		"builtin:windows:rundll32-general": {
+			tags:     []string{"windows:lolbin", "security"},
+			keywords: []string{"rundll32"},
+		},
+		"builtin:windows:regsvr32-general": {
+			tags:     []string{"windows:lolbin", "security"},
+			keywords: []string{"regsvr32"},
+		},
+		"builtin:windows:mshta-general": {
+			tags:     []string{"windows:lolbin", "security"},
+			keywords: []string{"mshta"},
+		},
+		"builtin:windows:comobject-general": {
+			tags:     []string{"windows:execution", "security"},
+			keywords: []string{"new-object", "comobject"},
+		},
 
 		// === Persistence ===
 		"builtin:persist:crontab-edit":    {tags: []string{"persistence"}, keywords: []string{"crontab"}},

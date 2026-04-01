@@ -170,7 +170,7 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 // table at all, it returns false (caller should fall through to other rules).
 func IsConditionallySafe(basename, fullCmd string) bool {
 	fields := strings.Fields(fullCmd)
-	switch basename {
+	switch strings.ToLower(basename) {
 	case "find":
 		return isFindSafe(fields)
 	case "git":
@@ -201,7 +201,13 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 		return isNcSafe(fields)
 	case "pip", "pip3":
 		return isPipSafe(fields)
-	case "Remove-Item":
+	case "certutil":
+		return isCertutilSafe(fields)
+	case "sc":
+		return isSCSafe(fields)
+	case "reg":
+		return isRegSafe(fields)
+	case "remove-item":
 		return isRemoveItemSafe(fields)
 	case "set":
 		// CMD set without args displays env vars (safe); with args modifies them (dangerous).
@@ -213,10 +219,40 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 		// CMD time/date without args or with /t displays value (safe); with args modifies (dangerous).
 		return len(fields) == 1 || (len(fields) == 2 && strings.EqualFold(fields[1], "/t"))
 	default:
-		// PowerShell cmdlet case-insensitive match for conditional checks.
-		if strings.EqualFold(basename, "Remove-Item") {
-			return isRemoveItemSafe(fields)
+		return false
+	}
+}
+
+func isCertutilSafe(fields []string) bool {
+	for _, field := range fields[1:] {
+		switch strings.ToLower(field) {
+		case "-hashfile", "-verify", "-dump", "-store", "-viewstore":
+			return true
 		}
+	}
+	return false
+}
+
+func isSCSafe(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	switch strings.ToLower(fields[1]) {
+	case "query", "queryex", "qc":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRegSafe(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+	switch strings.ToLower(fields[1]) {
+	case "query", "export":
+		return true
+	default:
 		return false
 	}
 }

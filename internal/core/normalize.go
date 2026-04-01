@@ -1032,7 +1032,10 @@ var powerShellAliases = map[string]string{
 	"iwr":     "Invoke-WebRequest", "wget": "Invoke-WebRequest", "curl": "Invoke-WebRequest",
 	"irm":  "Invoke-RestMethod",
 	"iex":  "Invoke-Expression",
+	"icm":  "Invoke-Command",
 	"sal":  "Set-Alias",
+	"nsn":  "New-PSSession",
+	"etsn": "Enter-PSSession",
 	"saps": "Start-Process", "start": "Start-Process",
 }
 
