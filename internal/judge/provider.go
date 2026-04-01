@@ -138,9 +138,15 @@ func probeProviderAuth(providerName string) (bool, string, []string) {
 		if configured {
 			return configured, source, checked
 		}
-		checked = append(checked, "CODEX_HOME/auth.json")
-		if info, err := os.Stat(codexAuthPath()); err == nil && info.Size() > 0 {
-			return true, "CODEX_HOME/auth.json", checked
+		authPath, authSource, ok := codexAuthTarget()
+		if authSource != "" {
+			checked = append(checked, authSource)
+		}
+		if !ok {
+			return false, "", checked
+		}
+		if info, err := os.Stat(authPath); err == nil && !info.IsDir() && info.Mode().IsRegular() && info.Size() > 0 {
+			return true, authSource, checked
 		}
 		return false, "", checked
 	default:
@@ -159,13 +165,23 @@ func probeEnvAuth(names ...string) (bool, string, []string) {
 	return false, "", checked
 }
 
-func codexAuthPath() string {
-	if home := os.Getenv("CODEX_HOME"); strings.TrimSpace(home) != "" {
-		return filepath.Join(home, "auth.json")
+func codexAuthTarget() (string, string, bool) {
+	if home := strings.TrimSpace(os.Getenv("CODEX_HOME")); home != "" {
+		return codexAuthTargetFrom(home, "", false)
 	}
 	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(os.TempDir(), ".codex", "auth.json")
+	return codexAuthTargetFrom("", home, err == nil)
+}
+
+func codexAuthTargetFrom(codexHome, userHome string, hasUserHome bool) (string, string, bool) {
+	if codexHome = strings.TrimSpace(codexHome); codexHome != "" {
+		return filepath.Join(codexHome, "auth.json"), "CODEX_HOME/auth.json", true
 	}
-	return filepath.Join(home, ".codex", "auth.json")
+	if hasUserHome {
+		userHome = strings.TrimSpace(userHome)
+		if userHome != "" {
+			return filepath.Join(userHome, ".codex", "auth.json"), "~/.codex/auth.json", true
+		}
+	}
+	return filepath.Join(os.TempDir(), ".codex", "auth.json"), "", false
 }

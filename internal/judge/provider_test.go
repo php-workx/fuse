@@ -173,3 +173,64 @@ func TestProbeProviderReadiness_CodexAuthFile(t *testing.T) {
 		t.Fatalf("AuthSource = %q, want CODEX_HOME/auth.json", readiness.AuthSource)
 	}
 }
+
+func TestProbeProviderReadiness_CodexDefaultAuthFile(t *testing.T) {
+	dir := t.TempDir()
+	createFakeBinary(t, dir, "codex")
+	t.Setenv("PATH", dir)
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("CODEX_HOME", "")
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	authPath := filepath.Join(homeDir, ".codex", "auth.json")
+	if err := os.MkdirAll(filepath.Dir(authPath), 0o755); err != nil {
+		t.Fatalf("mkdir .codex: %v", err)
+	}
+	if err := os.WriteFile(authPath, []byte("{\"access_token\":\"test\"}\n"), 0o600); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+
+	readiness := ProbeProviderReadiness("codex", "")
+	if !readiness.AuthConfigured {
+		t.Fatal("AuthConfigured = false, want true")
+	}
+	if readiness.AuthSource != "~/.codex/auth.json" {
+		t.Fatalf("AuthSource = %q, want ~/.codex/auth.json", readiness.AuthSource)
+	}
+}
+
+func TestProbeProviderReadiness_CodexAuthDirectoryIgnored(t *testing.T) {
+	dir := t.TempDir()
+	createFakeBinary(t, dir, "codex")
+	t.Setenv("PATH", dir)
+	t.Setenv("OPENAI_API_KEY", "")
+
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	if err := os.Mkdir(filepath.Join(codexHome, "auth.json"), 0o755); err != nil {
+		t.Fatalf("mkdir auth.json dir: %v", err)
+	}
+
+	readiness := ProbeProviderReadiness("codex", "")
+	if readiness.AuthConfigured {
+		t.Fatal("AuthConfigured = true, want false")
+	}
+	if readiness.AuthSource != "" {
+		t.Fatalf("AuthSource = %q, want empty", readiness.AuthSource)
+	}
+}
+
+func TestCodexAuthTargetFrom_TempFallbackIsNotAuthoritative(t *testing.T) {
+	path, source, ok := codexAuthTargetFrom("", "", false)
+	if ok {
+		t.Fatal("ok = true, want false")
+	}
+	if source != "" {
+		t.Fatalf("source = %q, want empty", source)
+	}
+	wantPath := filepath.Join(os.TempDir(), ".codex", "auth.json")
+	if path != wantPath {
+		t.Fatalf("path = %q, want %q", path, wantPath)
+	}
+}
