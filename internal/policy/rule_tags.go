@@ -249,6 +249,30 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag
 		"builtin:revshell:mkfifo":   {tags: []string{"revshell", "security"}, keywords: []string{"mkfifo"}},
 		"builtin:revshell:socat":    {tags: []string{"revshell", "security"}, keywords: []string{"socat"}},
 
+		// === Windows downloads ===
+		"builtin:windows:iex-downloadstring": {
+			tags:     []string{"windows:download", "security"},
+			keywords: []string{"iex", "invoke-expression", "downloadstring", "downloadfile"},
+		},
+		"builtin:windows:iex-webclient": {
+			tags:     []string{"windows:download", "security"},
+			keywords: []string{"iex", "invoke-expression", "new-object", "net.webclient"},
+		},
+		"builtin:windows:pipe-to-iex": {
+			tags:     []string{"windows:download", "windows:obfuscation", "security"},
+			keywords: []string{"iex", "invoke-expression", "iwr", "irm"},
+		},
+		"builtin:windows:downloadstring-type": {
+			tags:     []string{"windows:download", "security"},
+			keywords: []string{"system.net.webclient", "downloadstring", "downloadfile"},
+		},
+		"builtin:windows:start-bitstransfer-url":    {tags: []string{"windows:download"}, keywords: []string{"start-bitstransfer"}},
+		"builtin:windows:invoke-webrequest-outfile": {tags: []string{"windows:download"}, keywords: []string{"invoke-webrequest", "iwr", "-outfile"}},
+		"builtin:windows:invoke-restmethod-mutating": {
+			tags:     []string{"windows:download"},
+			keywords: []string{"invoke-restmethod", "irm", "-method"},
+		},
+
 		// === Persistence ===
 		"builtin:persist:crontab-edit":    {tags: []string{"persistence"}, keywords: []string{"crontab"}},
 		"builtin:persist:cron-write":      {tags: []string{"persistence"}, keywords: []string{"cron"}},

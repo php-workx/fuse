@@ -331,3 +331,46 @@ func TestHardcodedBlocked_WindowsWriteCmdlets(t *testing.T) {
 		}
 	}
 }
+
+// TestHardcodedBlocked_WindowsSecurityIntelligence verifies Windows-specific
+// anti-forensics, AV tampering, and credential theft commands are blocked.
+func TestHardcodedBlocked_WindowsSecurityIntelligence(t *testing.T) {
+	blocked := []struct {
+		cmd    string
+		reason string
+	}{
+		{`Add-MpPreference -ExclusionPath C:\Temp`, `Defender exclusion path should be blocked`},
+		{`Set-MpPreference -DisableRealtimeMonitoring $true`, `disabling Defender realtime monitoring should be blocked`},
+		{`[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils')`, `AMSI bypass reflection should be blocked`},
+		{`powershell -Command "$a='amsiInitFailed'"`, `AMSI bypass marker should be blocked`},
+		{`Clear-EventLog -LogName Security`, `Clear-EventLog should be blocked`},
+		{`wevtutil cl Security`, `wevtutil cl should be blocked`},
+		{`procdump -ma lsass.exe C:\Temp\lsass.dmp`, `LSASS dump via procdump should be blocked`},
+		{`reg save HKLM\\SAM C:\Temp\SAM.save`, `SAM hive export should be blocked`},
+		{`reg save HKLM\\SYSTEM C:\Temp\SYSTEM.save`, `SYSTEM hive export should be blocked`},
+		{`reg save HKLM\\SECURITY C:\Temp\SECURITY.save`, `SECURITY hive export should be blocked`},
+	}
+	for _, tc := range blocked {
+		dec, reason := EvaluateHardcoded(tc.cmd)
+		if dec != core.DecisionBlocked {
+			t.Errorf("%s: got decision %q (reason: %q), want BLOCKED", tc.reason, dec, reason)
+		}
+	}
+
+	notBlocked := []struct {
+		cmd    string
+		reason string
+	}{
+		{`Get-MpPreference`, `read-only Defender query should not be blocked`},
+		{`wevtutil gl Security`, `wevtutil gl should not be blocked`},
+		{`wevtutil el`, `wevtutil el should not be blocked`},
+		{`reg save HKLM\\SOFTWARE C:\Temp\software.save`, `non-sensitive hive export should not be blocked`},
+		{`tasklist | findstr lsass`, `observing lsass should not be blocked`},
+	}
+	for _, tc := range notBlocked {
+		dec, _ := EvaluateHardcoded(tc.cmd)
+		if dec == core.DecisionBlocked {
+			t.Errorf("%s: got BLOCKED, want no match", tc.reason)
+		}
+	}
+}

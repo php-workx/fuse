@@ -301,6 +301,40 @@ var HardcodedBlocked = []HardcodedRule{
 		Reason:  "Disk formatting via PowerShell",
 	},
 
+	// === Windows: Security intelligence hard-blocks ===
+
+	// Defender exclusion changes allow malicious binaries or paths to evade scanning.
+	{
+		Pattern: regexp.MustCompile(`(?i)\b(Add-MpPreference|Set-MpPreference)\b.*-Exclusion(Path|Extension|Process)\b`),
+		Reason:  "Defender exclusion tampering",
+	},
+	{
+		Pattern: regexp.MustCompile(`(?i)\bSet-MpPreference\b.*-DisableRealtimeMonitoring\b`),
+		Reason:  "Disables Defender realtime monitoring",
+	},
+
+	// AMSI bypass strings are never legitimate for an AI agent to emit.
+	{
+		Pattern: regexp.MustCompile(`(?i)(AmsiUtils|amsiInitFailed|\[Ref\]\.Assembly\.GetType)`),
+		Reason:  "AMSI bypass",
+	},
+
+	// Clearing logs is anti-forensics; anchor wevtutil to the cl subcommand only.
+	{
+		Pattern: regexp.MustCompile(`(?i)\b(Clear-EventLog|wevtutil\s+cl)\b`),
+		Reason:  "Windows event log clearing",
+	},
+
+	// Credential theft via LSASS dumps or registry hive exports is never allowed.
+	{
+		Pattern: regexp.MustCompile(`(?i)\bprocdump(?:\.exe)?\b.*\blsass(?:\.exe)?\b|\blsass(?:\.exe)?\b.*\bprocdump(?:\.exe)?\b`),
+		Reason:  "Credential theft via LSASS dump",
+	},
+	{
+		Pattern: regexp.MustCompile(`(?i)\breg\s+save\s+.*\\(SAM|SYSTEM|SECURITY)\b`),
+		Reason:  "Credential theft via sensitive registry hive export",
+	},
+
 	// === Windows: Self-protection ===
 
 	// Self-protection: Windows path variants.

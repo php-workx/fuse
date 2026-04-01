@@ -146,7 +146,7 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 
 	// Extract basename from first token if it contains path separators.
 	firstToken := tokens[i]
-	if strings.Contains(firstToken, "/") || strings.Contains(firstToken, `\`) {
+	if (strings.Contains(firstToken, "/") || strings.Contains(firstToken, `\`)) && !strings.HasPrefix(firstToken, "[") {
 		normalizedToken := strings.ReplaceAll(firstToken, `\`, "/")
 		firstToken = filepath.Base(normalizedToken)
 	}
@@ -1030,6 +1030,7 @@ var powerShellAliases = map[string]string{
 	"sort":    "Sort-Object",
 	"measure": "Measure-Object",
 	"iwr":     "Invoke-WebRequest", "wget": "Invoke-WebRequest", "curl": "Invoke-WebRequest",
+	"irm":  "Invoke-RestMethod",
 	"iex":  "Invoke-Expression",
 	"sal":  "Set-Alias",
 	"saps": "Start-Process", "start": "Start-Process",

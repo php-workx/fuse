@@ -975,6 +975,7 @@ func TestResolvePowerShellAlias(t *testing.T) {
 		{"cat", "Get-Content"},
 		{"iex", "Invoke-Expression"},
 		{"iwr", "Invoke-WebRequest"},
+		{"irm", "Invoke-RestMethod"},
 		{"curl", "Invoke-WebRequest"},
 		{"wget", "Invoke-WebRequest"},
 		{"ps", "Get-Process"},

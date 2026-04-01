@@ -30,7 +30,10 @@ func (s ShellType) String() string {
 
 // knownCmdlets is the set of common PowerShell Verb-Noun cmdlets used for
 // heuristic detection. Stored lowercase for case-insensitive matching.
-var knownCmdlets map[string]bool
+var (
+	knownCmdlets           map[string]bool
+	knownPowerShellAliases map[string]bool
+)
 
 func init() {
 	cmdlets := []string{
@@ -51,6 +54,7 @@ func init() {
 		"Format-Table", "Format-List",
 		"Out-File", "Out-String", "Out-Null",
 		"Start-Process", "Stop-Process", "Start-Service", "Stop-Service",
+		"Start-BitsTransfer",
 		"Add-Content", "Clear-Content",
 		"Compare-Object", "Measure-Object", "Group-Object",
 		"ConvertTo-Json", "ConvertFrom-Json",
@@ -62,6 +66,14 @@ func init() {
 	knownCmdlets = make(map[string]bool, len(cmdlets))
 	for _, c := range cmdlets {
 		knownCmdlets[strings.ToLower(c)] = true
+	}
+
+	// Only include aliases that are strongly PowerShell-specific and do not
+	// collide with common Unix commands.
+	aliases := []string{"iex", "iwr", "irm", "icm", "saps", "spps", "nsn", "etsn"}
+	knownPowerShellAliases = make(map[string]bool, len(aliases))
+	for _, a := range aliases {
+		knownPowerShellAliases[a] = true
 	}
 }
 
@@ -88,8 +100,9 @@ var cmdOnlyBuiltins = map[string]bool{
 //  1. Explicit cmd.exe /c wrapper → CMD
 //  2. Explicit powershell.exe / pwsh wrapper → PowerShell
 //  3. Known PowerShell Verb-Noun cmdlet in the command → PowerShell
-//  4. (Windows only) First token is a CMD-only builtin → CMD
-//  5. Default → Bash
+//  4. PowerShell-specific alias or type literal syntax → PowerShell
+//  5. (Windows only) First token is a CMD-only builtin → CMD
+//  6. Default → Bash
 func DetectShellType(command string) ShellType {
 	fields := strings.Fields(command)
 	if len(fields) == 0 {
@@ -110,18 +123,25 @@ func DetectShellType(command string) ShellType {
 
 	// Step 3: Scan tokens for a known Verb-Noun PowerShell cmdlet.
 	for _, tok := range fields {
-		if knownCmdlets[strings.ToLower(tok)] {
+		lowerTok := strings.ToLower(tok)
+		if knownCmdlets[lowerTok] || knownPowerShellAliases[lowerTok] {
 			return ShellPowerShell
 		}
 	}
 
-	// Step 4: On Windows only, check if the first token is a CMD-only builtin.
+	// Step 4: PowerShell type-literal or static member syntax, e.g.
+	// [System.Net.WebClient]::new() or [Ref].Assembly.GetType(...).
+	if strings.Contains(command, "]::") || strings.Contains(command, "[Ref].") {
+		return ShellPowerShell
+	}
+
+	// Step 5: On Windows only, check if the first token is a CMD-only builtin.
 	if runtime.GOOS == "windows" {
 		if cmdOnlyBuiltins[first] {
 			return ShellCMD
 		}
 	}
 
-	// Step 5: Default to Bash.
+	// Step 6: Default to Bash.
 	return ShellBash
 }

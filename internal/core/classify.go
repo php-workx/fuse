@@ -131,6 +131,7 @@ var inlineScriptPatterns = []struct {
 var reSensitiveEnvVar = regexp.MustCompile(
 	`\$\{?(AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|GITHUB_TOKEN|GH_TOKEN|DATABASE_URL|DB_PASSWORD|API_KEY|SECRET_KEY|PRIVATE_KEY)`,
 )
+var rePowerShellDownloadPipeIEX = regexp.MustCompile(`(?i)\b(Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\b.*\|\s*(Invoke-Expression|iex)\b`)
 
 // Security-sensitive environment variable prefixes that trigger APPROVAL
 // when used as command-line env assignments (§5.3 from spec).
@@ -272,6 +273,14 @@ func collectFileHash(fileHashes []string, fileHash string) []string {
 // applyCompoundModifiers applies compound-level modifiers: inline pipe-script
 // detection and CWD change escalation.
 func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string) {
+	if rePowerShellDownloadPipeIEX.MatchString(displayNorm) {
+		result.Decision = DecisionBlocked
+		result.Reason = "PowerShell download piped to Invoke-Expression"
+		result.RuleID = "builtin:windows:pipe-to-iex"
+		result.FailClosed = false
+		return
+	}
+
 	// Preserve inline pipe-script detection across compound splitting.
 	if len(subCmds) > 1 && strings.Contains(displayNorm, "|") {
 		compoundInlineDecision, compoundInlineReason := detectInlineScript(displayNorm)
