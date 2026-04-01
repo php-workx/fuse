@@ -23,7 +23,7 @@ func init() {
 		},
 		{
 			ID:      "builtin:windows:mshta-remote",
-			Pattern: regexp.MustCompile(`(?i)\bmshta\b.*(https?://|vbscript:)`),
+			Pattern: regexp.MustCompile(`(?i)\bmshta\b.*(https?://|vbscript:|javascript:)`),
 			Action:  core.DecisionApproval,
 			Reason:  "mshta executing remote or script content",
 		},
@@ -69,8 +69,12 @@ func init() {
 			Action:  core.DecisionCaution,
 			Reason:  "general certutil usage",
 			Predicate: func(cmd string) bool {
+				lowerCmd := strings.ToLower(cmd)
+				if strings.Contains(lowerCmd, "-decode") || strings.Contains(lowerCmd, "-urlcache") {
+					return false
+				}
 				for _, safe := range []string{"-hashfile", "-verify", "-dump", "-store", "-viewstore"} {
-					if strings.Contains(strings.ToLower(cmd), safe) {
+					if strings.Contains(lowerCmd, safe) {
 						return false
 					}
 				}

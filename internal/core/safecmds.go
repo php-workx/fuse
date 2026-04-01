@@ -170,7 +170,7 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 // table at all, it returns false (caller should fall through to other rules).
 func IsConditionallySafe(basename, fullCmd string) bool {
 	fields := strings.Fields(fullCmd)
-	switch strings.ToLower(basename) {
+	switch basename {
 	case "find":
 		return isFindSafe(fields)
 	case "git":
@@ -201,6 +201,10 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 		return isNcSafe(fields)
 	case "pip", "pip3":
 		return isPipSafe(fields)
+	}
+
+	// Windows command names and PowerShell cmdlets are case-insensitive.
+	switch strings.ToLower(basename) {
 	case "certutil":
 		return isCertutilSafe(fields)
 	case "sc":
@@ -224,13 +228,29 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 }
 
 func isCertutilSafe(fields []string) bool {
-	for _, field := range fields[1:] {
-		switch strings.ToLower(field) {
-		case "-hashfile", "-verify", "-dump", "-store", "-viewstore":
-			return true
-		}
+	safeSwitches := map[string]bool{
+		"hashfile":  true,
+		"verify":    true,
+		"dump":      true,
+		"store":     true,
+		"viewstore": true,
 	}
-	return false
+	sawSafeSwitch := false
+
+	for _, field := range fields[1:] {
+		if !strings.HasPrefix(field, "-") && !strings.HasPrefix(field, "/") {
+			continue
+		}
+
+		name := strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(field), "-"), "/")
+		if !safeSwitches[name] {
+			return false
+		}
+
+		sawSafeSwitch = true
+	}
+
+	return sawSafeSwitch
 }
 
 func isSCSafe(fields []string) bool {
@@ -250,7 +270,7 @@ func isRegSafe(fields []string) bool {
 		return false
 	}
 	switch strings.ToLower(fields[1]) {
-	case "query", "export":
+	case "query":
 		return true
 	default:
 		return false

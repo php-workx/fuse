@@ -321,7 +321,7 @@ var HardcodedBlocked = []HardcodedRule{
 
 	// Clearing logs is anti-forensics; anchor wevtutil to the cl subcommand only.
 	{
-		Pattern: regexp.MustCompile(`(?i)\b(Clear-EventLog|wevtutil\s+cl)\b`),
+		Pattern: regexp.MustCompile(`(?i)\b(Clear-EventLog|wevtutil(?:\.exe)?\s+cl)\b`),
 		Reason:  "Windows event log clearing",
 	},
 
@@ -331,7 +331,7 @@ var HardcodedBlocked = []HardcodedRule{
 		Reason:  "Credential theft via LSASS dump",
 	},
 	{
-		Pattern: regexp.MustCompile(`(?i)\breg\s+save\s+.*\\(SAM|SYSTEM|SECURITY)\b`),
+		Pattern: regexp.MustCompile(`(?i)\breg(?:\.exe)?\s+save\s+.*\\(SAM|SYSTEM|SECURITY)\b`),
 		Reason:  "Credential theft via sensitive registry hive export",
 	},
 

@@ -345,10 +345,12 @@ func TestHardcodedBlocked_WindowsSecurityIntelligence(t *testing.T) {
 		{`powershell -Command "$a='amsiInitFailed'"`, `AMSI bypass marker should be blocked`},
 		{`Clear-EventLog -LogName Security`, `Clear-EventLog should be blocked`},
 		{`wevtutil cl Security`, `wevtutil cl should be blocked`},
+		{`wevtutil.exe cl Security`, `wevtutil.exe cl should be blocked`},
 		{`procdump -ma lsass.exe C:\Temp\lsass.dmp`, `LSASS dump via procdump should be blocked`},
-		{`reg save HKLM\\SAM C:\Temp\SAM.save`, `SAM hive export should be blocked`},
-		{`reg save HKLM\\SYSTEM C:\Temp\SYSTEM.save`, `SYSTEM hive export should be blocked`},
-		{`reg save HKLM\\SECURITY C:\Temp\SECURITY.save`, `SECURITY hive export should be blocked`},
+		{`reg save HKLM\SAM C:\Temp\SAM.save`, `SAM hive export should be blocked`},
+		{`reg save HKLM\SYSTEM C:\Temp\SYSTEM.save`, `SYSTEM hive export should be blocked`},
+		{`reg save HKLM\SECURITY C:\Temp\SECURITY.save`, `SECURITY hive export should be blocked`},
+		{`reg.exe save HKLM\SAM C:\Temp\SAM.save`, `SAM hive export via reg.exe should be blocked`},
 	}
 	for _, tc := range blocked {
 		dec, reason := EvaluateHardcoded(tc.cmd)
@@ -364,7 +366,8 @@ func TestHardcodedBlocked_WindowsSecurityIntelligence(t *testing.T) {
 		{`Get-MpPreference`, `read-only Defender query should not be blocked`},
 		{`wevtutil gl Security`, `wevtutil gl should not be blocked`},
 		{`wevtutil el`, `wevtutil el should not be blocked`},
-		{`reg save HKLM\\SOFTWARE C:\Temp\software.save`, `non-sensitive hive export should not be blocked`},
+		{`wevtutil.exe gl Security`, `wevtutil.exe gl should not be blocked`},
+		{`reg save HKLM\SOFTWARE C:\Temp\software.save`, `non-sensitive hive export should not be blocked`},
 		{`tasklist | findstr lsass`, `observing lsass should not be blocked`},
 	}
 	for _, tc := range notBlocked {

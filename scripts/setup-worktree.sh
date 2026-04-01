@@ -34,6 +34,19 @@ ensure_excluded() {
     printf '%s\n' "$path" > "$info_exclude_path"
 }
 
+ensure_no_local_git_entries() {
+    local name="$1"
+    local target_path="$2"
+    local status
+
+    status="$(git status --porcelain=v1 --untracked-files=all --ignored=matching -- "$name")"
+    if [ -n "$status" ]; then
+        echo "error: refusing to replace $target_path with local changes:" >&2
+        echo "$status" >&2
+        exit 1
+    fi
+}
+
 ensure_link() {
     local name="$1"
     local source_path="$primary_root/$name"
@@ -53,15 +66,9 @@ ensure_link() {
         fi
         rm -f "$target_path"
     elif [ -e "$target_path" ]; then
-        if [ "$name" = ".tickets" ]; then
-            local status
-            status="$(git status --porcelain=v1 --untracked-files=normal -- "$name")"
-            if [ -n "$status" ]; then
-                echo "error: refusing to replace $target_path with local changes:" >&2
-                echo "$status" >&2
-                exit 1
-            fi
-        elif find "$target_path" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+        ensure_no_local_git_entries "$name" "$target_path"
+
+        if [ "$name" != ".tickets" ] && find "$target_path" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
             echo "error: refusing to replace non-empty path: $target_path" >&2
             exit 1
         fi

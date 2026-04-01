@@ -179,7 +179,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	fileHashes := classifyAllSubCommands(result, subCmds, evaluator, req.Cwd)
 
 	// Apply compound-level modifiers.
-	applyCompoundModifiers(result, subCmds, displayNorm)
+	applyCompoundModifiers(result, subCmds, displayNorm, evaluator)
 
 	// Step 12: Compute decision key.
 	combinedHash := strings.Join(fileHashes, ":")
@@ -276,21 +276,22 @@ func collectFileHash(fileHashes []string, fileHash string) []string {
 
 // applyCompoundModifiers applies compound-level modifiers: inline pipe-script
 // detection and CWD change escalation.
-func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string) {
-	if rePowerShellDownloadContentIEX.MatchString(displayNorm) {
-		result.Decision = DecisionBlocked
-		result.Reason = "PowerShell Invoke-WebRequest content executed via Invoke-Expression"
-		result.RuleID = "builtin:windows:iex-webrequest-content"
-		result.FailClosed = false
-		return
-	}
+func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string, evaluator PolicyEvaluator) {
+	if evaluator != nil {
+		basename := extractBasename(displayNorm)
+		sanitized := SanitizeForClassification(displayNorm, KnownSafeVerbs[basename])
 
-	if rePowerShellDownloadPipeIEX.MatchString(displayNorm) {
-		result.Decision = DecisionBlocked
-		result.Reason = "PowerShell download piped to Invoke-Expression"
-		result.RuleID = "builtin:windows:pipe-to-iex"
-		result.FailClosed = false
-		return
+		// Keep compound Windows IEX/download detections in the normal policy path
+		// so dry-run/tag override semantics are honored.
+		if rePowerShellDownloadContentIEX.MatchString(displayNorm) {
+			pr := evaluatePolicyRules(displayNorm, sanitized, evaluator, nil, result.DryRunMatches)
+			applyCompoundPolicyMatch(result, pr)
+		}
+
+		if rePowerShellDownloadPipeIEX.MatchString(displayNorm) {
+			pr := evaluatePolicyRules(displayNorm, sanitized, evaluator, nil, result.DryRunMatches)
+			applyCompoundPolicyMatch(result, pr)
+		}
 	}
 
 	// Preserve inline pipe-script detection across compound splitting.
@@ -317,6 +318,26 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 	}
 }
 
+func applyCompoundPolicyMatch(result *ClassifyResult, pr policyResult) {
+	result.DryRunMatches = pr.dryRunMatches
+	if pr.tagOverrideEnforced {
+		result.TagOverrideEnforced = true
+	}
+	if pr.failClosed {
+		result.FailClosed = true
+	}
+	if !pr.matched {
+		return
+	}
+
+	combined := MaxDecision(result.Decision, pr.decision)
+	if combined != result.Decision {
+		result.Decision = combined
+		result.Reason = pr.reason
+		result.RuleID = pr.ruleID
+	}
+}
+
 // classifySubCommand runs the per-sub-command pipeline (steps 4-11).
 func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) SubCommandResult {
 	sub := SubCommandResult{Command: subCmd}
@@ -335,7 +356,7 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 		if DetectShellType(subCmd) != ShellBash || strings.Contains(subCmd, `\`) {
 			rawBasename := extractBasename(subCmd)
 			rawSanitized := SanitizeForClassification(subCmd, KnownSafeVerbs[rawBasename])
-			if pr := evaluatePolicyRules(subCmd, rawSanitized, evaluator, nil, nil); pr.matched {
+			if pr := evaluatePolicyRules(subCmd, rawSanitized, evaluator, nil, nil); pr.matched || len(pr.dryRunMatches) > 0 {
 				rawPolicyMatch = &pr
 			}
 		}
@@ -362,6 +383,12 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 
 	if rawPolicyMatch != nil {
 		sub.DryRunMatches = append(sub.DryRunMatches, rawPolicyMatch.dryRunMatches...)
+		if rawPolicyMatch.tagOverrideEnforced {
+			sub.TagOverrideEnforced = true
+		}
+		if rawPolicyMatch.failClosed {
+			sub.FailClosed = true
+		}
 		if combined := MaxDecision(sub.Decision, rawPolicyMatch.decision); combined != sub.Decision {
 			sub.Decision = combined
 			sub.Reason = rawPolicyMatch.reason

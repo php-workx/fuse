@@ -11,33 +11,8 @@ import (
 )
 
 func TestSetupWorktreeLinksSharedDirectories(t *testing.T) {
-	scriptPath, err := filepath.Abs("scripts/setup-worktree.sh")
-	if err != nil {
-		t.Fatalf("abs script path: %v", err)
-	}
-
-	repoRoot := t.TempDir()
-	runWorktreeCmd(t, repoRoot, "git", "init")
-	disabledHooksDir := filepath.Join(repoRoot, ".git-hooks-disabled")
-	if err := os.MkdirAll(disabledHooksDir, 0o755); err != nil {
-		t.Fatalf("mkdir disabled hooks dir: %v", err)
-	}
-	runWorktreeCmd(t, repoRoot, "git", "config", "core.hooksPath", disabledHooksDir)
-	runWorktreeCmd(t, repoRoot, "git", "config", "user.name", "Test User")
-	runWorktreeCmd(t, repoRoot, "git", "config", "user.email", "test@example.com")
-
-	writeWorktreeFile(t, filepath.Join(repoRoot, ".gitignore"), ".agents/\n.worktrees/\n")
-	writeWorktreeFile(t, filepath.Join(repoRoot, "README.md"), "fixture\n")
-	writeWorktreeFile(t, filepath.Join(repoRoot, ".tickets", "shared.md"), "ticket\n")
-	if err := os.MkdirAll(filepath.Join(repoRoot, ".agents"), 0o755); err != nil {
-		t.Fatalf("mkdir .agents: %v", err)
-	}
-
-	runWorktreeCmd(t, repoRoot, "git", "add", ".")
-	runWorktreeCmd(t, repoRoot, "git", "commit", "-m", "initial")
-
-	worktreeRoot := filepath.Join(repoRoot, ".worktrees", "feature")
-	runWorktreeCmd(t, repoRoot, "git", "worktree", "add", worktreeRoot, "-b", "feature")
+	scriptPath := worktreeScriptPath(t)
+	repoRoot, worktreeRoot := newWorktreeFixture(t)
 
 	beforeTickets := mustLstat(t, filepath.Join(worktreeRoot, ".tickets"))
 	if beforeTickets.Mode()&os.ModeSymlink != 0 {
@@ -58,18 +33,63 @@ func TestSetupWorktreeLinksSharedDirectories(t *testing.T) {
 	}
 }
 
+func TestSetupWorktreeRefusesIgnoredTicketsFiles(t *testing.T) {
+	scriptPath := worktreeScriptPath(t)
+	_, worktreeRoot := newWorktreeFixture(t)
+
+	writeWorktreeFile(t, filepath.Join(worktreeRoot, ".tickets", "local", "scratch.md"), "ignored\n")
+
+	output, err := runWorktreeCmdErr(worktreeRoot, "bash", scriptPath)
+	if err == nil {
+		t.Fatal("expected setup-worktree to fail when ignored files exist in .tickets")
+	}
+	if !strings.Contains(output, "refusing to replace") {
+		t.Fatalf("expected refusal output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "!! .tickets/local/") && !strings.Contains(output, "!! .tickets/local/scratch.md") {
+		t.Fatalf("expected ignored-file status in output, got:\n%s", output)
+	}
+
+	info := mustLstat(t, filepath.Join(worktreeRoot, ".tickets"))
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("expected .tickets to remain a real directory after refusal")
+	}
+}
+
+func TestAssertSymlinkTargetResolvesRelativeLinks(t *testing.T) {
+	root := t.TempDir()
+	targetDir := filepath.Join(root, "shared")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatalf("mkdir shared dir: %v", err)
+	}
+	linkPath := filepath.Join(root, "worktree", ".tickets")
+	if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+		t.Fatalf("mkdir link parent dir: %v", err)
+	}
+	if err := os.Symlink(filepath.Join("..", "shared"), linkPath); err != nil {
+		t.Fatalf("create relative symlink: %v", err)
+	}
+
+	assertSymlinkTarget(t, linkPath, targetDir)
+}
+
 func runWorktreeCmd(t *testing.T, cwd, name string, args ...string) string {
 	t.Helper()
 
+	out, err := runWorktreeCmdErr(cwd, name, args...)
+	if err != nil {
+		t.Fatalf("%s %v failed: %v\n%s", name, args, err, out)
+	}
+
+	return out
+}
+
+func runWorktreeCmdErr(cwd, name string, args ...string) (string, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Dir = cwd
 	cmd.Env = filteredGitEnv()
 	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s %v failed: %v\n%s", name, args, err, string(out))
-	}
-
-	return string(out)
+	return string(out), err
 }
 
 func filteredGitEnv() []string {
@@ -94,6 +114,46 @@ func filteredGitEnv() []string {
 		filtered = append(filtered, item)
 	}
 	return filtered
+}
+
+func worktreeScriptPath(t *testing.T) string {
+	t.Helper()
+
+	scriptPath, err := filepath.Abs("scripts/setup-worktree.sh")
+	if err != nil {
+		t.Fatalf("abs script path: %v", err)
+	}
+
+	return scriptPath
+}
+
+func newWorktreeFixture(t *testing.T) (string, string) {
+	t.Helper()
+
+	repoRoot := t.TempDir()
+	runWorktreeCmd(t, repoRoot, "git", "init")
+	disabledHooksDir := filepath.Join(repoRoot, ".git-hooks-disabled")
+	if err := os.MkdirAll(disabledHooksDir, 0o755); err != nil {
+		t.Fatalf("mkdir disabled hooks dir: %v", err)
+	}
+	runWorktreeCmd(t, repoRoot, "git", "config", "core.hooksPath", disabledHooksDir)
+	runWorktreeCmd(t, repoRoot, "git", "config", "user.name", "Test User")
+	runWorktreeCmd(t, repoRoot, "git", "config", "user.email", "test@example.com")
+
+	writeWorktreeFile(t, filepath.Join(repoRoot, ".gitignore"), ".agents/\n.worktrees/\n.tickets/local/\n")
+	writeWorktreeFile(t, filepath.Join(repoRoot, "README.md"), "fixture\n")
+	writeWorktreeFile(t, filepath.Join(repoRoot, ".tickets", "shared.md"), "ticket\n")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".agents"), 0o755); err != nil {
+		t.Fatalf("mkdir .agents: %v", err)
+	}
+
+	runWorktreeCmd(t, repoRoot, "git", "add", ".")
+	runWorktreeCmd(t, repoRoot, "git", "commit", "-m", "initial")
+
+	worktreeRoot := filepath.Join(repoRoot, ".worktrees", "feature")
+	runWorktreeCmd(t, repoRoot, "git", "worktree", "add", worktreeRoot, "-b", "feature")
+
+	return repoRoot, worktreeRoot
 }
 
 func writeWorktreeFile(t *testing.T, path, contents string) {
@@ -129,6 +189,9 @@ func assertSymlinkTarget(t *testing.T, path, want string) {
 	got, err := os.Readlink(path)
 	if err != nil {
 		t.Fatalf("readlink %s: %v", path, err)
+	}
+	if !filepath.IsAbs(got) {
+		got = filepath.Join(filepath.Dir(path), got)
 	}
 
 	gotEval, err := filepath.EvalSymlinks(got)

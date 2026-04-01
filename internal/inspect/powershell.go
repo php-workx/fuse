@@ -37,6 +37,11 @@ func init() {
 		{`(?i)\breg\s+add\b.*\\Run(Once)?(?:\s|$|\\)`, "persistence"},
 		{`(?i)\b(Add-MpPreference|Set-MpPreference)\b`, "defender_tamper"},
 		{`(?i)\b(AmsiUtils|amsiInitFailed)\b|\[Ref\]\.Assembly\.GetType`, "amsi_bypass"},
+		{`(?i)\b(Clear-EventLog|wevtutil(?:\.exe)?\s+cl)\b`, "blocked_behavior"},
+		{`(?i)\breg(?:\.exe)?\s+save\s+.*\\(SAM|SYSTEM|SECURITY)\b`, "blocked_behavior"},
+		{`(?i)\bprocdump(?:\.exe)?\b.*\blsass(?:\.exe)?\b|\blsass(?:\.exe)?\b.*\bprocdump(?:\.exe)?\b`, "blocked_behavior"},
+		{`(?i)\bRemove-Item\b.*-Recurse\b.*-Force\b|\bRemove-Item\b.*-Force\b.*-Recurse\b`, "destructive_block"},
+		{`(?i)\bFormat-Volume\b`, "destructive_block"},
 		{`(?i)\breg\s+(add|delete|import|save)\b|\b(New-ItemProperty|Set-ItemProperty)\b`, "registry_modify"},
 		{`(?i)\bNew-Object\b.*\b(Net\.WebClient|System\.Net\.Sockets)\b`, "network_object"},
 		{`(?i)\b(certutil|bitsadmin|mshta|regsvr32|rundll32|wscript|cscript|cmdkey|ntdsutil|pcalua|hh\.exe|vaultcmd|wevtutil|auditpol|wmic|netsh)\b`, "lolbin"},
@@ -59,10 +64,10 @@ func init() {
 func ScanPowerShell(content []byte) []Signal {
 	var signals []Signal
 	lines := bytes.Split(content, []byte("\n"))
-	inBlockComment := false
+	blockCommentDepth := 0
 
 	for i, line := range lines {
-		lineStr := stripPowerShellBlockComments(string(line), &inBlockComment)
+		lineStr := stripPowerShellBlockComments(string(line), &blockCommentDepth)
 		trimmed := strings.TrimSpace(lineStr)
 
 		if trimmed == "" {
@@ -90,31 +95,29 @@ func ScanPowerShell(content []byte) []Signal {
 }
 
 // stripPowerShellBlockComments removes block comment segments from a line while
-// tracking whether the parser is currently inside a <# ... #> comment block.
-func stripPowerShellBlockComments(line string, inBlockComment *bool) string {
+// tracking nested <# ... #> depth across lines.
+func stripPowerShellBlockComments(line string, blockCommentDepth *int) string {
 	var b strings.Builder
-	rest := line
 
-	for rest != "" {
-		if *inBlockComment {
-			end := strings.Index(rest, "#>")
-			if end < 0 {
-				return b.String()
+	for i := 0; i < len(line); {
+		if i+1 < len(line) {
+			if line[i] == '<' && line[i+1] == '#' {
+				(*blockCommentDepth)++
+				i += 2
+				continue
 			}
-			rest = rest[end+2:]
-			*inBlockComment = false
-			continue
+
+			if line[i] == '#' && line[i+1] == '>' && *blockCommentDepth > 0 {
+				(*blockCommentDepth)--
+				i += 2
+				continue
+			}
 		}
 
-		start := strings.Index(rest, "<#")
-		if start < 0 {
-			b.WriteString(rest)
-			break
+		if *blockCommentDepth == 0 {
+			b.WriteByte(line[i])
 		}
-
-		b.WriteString(rest[:start])
-		rest = rest[start+2:]
-		*inBlockComment = true
+		i++
 	}
 
 	return b.String()

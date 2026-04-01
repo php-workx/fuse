@@ -7,6 +7,8 @@ import (
 	"github.com/php-workx/fuse/internal/core"
 )
 
+var reWindowsRunKeyBoundary = regexp.MustCompile(`(?i)\\run(once)?(\s|$|\\)`)
+
 func init() {
 	rules := []BuiltinRule{
 		{
@@ -123,8 +125,7 @@ func init() {
 			Action:  core.DecisionCaution,
 			Reason:  "General registry modification via reg add",
 			Predicate: func(cmd string) bool {
-				lower := strings.ToLower(cmd)
-				return !strings.Contains(lower, `\run`) && !strings.Contains(lower, `\runonce`)
+				return !reWindowsRunKeyBoundary.MatchString(cmd)
 			},
 		},
 		{
@@ -196,14 +197,14 @@ func init() {
 		{
 			ID:      "builtin:windows:invoke-mimikatz",
 			Pattern: regexp.MustCompile(`(?i)\bInvoke-Mimikatz\b`),
-			Action:  core.DecisionCaution,
+			Action:  core.DecisionApproval,
 			Reason:  "Known offensive PowerShell function name",
 		},
 		{
 			ID:      "builtin:windows:wevtutil-set-log",
-			Pattern: regexp.MustCompile(`(?i)\bwevtutil\b.*\bsl\b`),
-			Action:  core.DecisionCaution,
-			Reason:  "Reconfigures a Windows event log channel",
+			Pattern: regexp.MustCompile(`(?i)\bwevtutil(?:\.exe)?\b.*\bsl\b.*\s/e:(false|0)\b`),
+			Action:  core.DecisionBlocked,
+			Reason:  "Disables a Windows event log channel",
 		},
 		{
 			ID:      "builtin:windows:new-itemproperty-registry",
@@ -245,7 +246,8 @@ func init() {
 				lower := strings.ToLower(cmd)
 				return !strings.Contains(lower, "http://") &&
 					!strings.Contains(lower, "https://") &&
-					!strings.Contains(lower, "vbscript:")
+					!strings.Contains(lower, "vbscript:") &&
+					!strings.Contains(lower, "javascript:")
 			},
 		},
 		{

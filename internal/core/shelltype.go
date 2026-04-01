@@ -1,6 +1,7 @@
 package core
 
 import (
+	"path/filepath"
 	"runtime"
 	"strings"
 )
@@ -107,7 +108,7 @@ var windowsCommandUtilities = map[string]bool{
 	"cmdkey":    true,
 	"cscript":   true,
 	"forfiles":  true,
-	"hh.exe":    true,
+	"hh":        true,
 	"logman":    true,
 	"mshta":     true,
 	"msiexec":   true,
@@ -131,55 +132,81 @@ var windowsCommandUtilities = map[string]bool{
 // Detection order:
 //  1. Explicit cmd.exe /c wrapper → CMD
 //  2. Explicit powershell.exe / pwsh wrapper → PowerShell
-//  3. Known PowerShell Verb-Noun cmdlet in the command → PowerShell
-//  4. PowerShell-specific alias or type literal syntax → PowerShell
-//  5. (Windows only) First token is a CMD-only builtin → CMD
-//  6. Default → Bash
+//  3. Known PowerShell Verb-Noun cmdlet or alias as first token → PowerShell
+//  4. Known cmdlet/alias in pipeline context (after "|") → PowerShell
+//  5. PowerShell-specific alias or type literal syntax → PowerShell
+//  6. (Windows only) First token is a CMD-only builtin → CMD
+//  7. Default → Bash
 func DetectShellType(command string) ShellType {
 	fields := strings.Fields(command)
 	if len(fields) == 0 {
 		return ShellBash
 	}
 
-	first := strings.ToLower(fields[0])
+	first := normalizeShellCommandToken(fields[0])
+	if first == "" {
+		return ShellBash
+	}
 
 	// Step 1: cmd.exe /c or cmd /c wrapper.
-	if (first == "cmd.exe" || first == "cmd") && len(fields) >= 2 && strings.EqualFold(fields[1], "/c") {
+	if first == "cmd" && len(fields) >= 2 && strings.EqualFold(strings.Trim(fields[1], `"'`), "/c") {
 		return ShellCMD
 	}
 
 	// Step 2: powershell.exe, pwsh.exe, powershell, or pwsh wrapper.
-	if first == "powershell.exe" || first == "pwsh.exe" || first == "powershell" || first == "pwsh" {
+	if first == "powershell" || first == "pwsh" {
 		return ShellPowerShell
 	}
 
-	// Step 3: Scan tokens for a known Verb-Noun PowerShell cmdlet.
-	for _, tok := range fields {
-		lowerTok := strings.ToLower(tok)
-		if knownCmdlets[lowerTok] || knownPowerShellAliases[lowerTok] {
+	// Step 3: Check first token for a known Verb-Noun PowerShell cmdlet/alias.
+	if knownCmdlets[first] || knownPowerShellAliases[first] {
+		return ShellPowerShell
+	}
+
+	// Step 4: Detect cmdlets in explicit pipeline context.
+	for i := 1; i < len(fields); i++ {
+		tok := normalizeShellCommandToken(fields[i])
+		if tok == "" || (!knownCmdlets[tok] && !knownPowerShellAliases[tok]) {
+			continue
+		}
+		prev := strings.TrimSpace(fields[i-1])
+		if prev == "|" || strings.HasSuffix(prev, "|") {
 			return ShellPowerShell
 		}
 	}
 
-	// Step 4: PowerShell type-literal or static member syntax, e.g.
+	// Step 5: PowerShell type-literal or static member syntax, e.g.
 	// [System.Net.WebClient]::new() or [Ref].Assembly.GetType(...).
-	if strings.Contains(command, "]::") || strings.Contains(command, "[Ref].") {
+	lowerCommand := strings.ToLower(command)
+	if strings.Contains(lowerCommand, "]::") || strings.Contains(lowerCommand, "[ref].") {
 		return ShellPowerShell
 	}
 
-	// Step 5: Standalone Windows utilities should also bypass the Bash parser so
+	// Step 6: Standalone Windows utilities should also bypass the Bash parser so
 	// backslashes survive on non-Windows hosts classifying Windows commands.
 	if windowsCommandUtilities[first] {
 		return ShellCMD
 	}
 
-	// Step 6: On Windows only, check if the first token is a CMD-only builtin.
+	// Step 7: On Windows only, check if the first token is a CMD-only builtin.
 	if runtime.GOOS == "windows" {
 		if cmdOnlyBuiltins[first] {
 			return ShellCMD
 		}
 	}
 
-	// Step 7: Default to Bash.
+	// Step 8: Default to Bash.
 	return ShellBash
+}
+
+func normalizeShellCommandToken(token string) string {
+	cleaned := strings.TrimSpace(token)
+	cleaned = strings.Trim(cleaned, `"'`)
+	if cleaned == "" {
+		return ""
+	}
+
+	normalized := strings.ReplaceAll(cleaned, `\`, "/")
+	base := strings.ToLower(filepath.Base(normalized))
+	return strings.TrimSuffix(base, ".exe")
 }
