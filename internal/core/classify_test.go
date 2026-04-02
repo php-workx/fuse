@@ -416,6 +416,47 @@ func TestClassify_BuiltinSectionSentinels(t *testing.T) {
 	}
 }
 
+func TestClassify_IndirectExecutionInnerCommandWins(t *testing.T) {
+	t.Parallel()
+
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+	}{
+		{
+			name:     "find exec shell extracts blocked inner command",
+			command:  `find . -name '*.tmp' -exec sh -c 'rm -rf /' \;`,
+			expected: core.DecisionBlocked,
+		},
+		{
+			name:     "watch extracts caution inner command",
+			command:  `watch "terraform destroy prod"`,
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "parallel extracts caution inner command",
+			command:  `parallel "kubectl delete ns prod" ::: 1`,
+			expected: core.DecisionCaution,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{RawCommand: tt.command, Cwd: "/tmp", Source: "test", SessionID: "test"}
+			got, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("Classify: %v", err)
+			}
+			if got.Decision != tt.expected {
+				t.Fatalf("Decision = %q, want %q (reason=%q subresults=%#v)", got.Decision, tt.expected, got.Reason, got.SubResults)
+			}
+		})
+	}
+}
+
 func TestClassify_SensitiveEnvVars(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 

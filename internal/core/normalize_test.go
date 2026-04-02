@@ -529,6 +529,63 @@ func TestClassificationNormalize_SshExtraction(t *testing.T) {
 	}
 }
 
+func TestClassificationNormalize_IndirectWrapperExtraction(t *testing.T) {
+	tests := []struct {
+		name            string
+		sub             string
+		wantOuter       string
+		wantInner       []string
+		wantExtractFail bool
+	}{
+		{
+			name:      "find exec shell",
+			sub:       `find . -name '*.tmp' -exec sh -c 'rm -rf /' \;`,
+			wantOuter: `find . -name *.tmp -exec sh -c rm -rf / ;`,
+			wantInner: []string{"rm -rf /"},
+		},
+		{
+			name:      "xargs shell",
+			sub:       `xargs sh -c 'rm -rf /'`,
+			wantOuter: `xargs sh -c rm -rf /`,
+			wantInner: []string{"rm -rf /"},
+		},
+		{
+			name:      "watch command",
+			sub:       `watch "terraform destroy prod"`,
+			wantOuter: `watch terraform destroy prod`,
+			wantInner: []string{"terraform destroy prod"},
+		},
+		{
+			name:      "parallel command",
+			sub:       `parallel "kubectl delete ns prod" ::: 1`,
+			wantOuter: `parallel kubectl delete ns prod ::: 1`,
+			wantInner: []string{"kubectl delete ns prod"},
+		},
+		{
+			name:            "watch missing command fails closed",
+			sub:             `watch`,
+			wantOuter:       `watch`,
+			wantInner:       nil,
+			wantExtractFail: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassificationNormalize(tt.sub)
+			if got.Outer != tt.wantOuter {
+				t.Errorf("ClassificationNormalize(%q).Outer = %q, want %q", tt.sub, got.Outer, tt.wantOuter)
+			}
+			if !stringSliceEqual(got.Inner, tt.wantInner) {
+				t.Errorf("ClassificationNormalize(%q).Inner = %v, want %v", tt.sub, got.Inner, tt.wantInner)
+			}
+			if got.ExtractionFailed != tt.wantExtractFail {
+				t.Errorf("ClassificationNormalize(%q).ExtractionFailed = %v, want %v", tt.sub, got.ExtractionFailed, tt.wantExtractFail)
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Spec table integration tests
 // ---------------------------------------------------------------------------

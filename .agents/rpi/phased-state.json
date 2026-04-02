@@ -1,0 +1,18 @@
+{
+  "goal": "specs/rule-landscape.md",
+  "epic_id": null,
+  "phase": "completed",
+  "auto": true,
+  "test_first": true,
+  "complexity": "full",
+  "cycle": 1,
+  "parent_epic": null,
+  "verdicts": {
+    "research": "DONE",
+    "plan": "DONE",
+    "pre_mortem": "PASS",
+    "implementation": "DONE",
+    "validation": "PASS",
+    "post_mortem": "DONE"
+  }
+}

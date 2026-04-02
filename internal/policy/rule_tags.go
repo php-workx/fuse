@@ -19,6 +19,15 @@ func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag
 		"builtin:git:checkout-dot":     {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
 		"builtin:git:restore-worktree": {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
 
+		// === CI/CD ===
+		"builtin:cicd:gh-secret-delete":         {tags: []string{"cicd", "github-actions"}, keywords: []string{"gh", "secret"}},
+		"builtin:cicd:gh-variable-delete":       {tags: []string{"cicd", "github-actions"}, keywords: []string{"gh", "variable"}},
+		"builtin:cicd:gh-api-actions-admin":     {tags: []string{"cicd", "github-actions"}, keywords: []string{"gh", "api", "actions"}},
+		"builtin:cicd:gitlab-runner-unregister": {tags: []string{"cicd", "gitlab-ci"}, keywords: []string{"gitlab-runner", "unregister"}},
+		"builtin:cicd:glab-variable-delete":     {tags: []string{"cicd", "gitlab-ci"}, keywords: []string{"glab", "variable"}},
+		"builtin:cicd:jenkins-delete-job":       {tags: []string{"cicd", "jenkins"}, keywords: []string{"jenkins-cli", "delete-job"}},
+		"builtin:cicd:circleci-remove-secret":   {tags: []string{"cicd", "circleci"}, keywords: []string{"circleci", "remove-secret"}},
+
 		// === AWS ===
 		"builtin:aws:terminate-instances":            {tags: []string{"aws", "cloud", "ec2"}, keywords: []string{"aws"}},
 		"builtin:aws:stop-instances":                 {tags: []string{"aws", "cloud", "ec2"}, keywords: []string{"aws"}},

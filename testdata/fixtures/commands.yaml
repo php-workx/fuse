@@ -796,6 +796,56 @@ fixtures:
     description: "pip install from URL is caution-tier"
 
   # =======================================================================
+  # CI/CD protection tests
+  # =======================================================================
+  - command: "gh secret delete PROD_TOKEN"
+    expected: "CAUTION"
+    description: "GitHub CLI secret delete"
+  - command: "gh secret list"
+    expected: "SAFE"
+    description: "GitHub CLI secret list is read-only"
+  - command: "gh api -X DELETE /repos/acme/app/actions/secrets/PROD_TOKEN"
+    expected: "CAUTION"
+    description: "GitHub Actions secret delete via gh api"
+  - command: "gh api /repos/acme/app/actions/secrets"
+    expected: "SAFE"
+    description: "GitHub Actions secret list via gh api GET"
+  - command: "gitlab-runner unregister --name prod-runner"
+    expected: "CAUTION"
+    description: "GitLab runner unregister"
+  - command: "gitlab-runner list"
+    expected: "SAFE"
+    description: "GitLab runner list is read-only"
+  - command: "jenkins-cli delete-job prod-deploy"
+    expected: "CAUTION"
+    description: "Jenkins delete job"
+  - command: "jenkins-cli list-jobs"
+    expected: "SAFE"
+    description: "Jenkins list jobs is read-only"
+  - command: "circleci context remove-secret prod-context STRIPE_KEY"
+    expected: "CAUTION"
+    description: "CircleCI remove secret from context"
+  - command: "circleci context list"
+    expected: "SAFE"
+    description: "CircleCI context list is read-only"
+
+  # =======================================================================
+  # Indirect execution wrapper tests
+  # =======================================================================
+  - command: "find . -name '*.tmp' -exec sh -c 'rm -rf /' \\;"
+    expected: "BLOCKED"
+    description: "find -exec shell with blocked inner command"
+  - command: "xargs sh -c 'rm -rf /'"
+    expected: "BLOCKED"
+    description: "xargs shell wrapper with blocked inner command"
+  - command: "watch \"terraform destroy prod\""
+    expected: "CAUTION"
+    description: "watch wrapper with caution inner command"
+  - command: "parallel \"kubectl delete ns prod\" ::: 1"
+    expected: "CAUTION"
+    description: "parallel wrapper with caution inner command"
+
+  # =======================================================================
   # Reconnaissance tests
   # =======================================================================
   - command: "masscan -p1-65535 10.0.0.0/8"

@@ -187,6 +187,9 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 			return result
 		}
 	}
+	if handleIndirectWrappers(tokens, i, depth, unbalancedQuotes, firstToken, &result) {
+		return result
+	}
 
 	// Build outer command: replace first token with basename, keep rest.
 	remaining := make([]string, 0, len(tokens)-i)
@@ -256,6 +259,166 @@ func handleSSH(tokens []string, i int, result *ClassifiedCommand) bool {
 	result.Outer = strings.Join(tokens[i:], " ")
 	result.Inner = append(result.Inner, remoteCmd)
 	return true
+}
+
+func handleFindExecShell(tokens []string, i, depth int, unbalancedQuotes bool, result *ClassifiedCommand) bool {
+	innerCmd, ok, found := extractFindExecShell(tokens, i)
+	if ok && !unbalancedQuotes {
+		setOuterAndRecursiveInner(tokens, i, innerCmd, depth, result)
+		return true
+	}
+	if found {
+		result.ExtractionFailed = true
+	}
+	return false
+}
+
+func handleXargsShell(tokens []string, i, depth int, unbalancedQuotes bool, result *ClassifiedCommand) bool {
+	innerCmd, ok, found := extractXargsShell(tokens, i)
+	if ok && !unbalancedQuotes {
+		setOuterAndRecursiveInner(tokens, i, innerCmd, depth, result)
+		return true
+	}
+	if found {
+		result.ExtractionFailed = true
+	}
+	return false
+}
+
+func handleWatchCommand(tokens []string, i, depth int, result *ClassifiedCommand) bool {
+	innerCmd, ok := extractWatchCommand(tokens, i)
+	if !ok {
+		result.ExtractionFailed = true
+		return false
+	}
+	setOuterAndRecursiveInner(tokens, i, innerCmd, depth, result)
+	return true
+}
+
+func handleParallelCommand(tokens []string, i, depth int, result *ClassifiedCommand) bool {
+	innerCmd, ok := extractParallelCommand(tokens, i)
+	if !ok {
+		result.ExtractionFailed = true
+		return false
+	}
+	setOuterAndRecursiveInner(tokens, i, innerCmd, depth, result)
+	return true
+}
+
+func handleIndirectWrappers(tokens []string, i, depth int, unbalancedQuotes bool, firstToken string, result *ClassifiedCommand) bool {
+	switch firstToken {
+	case "find":
+		if i+1 < len(tokens) {
+			return handleFindExecShell(tokens, i, depth, unbalancedQuotes, result)
+		}
+	case "xargs":
+		if i+1 < len(tokens) {
+			return handleXargsShell(tokens, i, depth, unbalancedQuotes, result)
+		}
+	case "watch":
+		return handleWatchCommand(tokens, i, depth, result)
+	case "parallel":
+		return handleParallelCommand(tokens, i, depth, result)
+	}
+	return false
+}
+
+func setOuterAndRecursiveInner(tokens []string, i int, innerCmd string, depth int, result *ClassifiedCommand) {
+	result.Outer = strings.Join(tokens[i:], " ")
+	if depth < maxRecursionDepth {
+		innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
+		result.Inner = append(result.Inner, innerCmd)
+		result.Inner = append(result.Inner, innerResult.Inner...)
+		if innerResult.EscalateClassification {
+			result.EscalateClassification = true
+		}
+		if innerResult.ExtractionFailed {
+			result.ExtractionFailed = true
+		}
+	} else {
+		result.Inner = append(result.Inner, innerCmd)
+	}
+}
+
+func extractFindExecShell(tokens []string, i int) (string, bool, bool) {
+	for j := i + 1; j < len(tokens); j++ {
+		if tokens[j] != "-exec" && tokens[j] != "-execdir" {
+			continue
+		}
+		if j+1 >= len(tokens) || !isShellBinaryToken(tokens[j+1]) {
+			return "", false, false
+		}
+		innerCmd, ok := extractBashCInner(tokens, j+1)
+		return innerCmd, ok, true
+	}
+	return "", false, false
+}
+
+func extractXargsShell(tokens []string, i int) (string, bool, bool) {
+	for j := i + 1; j < len(tokens); j++ {
+		if !isShellBinaryToken(tokens[j]) {
+			continue
+		}
+		innerCmd, ok := extractBashCInner(tokens, j)
+		if !ok {
+			return "", false, true
+		}
+		if strings.Contains(innerCmd, "{}") || strings.Contains(innerCmd, "$0") || strings.Contains(innerCmd, "$1") {
+			return "", false, true
+		}
+		return innerCmd, true, true
+	}
+	return "", false, false
+}
+
+func extractWatchCommand(tokens []string, i int) (string, bool) {
+	j := i + 1
+scan:
+	for j < len(tokens) {
+		t := tokens[j]
+		switch t {
+		case "-n", "--interval":
+			j += 2
+			continue
+		case "--":
+			j++
+			break scan
+		}
+		if strings.HasPrefix(t, "-") {
+			j++
+			continue
+		}
+		break
+	}
+	if j >= len(tokens) {
+		return "", false
+	}
+	return strings.Join(tokens[j:], " "), true
+}
+
+func extractParallelCommand(tokens []string, i int) (string, bool) {
+	j := i + 1
+	for j < len(tokens) {
+		t := tokens[j]
+		if t == ":::" || t == "::::" {
+			return "", false
+		}
+		if strings.HasPrefix(t, "-") {
+			j++
+			continue
+		}
+		return t, true
+	}
+	return "", false
+}
+
+func isShellBinaryToken(token string) bool {
+	base := token
+	if strings.Contains(token, "/") || strings.Contains(token, `\`) {
+		base = filepath.Base(strings.ReplaceAll(token, `\`, "/"))
+	}
+	base = strings.TrimSuffix(strings.ToLower(base), ".exe")
+	return base == "sh" || base == "bash"
 }
 
 // tokenizeQuoteAware splits a command string into tokens, respecting single and double quotes. Also
