@@ -41,7 +41,7 @@ func init() {
 		},
 		{
 			ID:      "builtin:windows:start-bitstransfer-url",
-			Pattern: regexp.MustCompile(`(?i)\bStart-BitsTransfer\b.*\s-Source\b.*https?://`),
+			Pattern: regexp.MustCompile(`(?i)\bStart-BitsTransfer\b(?:.*\s-Source\b.*https?://|\s+https?://)`),
 			Action:  core.DecisionApproval,
 			Reason:  "Downloads content via BITS",
 		},

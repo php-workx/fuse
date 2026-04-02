@@ -65,16 +65,24 @@ func ScanPowerShell(content []byte) []Signal {
 	var signals []Signal
 	lines := bytes.Split(content, []byte("\n"))
 	blockCommentDepth := 0
+	inSingleQuote := false
+	inDoubleQuote := false
 
 	for i, line := range lines {
-		lineStr := stripPowerShellBlockComments(string(line), &blockCommentDepth)
+		lineStartedInQuote := inSingleQuote || inDoubleQuote
+		lineStr := stripPowerShellBlockComments(
+			string(line),
+			&blockCommentDepth,
+			&inSingleQuote,
+			&inDoubleQuote,
+		)
 		trimmed := strings.TrimSpace(lineStr)
 
 		if trimmed == "" {
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, "#") {
+		if !lineStartedInQuote && strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
@@ -96,29 +104,65 @@ func ScanPowerShell(content []byte) []Signal {
 
 // stripPowerShellBlockComments removes block comment segments from a line while
 // tracking nested <# ... #> depth across lines.
-func stripPowerShellBlockComments(line string, blockCommentDepth *int) string {
+func stripPowerShellBlockComments(
+	line string,
+	blockCommentDepth *int,
+	inSingleQuote *bool,
+	inDoubleQuote *bool,
+) string {
 	var b strings.Builder
 
 	for i := 0; i < len(line); {
-		if i+1 < len(line) {
-			if line[i] == '<' && line[i+1] == '#' {
-				(*blockCommentDepth)++
-				i += 2
-				continue
+		if *blockCommentDepth > 0 {
+			if i+1 < len(line) {
+				if line[i] == '<' && line[i+1] == '#' {
+					(*blockCommentDepth)++
+					i += 2
+					continue
+				}
+				if line[i] == '#' && line[i+1] == '>' {
+					(*blockCommentDepth)--
+					i += 2
+					continue
+				}
 			}
-
-			if line[i] == '#' && line[i+1] == '>' && *blockCommentDepth > 0 {
-				(*blockCommentDepth)--
-				i += 2
-				continue
-			}
+			i++
+			continue
 		}
 
-		if *blockCommentDepth == 0 {
-			b.WriteByte(line[i])
+		if i+1 < len(line) && !*inSingleQuote && !*inDoubleQuote && line[i] == '<' && line[i+1] == '#' {
+			(*blockCommentDepth)++
+			i += 2
+			continue
 		}
+
+		ch := line[i]
+		switch ch {
+		case '\'':
+			if !*inDoubleQuote {
+				if *inSingleQuote && i+1 < len(line) && line[i+1] == '\'' {
+					b.WriteString("''")
+					i += 2
+					continue
+				}
+				*inSingleQuote = !*inSingleQuote
+			}
+		case '"':
+			if !*inSingleQuote && !isEscapedPowerShellDoubleQuote(line, i) {
+				*inDoubleQuote = !*inDoubleQuote
+			}
+		}
+		b.WriteByte(ch)
 		i++
 	}
 
 	return b.String()
+}
+
+func isEscapedPowerShellDoubleQuote(line string, idx int) bool {
+	backticks := 0
+	for i := idx - 1; i >= 0 && line[i] == '`'; i-- {
+		backticks++
+	}
+	return backticks%2 == 1
 }
