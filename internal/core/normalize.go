@@ -146,7 +146,7 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 
 	// Extract basename from first token if it contains path separators.
 	firstToken := tokens[i]
-	if strings.Contains(firstToken, "/") || strings.Contains(firstToken, `\`) {
+	if shouldExtractBasenameToken(firstToken) {
 		normalizedToken := strings.ReplaceAll(firstToken, `\`, "/")
 		firstToken = filepath.Base(normalizedToken)
 	}
@@ -195,6 +195,12 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 	result.Outer = strings.Join(remaining, " ")
 
 	return result
+}
+
+func shouldExtractBasenameToken(firstToken string) bool {
+	return (strings.Contains(firstToken, "/") || strings.Contains(firstToken, `\`)) &&
+		!strings.HasPrefix(firstToken, "[") &&
+		!strings.HasPrefix(firstToken, "(")
 }
 
 // skipLeadingEnvAssignments skips bare env var assignments (VAR=value) before the command.
@@ -1030,8 +1036,12 @@ var powerShellAliases = map[string]string{
 	"sort":    "Sort-Object",
 	"measure": "Measure-Object",
 	"iwr":     "Invoke-WebRequest", "wget": "Invoke-WebRequest", "curl": "Invoke-WebRequest",
+	"irm":  "Invoke-RestMethod",
 	"iex":  "Invoke-Expression",
+	"icm":  "Invoke-Command",
 	"sal":  "Set-Alias",
+	"nsn":  "New-PSSession",
+	"etsn": "Enter-PSSession",
 	"saps": "Start-Process", "start": "Start-Process",
 }
 

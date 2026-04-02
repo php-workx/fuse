@@ -132,6 +132,11 @@ var reSensitiveEnvVar = regexp.MustCompile(
 	`\$\{?(AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|GITHUB_TOKEN|GH_TOKEN|DATABASE_URL|DB_PASSWORD|API_KEY|SECRET_KEY|PRIVATE_KEY)`,
 )
 
+var (
+	rePowerShellDownloadPipeIEX    = regexp.MustCompile(`(?i)\b(Invoke-WebRequest|iwr|Invoke-RestMethod|irm)\b.*\|\s*(Invoke-Expression|iex)\b`)
+	rePowerShellDownloadContentIEX = regexp.MustCompile(`(?i)\b(Invoke-Expression|iex)\b.*\b(Invoke-WebRequest|iwr)\b.*\.Content\b`)
+)
+
 // Security-sensitive environment variable prefixes that trigger APPROVAL
 // when used as command-line env assignments (§5.3 from spec).
 // Only includes variables that enable binary/library injection or config
@@ -174,7 +179,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	fileHashes := classifyAllSubCommands(result, subCmds, evaluator, req.Cwd)
 
 	// Apply compound-level modifiers.
-	applyCompoundModifiers(result, subCmds, displayNorm)
+	applyCompoundModifiers(result, subCmds, displayNorm, evaluator)
 
 	// Step 12: Compute decision key.
 	combinedHash := strings.Join(fileHashes, ":")
@@ -271,7 +276,24 @@ func collectFileHash(fileHashes []string, fileHash string) []string {
 
 // applyCompoundModifiers applies compound-level modifiers: inline pipe-script
 // detection and CWD change escalation.
-func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string) {
+func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string, evaluator PolicyEvaluator) {
+	if evaluator != nil {
+		basename := extractBasename(displayNorm)
+		sanitized := SanitizeForClassification(displayNorm, KnownSafeVerbs[basename])
+
+		// Keep compound Windows IEX/download detections in the normal policy path
+		// so dry-run/tag override semantics are honored.
+		if rePowerShellDownloadContentIEX.MatchString(displayNorm) {
+			pr := evaluatePolicyRules(displayNorm, sanitized, evaluator, nil, result.DryRunMatches)
+			applyCompoundPolicyMatch(result, pr)
+		}
+
+		if rePowerShellDownloadPipeIEX.MatchString(displayNorm) {
+			pr := evaluatePolicyRules(displayNorm, sanitized, evaluator, nil, result.DryRunMatches)
+			applyCompoundPolicyMatch(result, pr)
+		}
+	}
+
 	// Preserve inline pipe-script detection across compound splitting.
 	if len(subCmds) > 1 && strings.Contains(displayNorm, "|") {
 		compoundInlineDecision, compoundInlineReason := detectInlineScript(displayNorm)
@@ -296,19 +318,47 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 	}
 }
 
+func applyCompoundPolicyMatch(result *ClassifyResult, pr policyResult) {
+	result.DryRunMatches = pr.dryRunMatches
+	if pr.tagOverrideEnforced {
+		result.TagOverrideEnforced = true
+	}
+	if pr.failClosed {
+		result.FailClosed = true
+	}
+	if !pr.matched {
+		return
+	}
+
+	combined := MaxDecision(result.Decision, pr.decision)
+	if combined != result.Decision {
+		result.Decision = combined
+		result.Reason = pr.reason
+		result.RuleID = pr.ruleID
+	}
+}
+
 // classifySubCommand runs the per-sub-command pipeline (steps 4-11).
 func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) SubCommandResult {
 	sub := SubCommandResult{Command: subCmd}
+	var rawPolicyMatch *policyResult
 
-	// Pre-normalization hardcoded check: the tokenizer treats backslashes as
-	// escape characters (Bash semantics), which mangles Windows paths like
-	// C:\Windows into C:Windows. Check hardcoded rules against the raw
-	// sub-command before normalization strips the backslashes.
+	// Pre-normalization rule checks: tokenization can treat backslashes as escape
+	// characters, which mangles Windows paths like C:\Windows into C:Windows.
+	// Check raw command text before normalization strips those separators.
 	if evaluator != nil {
 		if d, reason := evaluator.EvaluateHardcoded(subCmd); d != "" {
 			sub.Decision = d
 			sub.Reason = reason
 			return sub
+		}
+
+		if DetectShellType(subCmd) != ShellBash || strings.Contains(subCmd, `\`) {
+			rawBasename := extractBasename(subCmd)
+			rawSanitized := SanitizeForClassification(subCmd, KnownSafeVerbs[rawBasename])
+			if pr := evaluatePolicyRules(subCmd, rawSanitized, evaluator, nil, nil); pr.matched || len(pr.dryRunMatches) > 0 {
+				rawPolicyMatch = &pr
+			}
 		}
 	}
 
@@ -330,6 +380,23 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 
 	// Classify all commands (outer + inner), take most restrictive.
 	classifyAllNormalizedCommands(&sub, classified, evaluator, cwd, fileInspection)
+
+	if rawPolicyMatch != nil {
+		sub.DryRunMatches = append(sub.DryRunMatches, rawPolicyMatch.dryRunMatches...)
+		if rawPolicyMatch.tagOverrideEnforced {
+			sub.TagOverrideEnforced = true
+		}
+		if rawPolicyMatch.failClosed {
+			sub.FailClosed = true
+		}
+		if combined := MaxDecision(sub.Decision, rawPolicyMatch.decision); combined != sub.Decision {
+			sub.Decision = combined
+			sub.Reason = rawPolicyMatch.reason
+			sub.RuleID = rawPolicyMatch.ruleID
+			sub.TagOverrideEnforced = rawPolicyMatch.tagOverrideEnforced
+			sub.FailClosed = rawPolicyMatch.failClosed
+		}
+	}
 
 	// Apply post-classification modifiers.
 	applyEnvVarEscalations(&sub, subCmd, classified)

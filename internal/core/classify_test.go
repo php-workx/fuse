@@ -378,7 +378,7 @@ func TestClassify_BuiltinSectionSentinels(t *testing.T) {
 		{name: "6.3.12 paas near miss", command: "heroku apps:info --app prod-app", cwd: "/tmp", expected: core.DecisionSafe}, // unknown command fallback is SAFE
 		{name: "6.3.13 filesystem positive", command: "find . -delete", cwd: "/tmp", expected: core.DecisionCaution},
 		{name: "6.3.13 filesystem near miss", command: "find . -name '*.tmp'", cwd: "/tmp", expected: core.DecisionSafe},
-		{name: "6.3.14 interpreter positive", command: "python testdata/scripts/dangerous_boto3.py", cwd: repoRoot, expected: core.DecisionCaution},
+		{name: "6.3.14 interpreter positive", command: "python testdata/scripts/dangerous_boto3.py", cwd: repoRoot, expected: core.DecisionApproval},
 		{name: "6.3.14 interpreter near miss", command: "python testdata/scripts/safe_script.py", cwd: repoRoot, expected: core.DecisionSafe},
 		{name: "6.3.15 credential access positive", command: "cat ~/.aws/credentials", cwd: "/tmp", expected: core.DecisionCaution},
 		{name: "6.3.15 credential access near miss", command: "cat README.md", cwd: "/tmp", expected: core.DecisionSafe},
@@ -474,8 +474,8 @@ func TestClassify_InterpreterBackedDangerousScriptUsesInspectionResult(t *testin
 	if err != nil {
 		t.Fatalf("classify error: %v", err)
 	}
-	if result.Decision != core.DecisionCaution {
-		t.Fatalf("expected dangerous script execution to require CAUTION, got %s (reason: %s)", result.Decision, result.Reason)
+	if result.Decision != core.DecisionApproval {
+		t.Fatalf("expected dangerous script execution to require APPROVAL, got %s (reason: %s)", result.Decision, result.Reason)
 	}
 }
 
