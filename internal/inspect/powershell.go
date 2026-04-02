@@ -65,9 +65,16 @@ func ScanPowerShell(content []byte) []Signal {
 	var signals []Signal
 	lines := bytes.Split(content, []byte("\n"))
 	blockCommentDepth := 0
+	inSingleQuote := false
+	inDoubleQuote := false
 
 	for i, line := range lines {
-		lineStr := stripPowerShellBlockComments(string(line), &blockCommentDepth)
+		lineStr := stripPowerShellBlockComments(
+			string(line),
+			&blockCommentDepth,
+			&inSingleQuote,
+			&inDoubleQuote,
+		)
 		trimmed := strings.TrimSpace(lineStr)
 
 		if trimmed == "" {
@@ -96,10 +103,13 @@ func ScanPowerShell(content []byte) []Signal {
 
 // stripPowerShellBlockComments removes block comment segments from a line while
 // tracking nested <# ... #> depth across lines.
-func stripPowerShellBlockComments(line string, blockCommentDepth *int) string {
+func stripPowerShellBlockComments(
+	line string,
+	blockCommentDepth *int,
+	inSingleQuote *bool,
+	inDoubleQuote *bool,
+) string {
 	var b strings.Builder
-	inSingleQuote := false
-	inDoubleQuote := false
 
 	for i := 0; i < len(line); {
 		if *blockCommentDepth > 0 {
@@ -119,7 +129,7 @@ func stripPowerShellBlockComments(line string, blockCommentDepth *int) string {
 			continue
 		}
 
-		if i+1 < len(line) && !inSingleQuote && !inDoubleQuote && line[i] == '<' && line[i+1] == '#' {
+		if i+1 < len(line) && !*inSingleQuote && !*inDoubleQuote && line[i] == '<' && line[i+1] == '#' {
 			(*blockCommentDepth)++
 			i += 2
 			continue
@@ -128,17 +138,17 @@ func stripPowerShellBlockComments(line string, blockCommentDepth *int) string {
 		ch := line[i]
 		switch ch {
 		case '\'':
-			if !inDoubleQuote {
-				if inSingleQuote && i+1 < len(line) && line[i+1] == '\'' {
+			if !*inDoubleQuote {
+				if *inSingleQuote && i+1 < len(line) && line[i+1] == '\'' {
 					b.WriteString("''")
 					i += 2
 					continue
 				}
-				inSingleQuote = !inSingleQuote
+				*inSingleQuote = !*inSingleQuote
 			}
 		case '"':
-			if !inSingleQuote && !isEscapedPowerShellDoubleQuote(line, i) {
-				inDoubleQuote = !inDoubleQuote
+			if !*inSingleQuote && !isEscapedPowerShellDoubleQuote(line, i) {
+				*inDoubleQuote = !*inDoubleQuote
 			}
 		}
 		b.WriteByte(ch)
