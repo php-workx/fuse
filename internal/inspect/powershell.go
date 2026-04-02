@@ -69,6 +69,7 @@ func ScanPowerShell(content []byte) []Signal {
 	inDoubleQuote := false
 
 	for i, line := range lines {
+		lineStartedInQuote := inSingleQuote || inDoubleQuote
 		lineStr := stripPowerShellBlockComments(
 			string(line),
 			&blockCommentDepth,
@@ -81,7 +82,7 @@ func ScanPowerShell(content []byte) []Signal {
 			continue
 		}
 
-		if strings.HasPrefix(trimmed, "#") {
+		if !lineStartedInQuote && strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
