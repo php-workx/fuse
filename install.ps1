@@ -68,7 +68,17 @@ function Add-FuseToUserPath {
     return $true
 }
 
-if (-not $IsWindows -and $PSVersionTable.PSEdition -eq "Core") {
+function Test-FuseWindowsHost {
+    if ($PSVersionTable.PSEdition -eq "Desktop") {
+        return $true
+    }
+
+    return [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+        [System.Runtime.InteropServices.OSPlatform]::Windows
+    )
+}
+
+if (-not (Test-FuseWindowsHost)) {
     throw "install.ps1 is only supported on Windows."
 }
 

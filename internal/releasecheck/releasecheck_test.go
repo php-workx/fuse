@@ -74,6 +74,9 @@ func TestWindowsInstallerReleaseContract(t *testing.T) {
 			t.Fatalf("install.ps1 missing %q", want)
 		}
 	}
+	if strings.Contains(installerText, "$IsWindows") {
+		t.Fatal("install.ps1 must not read $IsWindows directly; Windows PowerShell 5.1 does not define it")
+	}
 
 	releaseConfig, err := os.ReadFile(filepath.Join(root, ".goreleaser.yml"))
 	if err != nil {
