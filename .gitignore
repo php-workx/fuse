@@ -3,6 +3,8 @@
 
 # AgentOps session artifacts
 .agents/
+.claude/
+.serena/
 
 # Build artifacts
 bin/
