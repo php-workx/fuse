@@ -108,8 +108,8 @@ try {
     $checksumsUrl = "$releaseBase/checksums.txt"
 
     Write-Host "Downloading $archiveUrl"
-    Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath
-    Invoke-WebRequest -Uri $checksumsUrl -OutFile $checksumsPath
+    Invoke-WebRequest -Uri $archiveUrl -OutFile $archivePath -UseBasicParsing
+    Invoke-WebRequest -Uri $checksumsUrl -OutFile $checksumsPath -UseBasicParsing
 
     $expectedHash = $null
     foreach ($line in Get-Content $checksumsPath) {

@@ -67,6 +67,7 @@ func TestWindowsInstallerReleaseContract(t *testing.T) {
 		"Get-FileHash",
 		"Expand-Archive",
 		"Invoke-WebRequest",
+		"-UseBasicParsing",
 		"fuse_{{ARCHIVE_OS}}_{{ARCHIVE_ARCH}}.zip",
 		"[Environment]::SetEnvironmentVariable",
 	} {
