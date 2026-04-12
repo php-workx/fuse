@@ -19,7 +19,7 @@ A local firewall for AI agent commands.
 | Platforms | macOS, Linux |
 | Claude Code | primary integration |
 | Codex CLI | beta |
-| Windows | planned, not supported in v1 |
+| Windows | early-adopter testing |
 
 ---
 
@@ -48,6 +48,9 @@ sudo rpm -i fuse.rpm
 # Alpine
 curl -sSfL https://github.com/php-workx/fuse/releases/latest/download/fuse_amd64.apk -o fuse.apk
 sudo apk add --allow-untrusted fuse.apk
+
+# Windows PowerShell
+irm https://raw.githubusercontent.com/php-workx/fuse/main/install.ps1 | iex
 
 # From source (requires Go 1.25+)
 go install github.com/php-workx/fuse/cmd/fuse@latest

@@ -15,8 +15,7 @@ builds:
     goos:
       - linux
       - darwin
-      # Windows excluded from release builds until code signing is resolved.
-      # Use `just build-windows` for local testing. See specs/windows-support-plan.md.
+      - windows
     goarch:
       - amd64
       - arm64
@@ -30,6 +29,10 @@ archives:
   - id: default
     formats:
       - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

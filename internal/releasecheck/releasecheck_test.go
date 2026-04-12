@@ -51,6 +51,47 @@ func repoRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }
 
+func TestWindowsInstallerReleaseContract(t *testing.T) {
+	root := repoRoot(t)
+
+	installer, err := os.ReadFile(filepath.Join(root, "install.ps1"))
+	if err != nil {
+		t.Fatalf("read install.ps1: %v", err)
+	}
+	installerText := string(installer)
+	for _, want := range []string{
+		"$env:LOCALAPPDATA",
+		"Programs",
+		"fuse",
+		"checksums.txt",
+		"Get-FileHash",
+		"Expand-Archive",
+		"Invoke-WebRequest",
+		"fuse_{{ARCHIVE_OS}}_{{ARCHIVE_ARCH}}.zip",
+		"[Environment]::SetEnvironmentVariable",
+	} {
+		if !strings.Contains(installerText, want) {
+			t.Fatalf("install.ps1 missing %q", want)
+		}
+	}
+
+	releaseConfig, err := os.ReadFile(filepath.Join(root, ".goreleaser.yml"))
+	if err != nil {
+		t.Fatalf("read .goreleaser.yml: %v", err)
+	}
+	releaseText := string(releaseConfig)
+	for _, want := range []string{
+		"- windows",
+		"format_overrides:",
+		"goos: windows",
+		"- zip",
+	} {
+		if !strings.Contains(releaseText, want) {
+			t.Fatalf(".goreleaser.yml missing %q", want)
+		}
+	}
+}
+
 func enableIsolatedFuseHome(t *testing.T) string {
 	t.Helper()
 	// Pin GOPATH before changing HOME so go build doesn't create a

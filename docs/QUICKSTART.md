@@ -5,9 +5,17 @@ Get fuse running in under a minute.
 ## Prerequisites
 
 - Go 1.25+ (for `go install`)
-- macOS or Linux (Windows is not supported in v1)
+- macOS, Linux, or Windows early-adopter testing
 
 ## Install
+
+Windows PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/php-workx/fuse/main/install.ps1 | iex
+```
+
+macOS, Linux, or source install:
 
 ```bash
 go install github.com/php-workx/fuse/cmd/fuse@latest
