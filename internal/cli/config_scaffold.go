@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/db"
 )
 
 func ensureFuseConfigScaffold(profile string) error {
@@ -30,6 +31,17 @@ func ensureFuseConfigScaffold(profile string) error {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
+}
+
+// ensureFuseStateDB materializes an empty state database so that commands
+// like `fuse monitor` don't error on a freshly installed system. OpenDB
+// creates the file, runs migrations, and is a no-op if the DB already exists.
+func ensureFuseStateDB() error {
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		return fmt.Errorf("initialize state database: %w", err)
+	}
+	return database.Close()
 }
 
 func profileAwareConfigScaffold(profile string) string {

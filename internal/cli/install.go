@@ -156,6 +156,10 @@ func installClaudeWithProfile(secure bool, profile string) error {
 		return err
 	}
 
+	if err := ensureFuseStateDB(); err != nil {
+		return err
+	}
+
 	fmt.Printf("fuse hook installed in %s\n", settingsPath)
 	fmt.Println("Claude Code will now use fuse for command safety checks.")
 	return nil
@@ -380,6 +384,10 @@ func installCodexWithProfile(profile string) error {
 	}
 
 	if err := ensureFuseConfigScaffold(profile); err != nil {
+		return err
+	}
+
+	if err := ensureFuseStateDB(); err != nil {
 		return err
 	}
 
