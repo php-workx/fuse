@@ -71,7 +71,7 @@ func ProfileDefaults(profile string) *Config {
 	cfg := &Config{
 		Profile:         profile,
 		LogLevel:        "warn",
-		MaxEventLogRows: 10000,
+		MaxEventLogRows: 100000,
 		CautionFallback: "log",
 		LLMJudge: LLMJudgeConfig{
 			Mode:               "off",

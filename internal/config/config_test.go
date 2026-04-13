@@ -14,6 +14,9 @@ func TestDefaultConfig_RelaxedProfile(t *testing.T) {
 	if cfg.CautionFallback != "log" {
 		t.Fatalf("CautionFallback = %q, want log", cfg.CautionFallback)
 	}
+	if cfg.MaxEventLogRows != 100000 {
+		t.Fatalf("MaxEventLogRows = %d, want 100000", cfg.MaxEventLogRows)
+	}
 	if cfg.LLMJudge.Mode != "off" {
 		t.Fatalf("LLMJudge.Mode = %q, want off", cfg.LLMJudge.Mode)
 	}
