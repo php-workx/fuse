@@ -92,7 +92,6 @@ func TestUnconditionalSafeCmd_MultiWord(t *testing.T) {
 		// Not safe multi-word commands.
 		{"npm install", "npm install express", false},
 		{"cargo build", "cargo build --release", false},
-		{"go build", "go build ./cmd/fuse", false},
 		{"make deploy", "make deploy", false},
 		{"pip install", "pip install requests", false},
 

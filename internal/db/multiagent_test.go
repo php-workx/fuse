@@ -346,6 +346,9 @@ func TestSummarizeEvents_NullFields(t *testing.T) {
 	if summary.ByAgent["(unknown)"] != 1 {
 		t.Errorf("ByAgent[(unknown)] = %d, want 1", summary.ByAgent["(unknown)"])
 	}
+	if summary.BySourceAgent["(unknown)/(unknown)"] != 1 {
+		t.Errorf("BySourceAgent[(unknown)/(unknown)] = %d, want 1", summary.BySourceAgent["(unknown)/(unknown)"])
+	}
 }
 
 // --- fu-uvi: Test session-scoped approval isolation ---

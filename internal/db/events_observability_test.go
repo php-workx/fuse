@@ -101,6 +101,9 @@ func TestSummarizeEvents_AggregatesByDecisionAgentSourceAndWorkspace(t *testing.
 	if summary.BySource["codex-shell"] != 2 || summary.BySource["hook"] != 1 {
 		t.Fatalf("unexpected source counts: %#v", summary.BySource)
 	}
+	if summary.BySourceAgent["codex-shell/codex"] != 2 || summary.BySourceAgent["hook/claude"] != 1 {
+		t.Fatalf("unexpected source/agent counts: %#v", summary.BySourceAgent)
+	}
 	if summary.ByWorkspace["/tmp/repo-a"] != 2 || summary.ByWorkspace["/tmp/repo-b"] != 1 {
 		t.Fatalf("unexpected workspace counts: %#v", summary.ByWorkspace)
 	}

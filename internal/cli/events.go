@@ -147,6 +147,7 @@ func runStats() error {
 	printCounts("By decision", summary.ByDecision)
 	printCounts("By agent", summary.ByAgent)
 	printCounts("By source", summary.BySource)
+	printCounts("By source/agent", summary.BySourceAgent)
 	printCounts("By workspace", summary.ByWorkspace)
 	return nil
 }

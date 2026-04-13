@@ -257,6 +257,217 @@ func TestClassify_AuditTunedFindDeleteAndCleanupNoise(t *testing.T) {
 	}
 }
 
+func TestClassify_AuditHeredocCommitMessagesDoNotFailClosed(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{
+			name: "git commit heredoc message",
+			command: `git commit -m "$(cat <<'EOF'
+fix: tune alert classification
+
+Classify message heredocs as commit text, not inline scripts.
+EOF
+)"`,
+		},
+		{
+			name: "git add and commit heredoc message",
+			command: `git add internal/core/classify.go && git commit -m "$(cat <<'EOF'
+fix: update classifier tests
+EOF
+)"`,
+		},
+		{
+			name: "git commit no verify heredoc message",
+			command: `git commit --no-verify -m "$(cat <<'EOF'
+Merge branch 'main'
+EOF
+)"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != core.DecisionCaution {
+				t.Fatalf("got %s, want CAUTION (reason: %s)", result.Decision, result.Reason)
+			}
+			if result.FailClosed || strings.Contains(result.Reason, "inline script extraction incomplete") {
+				t.Fatalf("commit message heredoc should not fail closed: failClosed=%v reason=%q", result.FailClosed, result.Reason)
+			}
+		})
+	}
+}
+
+func TestClassify_AuditFuseTestClassifyTreatsPayloadAsInert(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []string{
+		`fuse test classify -- find . -name "*.tmp" -delete`,
+		`/Users/runger/go/bin/fuse test classify -- mcp__context7__query-docs '{"query":"find -delete"}'`,
+		`fuse test classify rg -n "find -delete" internal`,
+	}
+
+	for _, command := range tests {
+		t.Run(command, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != core.DecisionSafe {
+				t.Fatalf("got %s, want SAFE for inert classifier payload (reason: %s, rule: %s)", result.Decision, result.Reason, result.RuleID)
+			}
+		})
+	}
+}
+
+func TestClassify_AuditSimpleLeadingCDInheritsInnerDecision(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+	}{
+		{
+			name:     "absolute cd to safe inner command",
+			command:  `cd /Users/runger/workspaces/fuse && git status --short`,
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "absolute cd to state changing inner command",
+			command:  `cd /Users/runger/workspaces/fuse && git add internal/core/classify.go`,
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "relative cd remains caution",
+			command:  `cd ../fuse && git status --short`,
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "variable cd remains caution",
+			command:  `cd "$WORKSPACE" && git status --short`,
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "pushd remains caution",
+			command:  `pushd /Users/runger/workspaces/fuse && git status --short`,
+			expected: core.DecisionCaution,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("got %s, want %s (reason: %s)", result.Decision, tt.expected, result.Reason)
+			}
+		})
+	}
+}
+
+func TestClassify_AuditReadOnlyDeveloperInspectionCommands(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+	}{
+		{name: "colgrep search", command: `colgrep -e "tool " -F --include="go.mod" -n 4 .`, expected: core.DecisionSafe},
+		{name: "nl read file", command: `nl -ba internal/core/classify.go`, expected: core.DecisionSafe},
+		{name: "go help", command: `go help mod`, expected: core.DecisionSafe},
+		{name: "codex help", command: `codex exec --help`, expected: core.DecisionSafe},
+		{name: "codex features list", command: `codex features list`, expected: core.DecisionSafe},
+		{name: "fuse events help", command: `/Users/runger/go/bin/fuse events --help`, expected: core.DecisionSafe},
+		{name: "sqlite read", command: `sqlite3 app.db "SELECT 1"`, expected: core.DecisionSafe},
+		{name: "sqlite write remains unsafe", command: `sqlite3 app.db "DELETE FROM events"`, expected: core.DecisionCaution},
+		{name: "gh api read", command: `gh api repos/php-workx/fuse/pulls/1/comments --paginate`, expected: core.DecisionSafe},
+		{name: "gh api mutating method remains unsafe", command: `gh api -X POST repos/php-workx/fuse/issues/1/comments -f body=test`, expected: core.DecisionCaution},
+		{name: "tk show", command: `tk show fus-112i`, expected: core.DecisionSafe},
+		{name: "tk create remains unsafe", command: `tk create "new ticket" -d "desc"`, expected: core.DecisionCaution},
+		{name: "gofumpt list", command: `gofumpt --extra -l .`, expected: core.DecisionSafe},
+		{name: "gofumpt write remains unsafe", command: `gofumpt -w internal/core/classify.go`, expected: core.DecisionCaution},
+		{name: "go build", command: `go build ./...`, expected: core.DecisionSafe},
+		{name: "just check", command: `just check`, expected: core.DecisionSafe},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("command %q: got %s, want %s (reason: %s, rule: %s)",
+					tt.command, result.Decision, tt.expected, result.Reason, result.RuleID)
+			}
+		})
+	}
+}
+
+func TestClassify_AuditMktempCleanupDowngradesVariablePathBlock(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+	}{
+		{name: "quoted mktemp variable cleanup", command: `tmp=$(mktemp -d); mkdir -p "$tmp/bin"; rm -rf "$tmp"`, expected: core.DecisionCaution},
+		{name: "braced mktemp variable cleanup", command: `tmp=$(mktemp -d); rm -rf "${tmp}"`, expected: core.DecisionCaution},
+		{name: "unproven variable cleanup remains blocked", command: `rm -rf "$tmp"`, expected: core.DecisionBlocked},
+		{name: "reassigned variable cleanup remains blocked", command: `tmp=$(mktemp -d); tmp=/; rm -rf "$tmp"`, expected: core.DecisionBlocked},
+		{name: "mixed dangerous target remains blocked", command: `tmp=$(mktemp -d); rm -rf "$tmp" "$HOME"`, expected: core.DecisionBlocked},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("got %s, want %s (reason: %s, subresults: %#v)", result.Decision, tt.expected, result.Reason, result.SubResults)
+			}
+		})
+	}
+}
+
 func TestClassify_EmptyCommand(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 

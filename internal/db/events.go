@@ -54,11 +54,12 @@ type EventFilter struct {
 
 // EventSummary aggregates local usage for debugging and dogfooding.
 type EventSummary struct {
-	Total       int            `json:"total"`
-	ByDecision  map[string]int `json:"by_decision"`
-	ByAgent     map[string]int `json:"by_agent"`
-	BySource    map[string]int `json:"by_source"`
-	ByWorkspace map[string]int `json:"by_workspace"`
+	Total         int            `json:"total"`
+	ByDecision    map[string]int `json:"by_decision"`
+	ByAgent       map[string]int `json:"by_agent"`
+	BySource      map[string]int `json:"by_source"`
+	BySourceAgent map[string]int `json:"by_source_agent"`
+	ByWorkspace   map[string]int `json:"by_workspace"`
 }
 
 // credentialPatterns defines patterns to scrub from command strings before storage.
@@ -337,10 +338,11 @@ func scanEventRow(rows *sql.Rows) (EventRecord, error) {
 // using SQL GROUP BY queries to avoid loading all rows into memory.
 func (d *DB) SummarizeEvents() (EventSummary, error) {
 	summary := EventSummary{
-		ByDecision:  map[string]int{},
-		ByAgent:     map[string]int{},
-		BySource:    map[string]int{},
-		ByWorkspace: map[string]int{},
+		ByDecision:    map[string]int{},
+		ByAgent:       map[string]int{},
+		BySource:      map[string]int{},
+		BySourceAgent: map[string]int{},
+		ByWorkspace:   map[string]int{},
 	}
 
 	if err := d.db.QueryRow("SELECT COUNT(*) FROM events").Scan(&summary.Total); err != nil {
@@ -380,7 +382,36 @@ func (d *DB) SummarizeEvents() (EventSummary, error) {
 		}
 	}
 
+	rows, err := d.db.Query("SELECT COALESCE(source, ''), COALESCE(agent, ''), COUNT(*) FROM events GROUP BY source, agent")
+	if err != nil {
+		return EventSummary{}, fmt.Errorf("summarize events source/agent: %w", err)
+	}
+	for rows.Next() {
+		var source string
+		var agent string
+		var count int
+		if err := rows.Scan(&source, &agent, &count); err != nil {
+			rows.Close()
+			return EventSummary{}, fmt.Errorf("scan source/agent summary: %w", err)
+		}
+		summary.BySourceAgent[sourceAgentKey(source, agent)] = count
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return EventSummary{}, fmt.Errorf("iterate source/agent summary: %w", err)
+	}
+
 	return summary, nil
+}
+
+func sourceAgentKey(source, agent string) string {
+	if source == "" {
+		source = "(unknown)"
+	}
+	if agent == "" {
+		agent = "(unknown)"
+	}
+	return source + "/" + agent
 }
 
 // PruneEvents keeps the most recent maxRows events, deleting the oldest.

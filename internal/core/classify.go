@@ -169,17 +169,25 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	// Step 2: Display normalize.
 	displayNorm := DisplayNormalize(req.RawCommand)
 
+	if IsProvableMktempCleanup(displayNorm) {
+		result.Decision = DecisionCaution
+		result.Reason = "provable mktemp cleanup"
+		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
+		return result, nil
+	}
+
 	// Step 3: Compound command splitting.
 	subCmds, err := SplitCompoundCommand(displayNorm)
 	if err != nil {
 		return classifyCompoundSplitError(result, displayNorm, req.Source, evaluator, err)
 	}
+	effectiveCwd, suppressCwdEscalation := simpleLeadingAbsoluteCD(subCmds, req.Cwd)
 
 	// Classify all sub-commands and aggregate results.
-	fileHashes := classifyAllSubCommands(result, subCmds, evaluator, req.Cwd)
+	fileHashes := classifyAllSubCommands(result, subCmds, evaluator, effectiveCwd)
 
 	// Apply compound-level modifiers.
-	applyCompoundModifiers(result, subCmds, displayNorm, evaluator)
+	applyCompoundModifiers(result, subCmds, displayNorm, evaluator, suppressCwdEscalation)
 
 	// Step 12: Compute decision key.
 	combinedHash := strings.Join(fileHashes, ":")
@@ -276,7 +284,7 @@ func collectFileHash(fileHashes []string, fileHash string) []string {
 
 // applyCompoundModifiers applies compound-level modifiers: inline pipe-script
 // detection and CWD change escalation.
-func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string, evaluator PolicyEvaluator) {
+func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNorm string, evaluator PolicyEvaluator, suppressCwdEscalation bool) {
 	if evaluator != nil {
 		basename := extractBasename(displayNorm)
 		sanitized := SanitizeForClassification(displayNorm, KnownSafeVerbs[basename])
@@ -308,7 +316,7 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 	}
 
 	// CWD change in compound: escalate to at least CAUTION for logging/judge triage.
-	if len(subCmds) > 1 && ContainsCwdChange(subCmds) {
+	if !suppressCwdEscalation && len(subCmds) > 1 && ContainsCwdChange(subCmds) {
 		combined := MaxDecision(result.Decision, DecisionCaution)
 		if combined != result.Decision {
 			result.Decision = combined
@@ -316,6 +324,25 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 			result.RuleID = ""
 		}
 	}
+}
+
+func simpleLeadingAbsoluteCD(subCmds []string, currentCwd string) (string, bool) {
+	if len(subCmds) < 2 {
+		return currentCwd, false
+	}
+	fields := strings.Fields(subCmds[0])
+	if len(fields) != 2 || fields[0] != "cd" {
+		return currentCwd, false
+	}
+	target := strings.Trim(fields[1], `"'`)
+	if target == "" ||
+		!filepath.IsAbs(target) ||
+		strings.ContainsAny(target, "$`") ||
+		strings.Contains(target, "$(") ||
+		strings.Contains(target, "..") {
+		return currentCwd, false
+	}
+	return filepath.Clean(target), true
 }
 
 func applyCompoundPolicyMatch(result *ClassifyResult, pr policyResult) {
@@ -342,6 +369,12 @@ func applyCompoundPolicyMatch(result *ClassifyResult, pr policyResult) {
 func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) SubCommandResult {
 	sub := SubCommandResult{Command: subCmd}
 	var rawPolicyMatch *policyResult
+
+	if IsFuseTestClassify(subCmd) {
+		sub.Decision = DecisionSafe
+		sub.Reason = "fuse test classify payload is inert"
+		return sub
+	}
 
 	// Pre-normalization rule checks: tokenization can treat backslashes as escape
 	// characters, which mangles Windows paths like C:\Windows into C:Windows.
@@ -739,6 +772,10 @@ func classifyFallbackLayers(
 	// Layer 5: Conditionally safe commands.
 	if IsConditionallySafe(basename, cmd) {
 		return commandClassificationResult{decision: DecisionSafe, reason: "conditionally safe command", dryRunMatches: dryRunMatches}
+	}
+
+	if reason, ok := KnownUnsafeInspectionVariant(basename, cmd); ok {
+		return commandClassificationResult{decision: DecisionCaution, reason: reason, dryRunMatches: dryRunMatches}
 	}
 
 	// Layer 6: File inspection result (if applicable).

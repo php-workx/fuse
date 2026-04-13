@@ -100,7 +100,7 @@ func TestRunStats_SummarizesActivity(t *testing.T) {
 	if stderr != "" {
 		t.Fatalf("stderr = %q, want empty", stderr)
 	}
-	for _, want := range []string{"Total events", "codex", "claude", "codex-shell", "hook"} {
+	for _, want := range []string{"Total events", "codex", "claude", "codex-shell", "hook", "By source/agent", "codex-shell/codex", "hook/claude"} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected output to contain %q, got:\n%s", want, stdout)
 		}
@@ -195,8 +195,8 @@ func TestRunStats_JSONOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runStats: %v", err)
 	}
-	if !strings.Contains(stdout, `"total"`) {
-		t.Fatalf("expected JSON with total, got:\n%s", stdout)
+	if !strings.Contains(stdout, `"total"`) || !strings.Contains(stdout, `"by_source_agent"`) || !strings.Contains(stdout, `"hook/claude"`) {
+		t.Fatalf("expected JSON with source/agent stats, got:\n%s", stdout)
 	}
 }
 

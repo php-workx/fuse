@@ -1,6 +1,7 @@
 package core
 
 import (
+	"path/filepath"
 	"strings"
 )
 
@@ -14,9 +15,9 @@ var unconditionalSafe = map[string]bool{
 	"du": true, "df": true,
 	// Text processing
 	"echo": true, "printf": true, "grep": true, "egrep": true, "fgrep": true,
-	"rg": true, "ag": true, "awk": true, "sed": true, "cut": true, "tr": true,
+	"rg": true, "colgrep": true, "ag": true, "awk": true, "sed": true, "cut": true, "tr": true,
 	"sort": true, "uniq": true, "tee": true, "paste": true, "join": true,
-	"comm": true, "fold": true, "fmt": true, "column": true,
+	"comm": true, "fold": true, "fmt": true, "column": true, "nl": true,
 	"jq": true, "yq": true, "xq": true,
 	// Search / navigation
 	"which": true, "whereis": true, "type": true, "pwd": true, "cd": true,
@@ -89,12 +90,14 @@ var windowsSafePrefixes = []string{
 var unconditionalSafePrefixes = []string{
 	// Development tools (read-only)
 	"cargo check", "cargo test", "cargo clippy", "cargo fmt",
-	"go vet", "go test", "go fmt",
+	"go vet", "go test", "go fmt", "go help", "go build",
 	"npm test", "npm run lint", "npm run test", "npx jest",
 	"yarn test", "pnpm test", "bun test",
 	"pytest", "python -m pytest", "python -m unittest",
 	"tsc --noEmit", "tsc --version",
 	"make check", "make test", "make lint",
+	"just check",
+	"codex --help", "codex exec --help", "codex features",
 	// Version / info
 	"node --version", "python --version", "go version",
 	"rustc --version", "cargo --version", "npm --version",
@@ -170,61 +173,96 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 // table at all, it returns false (caller should fall through to other rules).
 func IsConditionallySafe(basename, fullCmd string) bool {
 	fields := strings.Fields(fullCmd)
-	switch basename {
-	case "find":
-		return isFindSafe(fields)
-	case "git":
-		return isGitSafe(fields)
-	case "sed":
-		return isSedSafe(fields)
-	case "base64":
-		return isBase64Safe(fields)
-	case "xargs":
-		return isXargsSafe(fields)
-	case "docker":
-		return isDockerSafe(fields)
-	case "kubectl":
-		return isKubectlSafe(fields)
-	case "terraform", "tofu":
-		return isTerraformSafe(fields)
-	case "pulumi":
-		return isPulumiSafe(fields)
-	case "aws":
-		return isAwsSafe(fields)
-	case "gcloud":
-		return isGcloudSafe(fields)
-	case "az":
-		return isAzSafe(fields)
-	case "sqlite3":
-		return isSqliteSafe(fields)
-	case "nc", "ncat", "netcat":
-		return isNcSafe(fields)
-	case "pip", "pip3":
-		return isPipSafe(fields)
+	if checker := conditionalSafeCheckers[basename]; checker != nil {
+		return checker(fields)
 	}
-
 	// Windows command names and PowerShell cmdlets are case-insensitive.
-	switch strings.ToLower(basename) {
-	case "certutil":
-		return isCertutilSafe(fields)
-	case "sc":
-		return isSCSafe(fields)
-	case "reg":
-		return isRegSafe(fields)
-	case "remove-item":
-		return isRemoveItemSafe(fields)
-	case "set":
-		// CMD set without args displays env vars (safe); with args modifies them (dangerous).
-		return len(fields) == 1
-	case "path":
-		// CMD path without args displays PATH (safe); with args modifies command resolution (dangerous).
-		return len(fields) == 1
-	case "time", "date":
-		// CMD time/date without args or with /t displays value (safe); with args modifies (dangerous).
-		return len(fields) == 1 || (len(fields) == 2 && strings.EqualFold(fields[1], "/t"))
-	default:
-		return false
+	if checker := windowsConditionalSafeCheckers[strings.ToLower(basename)]; checker != nil {
+		return checker(fields)
 	}
+	return false
+}
+
+var conditionalSafeCheckers = map[string]func([]string) bool{
+	"find":      isFindSafe,
+	"git":       isGitSafe,
+	"sed":       isSedSafe,
+	"base64":    isBase64Safe,
+	"xargs":     isXargsSafe,
+	"docker":    isDockerSafe,
+	"kubectl":   isKubectlSafe,
+	"terraform": isTerraformSafe,
+	"tofu":      isTerraformSafe,
+	"pulumi":    isPulumiSafe,
+	"aws":       isAwsSafe,
+	"gcloud":    isGcloudSafe,
+	"az":        isAzSafe,
+	"sqlite3":   isSqliteSafe,
+	"nc":        isNcSafe,
+	"ncat":      isNcSafe,
+	"netcat":    isNcSafe,
+	"pip":       isPipSafe,
+	"pip3":      isPipSafe,
+	"fuse":      isFuseSafe,
+	"codex":     isCodexSafe,
+	"gh":        isGhSafe,
+	"tk":        isTkSafe,
+	"gofumpt":   isGofumptSafe,
+	"just":      isJustSafe,
+}
+
+var windowsConditionalSafeCheckers = map[string]func([]string) bool{
+	"certutil":    isCertutilSafe,
+	"sc":          isSCSafe,
+	"reg":         isRegSafe,
+	"remove-item": isRemoveItemSafe,
+	"set":         isReadOnlySetOrPath,
+	"path":        isReadOnlySetOrPath,
+	"time":        isReadOnlyTimeOrDate,
+	"date":        isReadOnlyTimeOrDate,
+}
+
+func KnownUnsafeInspectionVariant(basename, fullCmd string) (string, bool) {
+	fields := strings.Fields(fullCmd)
+	switch basename {
+	case "sqlite3":
+		if len(fields) > 0 && !isSqliteSafe(fields) {
+			return "sqlite3 command is not read-only", true
+		}
+	case "gh":
+		if len(fields) > 0 && !isGhSafe(fields) {
+			return "gh command is not read-only", true
+		}
+	case "tk":
+		if len(fields) > 0 && !isTkSafe(fields) {
+			return "tk command is not read-only", true
+		}
+	case "gofumpt":
+		if len(fields) > 0 && !isGofumptSafe(fields) {
+			return "gofumpt command may write files", true
+		}
+	case "just":
+		if len(fields) > 0 && !isJustSafe(fields) {
+			return "just recipe is not allowlisted as read-only", true
+		}
+	case "codex":
+		if len(fields) > 0 && !isCodexSafe(fields) {
+			return "codex command is not allowlisted as read-only", true
+		}
+	case "fuse":
+		if len(fields) > 0 && !isFuseSafe(fields) {
+			return "fuse command is not allowlisted as read-only", true
+		}
+	}
+	return "", false
+}
+
+func isReadOnlySetOrPath(fields []string) bool {
+	return len(fields) == 1
+}
+
+func isReadOnlyTimeOrDate(fields []string) bool {
+	return len(fields) == 1 || (len(fields) == 2 && strings.EqualFold(fields[1], "/t"))
 }
 
 func isCertutilSafe(fields []string) bool {
@@ -880,4 +918,277 @@ func isPipSafe(fields []string) bool {
 		"search": true, "debug": true,
 	}
 	return safeSubs[fields[1]]
+}
+
+func isFuseSafe(fields []string) bool {
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "fuse") {
+		return false
+	}
+	if isHelpOrVersion(fields[1:]) {
+		return true
+	}
+	switch fields[1] {
+	case "test":
+		return len(fields) >= 3 && fields[2] == "classify"
+	case "events":
+		return len(fields) == 3 && fields[2] == "--help"
+	case "profile":
+		return true
+	default:
+		return false
+	}
+}
+
+func IsFuseTestClassify(cmd string) bool {
+	fields := strings.Fields(cmd)
+	return len(fields) >= 3 && commandTokenMatches(fields[0], "fuse") && fields[1] == "test" && fields[2] == "classify"
+}
+
+func isCodexSafe(fields []string) bool {
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "codex") {
+		return false
+	}
+	if isHelpOrVersion(fields[1:]) {
+		return true
+	}
+	switch fields[1] {
+	case "features":
+		return len(fields) >= 3 && fields[2] == "list"
+	case "exec":
+		return len(fields) == 3 && fields[2] == "--help"
+	default:
+		return false
+	}
+}
+
+func isGhSafe(fields []string) bool {
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "gh") {
+		return false
+	}
+	if isHelpOrVersion(fields[1:]) {
+		return true
+	}
+	if fields[1] == "api" {
+		return isGhAPISafe(fields[2:])
+	}
+	if len(fields) >= 3 {
+		switch fields[1] {
+		case "pr":
+			return map[string]bool{"view": true, "list": true, "status": true, "checks": true, "diff": true}[fields[2]]
+		case "issue", "repo", "run":
+			return map[string]bool{"view": true, "list": true}[fields[2]]
+		case "secret":
+			return fields[2] == "list"
+		}
+	}
+	return false
+}
+
+func isGhAPISafe(args []string) bool {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch arg {
+		case "-X", "--method":
+			if i+1 >= len(args) || !strings.EqualFold(args[i+1], "GET") {
+				return false
+			}
+			i++
+		case "-f", "-F", "--field", "--raw-field", "--input":
+			return false
+		default:
+			if strings.HasPrefix(arg, "-X") && len(arg) > 2 && !strings.EqualFold(strings.TrimPrefix(arg, "-X"), "GET") {
+				return false
+			}
+			if strings.HasPrefix(arg, "--method=") && !strings.EqualFold(strings.TrimPrefix(arg, "--method="), "GET") {
+				return false
+			}
+			if strings.HasPrefix(arg, "-f") && arg != "--paginate" {
+				return false
+			}
+			if strings.HasPrefix(arg, "-F") ||
+				strings.HasPrefix(arg, "--field=") ||
+				strings.HasPrefix(arg, "--raw-field=") ||
+				strings.HasPrefix(arg, "--input=") {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func isTkSafe(fields []string) bool {
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "tk") {
+		return false
+	}
+	if isHelpOrVersion(fields[1:]) {
+		return true
+	}
+	safeSubs := map[string]bool{
+		"show": true, "ready": true, "list": true, "ls": true,
+		"blocked": true, "closed": true, "next": true,
+	}
+	return safeSubs[fields[1]]
+}
+
+func isGofumptSafe(fields []string) bool {
+	if len(fields) == 0 || !commandTokenMatches(fields[0], "gofumpt") {
+		return false
+	}
+	for _, field := range fields[1:] {
+		if field == "-w" || strings.Contains(field, "w") && strings.HasPrefix(field, "-") && !strings.HasPrefix(field, "--") {
+			return false
+		}
+	}
+	return true
+}
+
+func isJustSafe(fields []string) bool {
+	return len(fields) >= 2 && commandTokenMatches(fields[0], "just") && fields[1] == "check"
+}
+
+func isHelpOrVersion(args []string) bool {
+	return len(args) == 1 && (args[0] == "--help" || args[0] == "-h" || args[0] == "help" || args[0] == "--version" || args[0] == "version")
+}
+
+func commandTokenMatches(token, want string) bool {
+	token = strings.Trim(token, `"'`)
+	token = strings.ReplaceAll(token, `\`, "/")
+	return filepath.Base(token) == want
+}
+
+func IsProvableMktempCleanup(cmd string) bool {
+	subCmds, err := SplitCompoundCommand(cmd)
+	if err != nil || len(subCmds) < 2 {
+		return false
+	}
+	tempVars := map[string]bool{}
+	sawCleanup := false
+	for _, subCmd := range subCmds {
+		fields := strings.Fields(subCmd)
+		if len(fields) == 0 {
+			return false
+		}
+		if name, ok := mktempAssignment(fields); ok {
+			tempVars[name] = true
+			continue
+		}
+		if isTempVarReassignment(fields, tempVars) {
+			return false
+		}
+		if isMktempSetupCommand(fields, tempVars) {
+			continue
+		}
+		if isMktempCleanupCommand(fields, tempVars) {
+			sawCleanup = true
+			continue
+		}
+		return false
+	}
+	return sawCleanup
+}
+
+func mktempAssignment(fields []string) (string, bool) {
+	if len(fields) == 2 && strings.HasSuffix(fields[0], "=$(mktemp") && fields[1] == "-d)" {
+		name := strings.TrimSuffix(fields[0], "=$(mktemp")
+		if isShellIdentifier(name) {
+			return name, true
+		}
+		return "", false
+	}
+	if len(fields) != 1 {
+		return "", false
+	}
+
+	field := fields[0]
+	const suffix = "=$(mktemp -d)"
+	if strings.HasSuffix(field, suffix) {
+		name := strings.TrimSuffix(field, suffix)
+		if isShellIdentifier(name) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+func isTempVarReassignment(fields []string, tempVars map[string]bool) bool {
+	if len(fields) != 1 || !strings.Contains(fields[0], "=") {
+		return false
+	}
+	parts := strings.SplitN(fields[0], "=", 2)
+	return tempVars[parts[0]]
+}
+
+func isMktempSetupCommand(fields []string, tempVars map[string]bool) bool {
+	if len(fields) < 3 {
+		return false
+	}
+	switch fields[0] {
+	case "mkdir":
+		return fields[1] == "-p" && allTargetsUseTempVar(fields[2:], tempVars)
+	case "chmod":
+		return allTargetsUseTempVar(fields[2:], tempVars)
+	default:
+		return false
+	}
+}
+
+func isMktempCleanupCommand(fields []string, tempVars map[string]bool) bool {
+	if len(fields) < 3 || fields[0] != "rm" {
+		return false
+	}
+	hasRecursive := false
+	targetStart := 1
+	for targetStart < len(fields) && strings.HasPrefix(fields[targetStart], "-") {
+		flag := fields[targetStart]
+		if strings.ContainsAny(flag, "rR") || flag == "--recursive" {
+			hasRecursive = true
+		}
+		targetStart++
+	}
+	if !hasRecursive || targetStart >= len(fields) {
+		return false
+	}
+	return allTargetsUseTempVar(fields[targetStart:], tempVars)
+}
+
+func allTargetsUseTempVar(targets []string, tempVars map[string]bool) bool {
+	if len(targets) == 0 {
+		return false
+	}
+	for _, target := range targets {
+		if !targetUsesTempVar(target, tempVars) {
+			return false
+		}
+	}
+	return true
+}
+
+func targetUsesTempVar(target string, tempVars map[string]bool) bool {
+	target = strings.Trim(target, `"'`)
+	for name := range tempVars {
+		if target == "$"+name || target == "${"+name+"}" ||
+			strings.HasPrefix(target, "$"+name+"/") ||
+			strings.HasPrefix(target, "${"+name+"}/") {
+			return true
+		}
+	}
+	return false
+}
+
+func isShellIdentifier(value string) bool {
+	if value == "" {
+		return false
+	}
+	for i, r := range value {
+		if i == 0 {
+			if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && r != '_' {
+				return false
+			}
+			continue
+		}
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' {
+			return false
+		}
+	}
+	return true
 }

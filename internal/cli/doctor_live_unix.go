@@ -15,6 +15,14 @@ import (
 )
 
 func checkLiveTTYAccess() checkResult {
+	if ok, detail := liveTerminalProbeReady(); !ok {
+		return checkResult{
+			name:   "Live terminal /dev/tty access",
+			status: "WARN",
+			detail: "/dev/tty not probed: " + detail,
+		}
+	}
+
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return checkResult{
@@ -32,6 +40,14 @@ func checkLiveTTYAccess() checkResult {
 }
 
 func checkLiveRawMode() checkResult {
+	if ok, detail := liveTerminalProbeReady(); !ok {
+		return checkResult{
+			name:   checkNameLiveRawMode,
+			status: "WARN",
+			detail: "raw mode not probed: " + detail,
+		}
+	}
+
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return checkResult{
@@ -81,12 +97,11 @@ func checkLiveRawMode() checkResult {
 }
 
 func checkLiveForegroundProcessGroup() checkResult {
-	fd := int(os.Stdin.Fd())
-	if _, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP); err != nil {
+	if ok, detail := liveTerminalProbeReady(); !ok {
 		return checkResult{
 			name:   checkNameLiveForegroundHandoff,
 			status: "WARN",
-			detail: "stdin is not a terminal; foreground process-group handoff not probed",
+			detail: "foreground process-group handoff not probed: " + detail,
 		}
 	}
 
@@ -119,6 +134,18 @@ func checkLiveForegroundProcessGroup() checkResult {
 		status: "PASS",
 		detail: "foreground handoff to a child process group succeeded",
 	}
+}
+
+func liveTerminalProbeReady() (bool, string) {
+	fd := int(os.Stdin.Fd())
+	foregroundPgrp, err := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
+	if err != nil {
+		return false, "stdin is not a terminal"
+	}
+	if currentPgrp := unix.Getpgrp(); currentPgrp != foregroundPgrp {
+		return false, "current process group is not foreground"
+	}
+	return true, ""
 }
 
 func startForegroundProbeProcess(stdin io.Reader, stdout, stderr io.Writer) (*exec.Cmd, error) {
