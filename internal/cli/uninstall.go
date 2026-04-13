@@ -230,11 +230,14 @@ func removeCodexHooksJSON(existing []byte) ([]byte, bool, error) {
 }
 
 func removeCodexIntegration(existing string) string {
-	header := "[mcp_servers.fuse-shell]\n"
-	start := strings.Index(existing, header)
-	if start >= 0 {
-		end := nextTOMLSectionBoundary(existing, start+len(header))
-		existing = existing[:start] + existing[end:]
+	fuseShellSectionRe := regexp.MustCompile(`(?m)^\[mcp_servers\.fuse-shell(?:\]|\.)`)
+	for {
+		loc := fuseShellSectionRe.FindStringIndex(existing)
+		if loc == nil {
+			break
+		}
+		end := nextTOMLSectionBoundary(existing, loc[1])
+		existing = existing[:loc[0]] + existing[end:]
 	}
 
 	featuresRe := regexp.MustCompile(`(?m)^shell_tool\s*=\s*false\s*$`)

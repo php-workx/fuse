@@ -183,13 +183,15 @@ shell_tool = false
 [mcp_servers.fuse-shell]
 command = "fuse"
 args = ["proxy", "codex-shell"]
+[mcp_servers.fuse-shell.tools.run_command]
+approval_mode = "approve"
 
 [other]
 value = "keep"
 `
 	got := removeCodexIntegration(input)
 	if strings.Contains(got, "fuse-shell") {
-		t.Fatalf("expected fuse-shell section removed:\n%s", got)
+		t.Fatalf("expected fuse-shell sections removed:\n%s", got)
 	}
 	if strings.Contains(got, "shell_tool = false") {
 		t.Fatalf("expected shell_tool override removed:\n%s", got)
