@@ -167,6 +167,85 @@ func TestMCPClassify_FallbackCaution(t *testing.T) {
 	}
 }
 
+func TestMCPClassify_AuditReadOnlyToolAllowlist(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolName string
+		args     map[string]interface{}
+		want     Decision
+	}{
+		{
+			name:     "context7 query docs with destructive words",
+			toolName: "mcp__context7__query-docs",
+			args:     map[string]interface{}{"query": "document git clean and find -delete behavior"},
+			want:     DecisionSafe,
+		},
+		{
+			name:     "context7 resolve library id",
+			toolName: "resolve-library-id",
+			args:     map[string]interface{}{"query": "OpenAI Codex CLI delete command docs"},
+			want:     DecisionSafe,
+		},
+		{
+			name:     "serena find symbol",
+			toolName: "mcp__serena__find_symbol",
+			args:     map[string]interface{}{"name_path_pattern": "deleteStack"},
+			want:     DecisionSafe,
+		},
+		{
+			name:     "serena search pattern",
+			toolName: "search_for_pattern",
+			args:     map[string]interface{}{"substring_pattern": "rm -rf"},
+			want:     DecisionSafe,
+		},
+		{
+			name:     "lapp read",
+			toolName: "mcp__lapp__lapp_read",
+			args:     map[string]interface{}{"path": "work"},
+			want:     DecisionSafe,
+		},
+		{
+			name:     "lapp grep",
+			toolName: "lapp_grep",
+			args:     map[string]interface{}{"pattern": "find -delete"},
+			want:     DecisionSafe,
+		},
+		{
+			name:     "morph codebase search",
+			toolName: "mcp__morph-mcp__codebase_search",
+			args:     map[string]interface{}{"search_string": "DROP TABLE handling"},
+			want:     DecisionSafe,
+		},
+		{
+			name:     "sequential thinking",
+			toolName: "mcp__sequential-thinking__sequentialthinking",
+			args:     map[string]interface{}{"thought": "Plan how to delete stale cache safely"},
+			want:     DecisionSafe,
+		},
+		{
+			name:     "lapp edit remains caution",
+			toolName: "mcp__lapp__lapp_edit",
+			args:     map[string]interface{}{"path": "work/file.py"},
+			want:     DecisionCaution,
+		},
+		{
+			name:     "generic read file still scans destructive command args",
+			toolName: "read_file",
+			args:     map[string]interface{}{"command": "rm -rf /tmp/data"},
+			want:     DecisionApproval,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ClassifyMCPTool(tt.toolName, tt.args)
+			if got != tt.want {
+				t.Fatalf("ClassifyMCPTool(%q, ...) = %q, want %q", tt.toolName, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestMCPClassify_NoArgs(t *testing.T) {
 	// nil args should not panic and should return name-based classification.
 	got := ClassifyMCPTool("read_file", nil)

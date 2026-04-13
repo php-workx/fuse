@@ -20,6 +20,19 @@ var (
 		"delete_", "remove_", "destroy_", "drop_", "purge_",
 		"revoke_", "disable_", "terminate_", "stop_", "kill_",
 	}
+	mcpReadOnlyExactTools = map[string]bool{
+		"query-docs":           true,
+		"resolve-library-id":   true,
+		"find_file":            true,
+		"find_symbol":          true,
+		"search_for_pattern":   true,
+		"get_symbols_overview": true,
+		"list_dir":             true,
+		"lapp_read":            true,
+		"lapp_grep":            true,
+		"codebase_search":      true,
+		"sequentialthinking":   true,
+	}
 )
 
 // Compiled destructive patterns for MCP argument content scanning (§6.6 Layer 2).
@@ -34,12 +47,14 @@ var mcpDestructivePatterns = []*regexp.Regexp{
 
 // ClassifyMCPTool classifies an MCP tool call using two-layer analysis (§6.6).
 func ClassifyMCPTool(toolName string, args map[string]interface{}) Decision {
+	actionName := normalizeMCPToolName(toolName)
+
 	// Layer 1: Tool name prefix matching.
-	nameDecision := classifyMCPByName(toolName)
+	nameDecision := classifyMCPByName(actionName)
 
 	// Layer 2: Argument content scanning.
 	argsDecision := DecisionSafe
-	if args != nil {
+	if args != nil && !mcpReadOnlyExactTools[actionName] {
 		values, complete := flattenStringValues(args)
 		for _, v := range values {
 			if matchesDestructivePattern(v) {
@@ -68,13 +83,10 @@ func ClassifyMCPTool(toolName string, args map[string]interface{}) Decision {
 // classifyMCPByName classifies an MCP tool by its name prefix.
 // Falls back to CAUTION for unmatched tool names.
 func classifyMCPByName(toolName string) Decision {
-	lower := strings.ToLower(toolName)
+	lower := normalizeMCPToolName(toolName)
 
-	// Defense-in-depth: strip mcp__<server>__ prefix if present.
-	if strings.HasPrefix(lower, "mcp__") {
-		if parts := strings.SplitN(lower, "__", 3); len(parts) == 3 {
-			lower = parts[2]
-		}
+	if mcpReadOnlyExactTools[lower] {
+		return DecisionSafe
 	}
 
 	// Check all prefix sets. Most restrictive match wins.
@@ -86,6 +98,16 @@ func classifyMCPByName(toolName string) Decision {
 		return DecisionCaution // fallback for unmatched tool names
 	}
 	return best
+}
+
+func normalizeMCPToolName(toolName string) string {
+	lower := strings.ToLower(toolName)
+	if strings.HasPrefix(lower, "mcp__") {
+		if parts := strings.SplitN(lower, "__", 3); len(parts) == 3 {
+			return parts[2]
+		}
+	}
+	return lower
 }
 
 // matchPrefixDecision returns decision if name matches any prefix, or empty Decision if none match.

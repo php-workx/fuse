@@ -9,15 +9,23 @@ func init() {
 func builtinRuleTags() map[string]ruleMetadata { //nolint:funlen,maintidx // tag registry is intentionally large
 	return map[string]ruleMetadata{
 		// === Git ===
-		"builtin:git:reset-hard":       {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
-		"builtin:git:clean":            {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
-		"builtin:git:push-force":       {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
-		"builtin:git:push-force-lease": {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
-		"builtin:git:stash-clear":      {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
-		"builtin:git:stash-drop":       {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
-		"builtin:git:branch-D":         {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
-		"builtin:git:checkout-dot":     {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
-		"builtin:git:restore-worktree": {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:reset-hard":        {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:reset":             {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:clean":             {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:push-force":        {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:push-force-lease":  {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:push":              {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:stash-clear":       {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:stash-drop":        {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:branch-D":          {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:checkout-dot":      {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:checkout-worktree": {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:add":               {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:commit":            {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:merge":             {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:rebase":            {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:git:restore-worktree":  {tags: []string{"git", "vcs"}, keywords: []string{"git"}},
+		"builtin:uv:lock":               {tags: []string{"package-manager", "lockfile"}, keywords: []string{"uv"}},
 
 		// === CI/CD ===
 		"builtin:cicd:gh-secret-delete":         {tags: []string{"cicd", "github-actions"}, keywords: []string{"gh", "secret"}},

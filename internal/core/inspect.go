@@ -171,38 +171,29 @@ func inferSignalDecision(result *FileInspection, signals []inspect.Signal, trunc
 // signal category found. Windows defender tampering/AMSI bypass and explicit
 // blocked-behavior signals are unconditionally BLOCKED. Dynamic execution
 // combined with network download is also BLOCKED to prevent download-exec
-// downgrade in script inspection.
+// downgrade in script inspection. Ordinary subprocess/cloud/destructive-script
+// signals stay at CAUTION to avoid approval noise for test and installer scripts.
 func inferDecisionFromSignals(signals []inspect.Signal) Decision {
 	hasApproval := false
-	hasCloudSDK := false
-	hasDestructive := false
 	hasDynamicExec := false
 	hasHTTPDownload := false
 	for _, s := range signals {
 		switch s.Category {
 		case "defender_tamper", "amsi_bypass", "blocked_behavior", "destructive_block":
 			return DecisionBlocked
-		case "subprocess", "cloud_cli", "http_control_plane",
-			"dynamic_import",
-			"lolbin", "process_spawn", "persistence",
-			"firewall_modify", "user_modify":
-			hasApproval = true
-		case "dynamic_exec":
+		case "dynamic_exec", "dynamic_import":
 			hasDynamicExec = true
+			hasApproval = true
+		case "persistence", "firewall_modify", "user_modify", "lolbin", "process_spawn":
 			hasApproval = true
 		case "http_download":
 			hasHTTPDownload = true
-			hasApproval = true
-		case "cloud_sdk":
-			hasCloudSDK = true
-		case "destructive_fs", "destructive_verb":
-			hasDestructive = true
 		}
 	}
 	if hasDynamicExec && hasHTTPDownload {
 		return DecisionBlocked
 	}
-	if hasApproval || (hasCloudSDK && hasDestructive) {
+	if hasApproval {
 		return DecisionApproval
 	}
 	return DecisionCaution

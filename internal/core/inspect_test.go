@@ -54,8 +54,25 @@ func TestInspectFile_DangerousPython(t *testing.T) {
 	if len(result.Signals) == 0 {
 		t.Fatal("expected signals for dangerous Python file, got 0")
 	}
+	if result.Decision != DecisionCaution {
+		t.Errorf("expected CAUTION for ordinary boto3/subprocess signals, got %s", result.Decision)
+	}
+}
+
+func TestInspectFile_DangerousPythonDynamicExecution(t *testing.T) {
+	path := filepath.Join(testdataDir(t), "subprocess_danger.py")
+	result, err := InspectFile(path, DefaultMaxBytes)
+	if err != nil {
+		t.Fatalf("InspectFile returned error: %v", err)
+	}
+	if !result.Exists {
+		t.Fatal("expected file to exist")
+	}
+	if len(result.Signals) == 0 {
+		t.Fatal("expected signals for dangerous Python file, got 0")
+	}
 	if result.Decision != DecisionApproval {
-		t.Errorf("expected APPROVAL for boto3/subprocess file, got %s", result.Decision)
+		t.Errorf("expected APPROVAL for dynamic execution signals, got %s", result.Decision)
 	}
 }
 
@@ -501,14 +518,14 @@ func TestInferDecisionFromSignals_CloudSDKAloneIsCaution(t *testing.T) {
 	}
 }
 
-func TestInferDecisionFromSignals_CloudSDKPlusDestructiveIsApproval(t *testing.T) {
+func TestInferDecisionFromSignals_CloudSDKPlusDestructiveIsCaution(t *testing.T) {
 	signals := []inspect.Signal{
 		{Category: "cloud_sdk", Pattern: "boto3", Line: 1, Match: "import boto3"},
 		{Category: "destructive_fs", Pattern: "rm -rf", Line: 2, Match: "rm -rf /tmp"},
 	}
 	got := inferDecisionFromSignals(signals)
-	if got != DecisionApproval {
-		t.Errorf("expected APPROVAL for cloud_sdk + destructive_fs, got %s", got)
+	if got != DecisionCaution {
+		t.Errorf("expected CAUTION for cloud_sdk + destructive_fs, got %s", got)
 	}
 }
 
@@ -535,7 +552,7 @@ func TestInferDecisionFromSignals_DownloadExecIsBlocked(t *testing.T) {
 }
 
 func TestInferDecisionFromSignals_WindowsApprovalSignals(t *testing.T) {
-	tests := []string{"lolbin", "http_download", "process_spawn", "persistence", "firewall_modify", "user_modify"}
+	tests := []string{"lolbin", "process_spawn", "persistence", "firewall_modify", "user_modify"}
 	for _, category := range tests {
 		t.Run(category, func(t *testing.T) {
 			signals := []inspect.Signal{{Category: category, Pattern: category, Line: 1, Match: category}}
@@ -547,7 +564,7 @@ func TestInferDecisionFromSignals_WindowsApprovalSignals(t *testing.T) {
 }
 
 func TestInferDecisionFromSignals_WindowsCautionSignals(t *testing.T) {
-	tests := []string{"registry_modify", "network_object"}
+	tests := []string{"registry_modify", "network_object", "http_download"}
 	for _, category := range tests {
 		t.Run(category, func(t *testing.T) {
 			signals := []inspect.Signal{{Category: category, Pattern: category, Line: 1, Match: category}}

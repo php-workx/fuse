@@ -703,6 +703,15 @@ var safeBuildDirs = map[string]bool{
 	"bin": true, "obj": true, ".gradle": true, ".angular": true,
 }
 
+var safeGeneratedCleanupFiles = map[string]bool{
+	"fuse.exe": true,
+}
+
+var safeTempCleanupPrefixes = []string{
+	"/tmp/fuse-",
+	"/tmp/codereview-",
+}
+
 // IsSafeBuildCleanup returns true if the command is rm -rf targeting
 // only known safe build/cache directories.
 func IsSafeBuildCleanup(cmd string) bool {
@@ -722,17 +731,29 @@ func IsSafeBuildCleanup(cmd string) bool {
 		return false
 	}
 	for _, arg := range fields[argStart:] {
-		dir := strings.TrimRight(arg, "/")
-		// Reject absolute paths, home-relative paths, and parent traversal.
-		if strings.HasPrefix(dir, "/") || strings.HasPrefix(dir, "~") || strings.Contains(dir, "..") {
-			return false
-		}
-		parts := strings.Split(dir, "/")
-		if !safeBuildDirs[parts[len(parts)-1]] {
+		if !isSafeCleanupTarget(arg) {
 			return false
 		}
 	}
 	return true
+}
+
+func isSafeCleanupTarget(arg string) bool {
+	target := strings.TrimRight(arg, "/")
+	if target == "" || strings.HasPrefix(target, "~") || strings.Contains(target, "..") {
+		return false
+	}
+	for _, prefix := range safeTempCleanupPrefixes {
+		if strings.HasPrefix(target, prefix) {
+			return true
+		}
+	}
+	if strings.HasPrefix(target, "/") {
+		return false
+	}
+	parts := strings.Split(target, "/")
+	base := parts[len(parts)-1]
+	return safeBuildDirs[base] || safeGeneratedCleanupFiles[base]
 }
 
 // gitRestoreSafe: git restore is safe with --staged (unstages without discarding).

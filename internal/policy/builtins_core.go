@@ -15,60 +15,109 @@ func init() {
 		// ===================================================================
 		BuiltinRule{
 			ID:      "builtin:git:reset-hard",
-			Pattern: regexp.MustCompile(`\bgit\s+reset\s+--hard\b`),
+			Pattern: regexp.MustCompile(`^git\s+reset\s+--hard\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Discards all uncommitted changes",
 		},
 		BuiltinRule{
-			ID:      "builtin:git:clean",
-			Pattern: regexp.MustCompile(`\bgit\s+clean\s+-[a-zA-Z]*f`),
+			ID:      "builtin:git:reset",
+			Pattern: regexp.MustCompile(`^git\s+reset\b`),
 			Action:  core.DecisionCaution,
-			Reason:  "Deletes untracked files",
+			Reason:  "Changes git index or history",
+		},
+		BuiltinRule{
+			ID:        "builtin:git:clean",
+			Pattern:   regexp.MustCompile(`^git\s+clean\b`),
+			Action:    core.DecisionCaution,
+			Reason:    "Deletes untracked files",
+			Predicate: gitCleanNeedsCaution,
 		},
 		BuiltinRule{
 			ID:      "builtin:git:push-force",
-			Pattern: regexp.MustCompile(`\bgit\s+push\s+.*--force\b`),
+			Pattern: regexp.MustCompile(`^git\s+push\s+.*--force\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Force push can overwrite remote history",
 		},
 		BuiltinRule{
 			ID:      "builtin:git:push-force-lease",
-			Pattern: regexp.MustCompile(`\bgit\s+push\s+.*--force-with-lease\b`),
+			Pattern: regexp.MustCompile(`^git\s+push\s+.*--force-with-lease\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Force push with lease",
 		},
 		BuiltinRule{
+			ID:      "builtin:git:push",
+			Pattern: regexp.MustCompile(`^git\s+push\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Pushes local changes to a remote",
+		},
+		BuiltinRule{
 			ID:      "builtin:git:stash-clear",
-			Pattern: regexp.MustCompile(`\bgit\s+stash\s+clear\b`),
+			Pattern: regexp.MustCompile(`^git\s+stash\s+clear\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Deletes all stashed changes",
 		},
 		BuiltinRule{
 			ID:      "builtin:git:stash-drop",
-			Pattern: regexp.MustCompile(`\bgit\s+stash\s+drop\b`),
+			Pattern: regexp.MustCompile(`^git\s+stash\s+drop\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Deletes a stash entry",
 		},
 		BuiltinRule{
 			ID:      "builtin:git:branch-D",
-			Pattern: regexp.MustCompile(`\bgit\s+branch\s+-D\b`),
+			Pattern: regexp.MustCompile(`^git\s+branch\s+-D\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Force-deletes a branch",
 		},
 		BuiltinRule{
 			ID:      "builtin:git:checkout-dot",
-			Pattern: regexp.MustCompile(`\bgit\s+checkout\s+--\s*\.`),
+			Pattern: regexp.MustCompile(`^git\s+checkout\s+--\s*\.`),
 			Action:  core.DecisionCaution,
 			Reason:  "Discards all working tree changes",
 		},
 		BuiltinRule{
-			ID:      "builtin:git:restore-worktree",
-			Pattern: regexp.MustCompile(`\bgit\s+restore\b`),
+			ID:        "builtin:git:checkout-worktree",
+			Pattern:   regexp.MustCompile(`^git\s+checkout\b`),
+			Action:    core.DecisionCaution,
+			Reason:    "May change or discard working tree files",
+			Predicate: gitCheckoutNeedsCaution,
+		},
+		BuiltinRule{
+			ID:      "builtin:git:add",
+			Pattern: regexp.MustCompile(`^git\s+add\b`),
 			Action:  core.DecisionCaution,
-			Reason:  "May discard working tree changes",
-			Predicate: func(cmd string) bool {
-				return !strings.Contains(cmd, "--staged")
-			},
+			Reason:  "Stages changes in the git index",
+		},
+		BuiltinRule{
+			ID:      "builtin:git:commit",
+			Pattern: regexp.MustCompile(`^git\s+commit\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Creates a git commit",
+		},
+		BuiltinRule{
+			ID:      "builtin:git:merge",
+			Pattern: regexp.MustCompile(`^git\s+merge\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Merges changes into the current branch",
+		},
+		BuiltinRule{
+			ID:      "builtin:git:rebase",
+			Pattern: regexp.MustCompile(`^git\s+rebase\b`),
+			Action:  core.DecisionCaution,
+			Reason:  "Rewrites or reapplies commits",
+		},
+		BuiltinRule{
+			ID:        "builtin:git:restore-worktree",
+			Pattern:   regexp.MustCompile(`^git\s+restore\b`),
+			Action:    core.DecisionCaution,
+			Reason:    "May discard working tree changes",
+			Predicate: gitRestoreNeedsCaution,
+		},
+		BuiltinRule{
+			ID:        "builtin:uv:lock",
+			Pattern:   regexp.MustCompile(`^uv\s+lock\b`),
+			Action:    core.DecisionCaution,
+			Reason:    "Updates uv lockfile",
+			Predicate: uvLockNeedsCaution,
 		},
 
 		// ===================================================================
@@ -1035,4 +1084,59 @@ func init() {
 			Reason:  "Truncating files to zero bytes",
 		},
 	)
+}
+
+func gitCleanNeedsCaution(cmd string) bool {
+	args := commandArgs(cmd, "git", "clean")
+	if len(args) == 0 {
+		return false
+	}
+	return !hasAnyArg(args, "-n", "--dry-run")
+}
+
+func gitCheckoutNeedsCaution(cmd string) bool {
+	args := commandArgs(cmd, "git", "checkout")
+	if len(args) == 0 {
+		return false
+	}
+	if hasAnyArg(args, "--theirs", "--ours") {
+		return true
+	}
+	first := args[0]
+	return first != "-b" && first != "-B"
+}
+
+func gitRestoreNeedsCaution(cmd string) bool {
+	args := commandArgs(cmd, "git", "restore")
+	if len(args) == 0 {
+		return false
+	}
+	if hasAnyArg(args, "--worktree", "-W", "-SW", "-WS") {
+		return true
+	}
+	return !hasAnyArg(args, "--staged", "-S")
+}
+
+func uvLockNeedsCaution(cmd string) bool {
+	args := commandArgs(cmd, "uv", "lock")
+	return !hasAnyArg(args, "--check")
+}
+
+func commandArgs(cmd, executable, subcommand string) []string {
+	fields := strings.Fields(cmd)
+	if len(fields) < 2 || fields[0] != executable || fields[1] != subcommand {
+		return nil
+	}
+	return fields[2:]
+}
+
+func hasAnyArg(args []string, needles ...string) bool {
+	for _, arg := range args {
+		for _, needle := range needles {
+			if arg == needle {
+				return true
+			}
+		}
+	}
+	return false
 }

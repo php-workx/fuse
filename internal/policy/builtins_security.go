@@ -71,13 +71,13 @@ func init() {
 		},
 		{
 			ID:      "builtin:fs:find-delete",
-			Pattern: regexp.MustCompile(`\bfind\b.*\s-delete\b`),
+			Pattern: regexp.MustCompile(`^find\b.*\s-delete\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Find with delete",
 		},
 		{
 			ID:      "builtin:fs:find-exec-rm",
-			Pattern: regexp.MustCompile(`\bfind\b.*-exec\s+rm\b`),
+			Pattern: regexp.MustCompile(`^find\b.*-exec\s+rm\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Find with exec rm",
 		},

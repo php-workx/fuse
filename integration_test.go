@@ -192,8 +192,8 @@ func TestIntegration_FileInspection(t *testing.T) {
 		if err != nil {
 			t.Fatalf("classify error: %v", err)
 		}
-		if result.Decision != core.DecisionApproval {
-			t.Errorf("expected APPROVAL for dangerous python script execution, got %s (reason: %s)", result.Decision, result.Reason)
+		if result.Decision != core.DecisionCaution {
+			t.Errorf("expected CAUTION for ordinary boto3/subprocess signals, got %s (reason: %s)", result.Decision, result.Reason)
 		}
 	})
 
@@ -210,8 +210,8 @@ func TestIntegration_FileInspection(t *testing.T) {
 		if len(inspection.Signals) == 0 {
 			t.Error("expected signals for dangerous boto3 file")
 		}
-		if inspection.Decision != core.DecisionApproval {
-			t.Errorf("expected APPROVAL from file inspection, got %s", inspection.Decision)
+		if inspection.Decision != core.DecisionCaution {
+			t.Errorf("expected CAUTION from file inspection, got %s", inspection.Decision)
 		}
 	})
 

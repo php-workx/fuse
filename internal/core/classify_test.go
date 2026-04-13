@@ -173,6 +173,90 @@ func TestClassify_UnknownCommandDefaultsToSafe(t *testing.T) {
 	}
 }
 
+func TestClassify_AuditTunedStateChangingDeveloperCommands(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+	}{
+		{name: "git add", command: "git add internal/core/classify_test.go", expected: core.DecisionCaution},
+		{name: "git commit", command: "git commit --no-edit", expected: core.DecisionCaution},
+		{name: "git checkout theirs", command: "git checkout --theirs uv.lock", expected: core.DecisionCaution},
+		{name: "git checkout branch switch", command: "git checkout main", expected: core.DecisionCaution},
+		{name: "git checkout create branch remains safe", command: "git checkout -b feature/audit", expected: core.DecisionSafe},
+		{name: "git restore staged only remains safe", command: "git restore --staged README.md", expected: core.DecisionSafe},
+		{name: "git restore staged and worktree", command: "git restore --staged --worktree README.md", expected: core.DecisionCaution},
+		{name: "git merge", command: "git merge feature/audit", expected: core.DecisionCaution},
+		{name: "git rebase", command: "git rebase main", expected: core.DecisionCaution},
+		{name: "git push", command: "git push origin main", expected: core.DecisionCaution},
+		{name: "git reset soft", command: "git reset --soft HEAD~1", expected: core.DecisionCaution},
+		{name: "uv lock", command: "uv lock", expected: core.DecisionCaution},
+		{name: "uv lock check remains safe", command: "uv lock --check", expected: core.DecisionSafe},
+		{name: "unknown command remains safe", command: "definitely-not-a-real-command-xyz", expected: core.DecisionSafe},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}
+			result, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("command %q: got %s, want %s (reason: %s, rule: %s)",
+					tt.command, result.Decision, tt.expected, result.Reason, result.RuleID)
+			}
+		})
+	}
+}
+
+func TestClassify_AuditTunedFindDeleteAndCleanupNoise(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+	}{
+		{name: "actual find delete", command: `find . -name "*.tmp" -delete`, expected: core.DecisionCaution},
+		{name: "actual find exec rm", command: `find . -name "*.tmp" -exec rm {} +`, expected: core.DecisionCaution},
+		{name: "rg mentions find delete", command: `rg -n "find -delete" internal`, expected: core.DecisionSafe},
+		{name: "grep mentions find delete", command: `grep "find -delete" README.md`, expected: core.DecisionSafe},
+		{name: "safe temp fuse cleanup", command: `rm -rf /tmp/fuse-codex-install.out`, expected: core.DecisionSafe},
+		{name: "safe temp codereview cleanup", command: `rm -rf /tmp/codereview-verify-abc123`, expected: core.DecisionSafe},
+		{name: "safe generated binary cleanup", command: `rm -rf dist fuse.exe`, expected: core.DecisionSafe},
+		{name: "generic tmp cleanup remains caution", command: `rm -rf /tmp/build`, expected: core.DecisionCaution},
+		{name: "verk run state remains caution", command: `rm -rf .verk/runs .verk/current`, expected: core.DecisionCaution},
+		{name: "catastrophic rm remains blocked", command: `rm -rf $HOME`, expected: core.DecisionBlocked},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}
+			result, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("command %q: got %s, want %s (reason: %s, rule: %s)",
+					tt.command, result.Decision, tt.expected, result.Reason, result.RuleID)
+			}
+		})
+	}
+}
+
 func TestClassify_EmptyCommand(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
@@ -353,7 +437,7 @@ func TestClassify_BuiltinSectionSentinels(t *testing.T) {
 		expected core.Decision
 	}{
 		{name: "6.3.1 git positive", command: "git reset --hard HEAD~1", cwd: "/tmp", expected: core.DecisionCaution},
-		{name: "6.3.1 git near miss", command: "git reset --soft HEAD~1", cwd: "/tmp", expected: core.DecisionSafe}, // unknown command fallback is SAFE
+		{name: "6.3.1 git near miss", command: "git reset --soft HEAD~1", cwd: "/tmp", expected: core.DecisionCaution},
 		{name: "6.3.2 aws positive", command: "aws cloudformation delete-stack --stack-name prod", cwd: "/tmp", expected: core.DecisionCaution},
 		{name: "6.3.2 aws near miss", command: "aws cloudformation describe-stacks --stack-name prod", cwd: "/tmp", expected: core.DecisionSafe},
 		{name: "6.3.3 gcp positive", command: "gcloud projects delete prod-project", cwd: "/tmp", expected: core.DecisionCaution},
@@ -378,7 +462,7 @@ func TestClassify_BuiltinSectionSentinels(t *testing.T) {
 		{name: "6.3.12 paas near miss", command: "heroku apps:info --app prod-app", cwd: "/tmp", expected: core.DecisionSafe}, // unknown command fallback is SAFE
 		{name: "6.3.13 filesystem positive", command: "find . -delete", cwd: "/tmp", expected: core.DecisionCaution},
 		{name: "6.3.13 filesystem near miss", command: "find . -name '*.tmp'", cwd: "/tmp", expected: core.DecisionSafe},
-		{name: "6.3.14 interpreter positive", command: "python testdata/scripts/dangerous_boto3.py", cwd: repoRoot, expected: core.DecisionApproval},
+		{name: "6.3.14 interpreter positive", command: "python testdata/scripts/dangerous_boto3.py", cwd: repoRoot, expected: core.DecisionCaution},
 		{name: "6.3.14 interpreter near miss", command: "python testdata/scripts/safe_script.py", cwd: repoRoot, expected: core.DecisionSafe},
 		{name: "6.3.15 credential access positive", command: "cat ~/.aws/credentials", cwd: "/tmp", expected: core.DecisionCaution},
 		{name: "6.3.15 credential access near miss", command: "cat README.md", cwd: "/tmp", expected: core.DecisionSafe},
@@ -515,8 +599,8 @@ func TestClassify_InterpreterBackedDangerousScriptUsesInspectionResult(t *testin
 	if err != nil {
 		t.Fatalf("classify error: %v", err)
 	}
-	if result.Decision != core.DecisionApproval {
-		t.Fatalf("expected dangerous script execution to require APPROVAL, got %s (reason: %s)", result.Decision, result.Reason)
+	if result.Decision != core.DecisionCaution {
+		t.Fatalf("expected ordinary dangerous script signals to require CAUTION, got %s (reason: %s)", result.Decision, result.Reason)
 	}
 }
 
