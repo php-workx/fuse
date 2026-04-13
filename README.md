@@ -103,7 +103,7 @@ boundaries, and what fuse touches on your filesystem.
 | State DB | `~/.fuse/state/fuse.db` | Event log, approvals (SQLite) |
 | HMAC secret | `~/.fuse/state/secret.key` | Approval record signing |
 | Claude hook | `~/.claude/settings.json` | Adds `PreToolUse` hook entries |
-| Codex config | `~/.codex/config.toml` | Adds fuse-shell MCP server |
+| Codex config | `~/.codex/config.toml`, `~/.codex/hooks.json` | Adds native Bash hook when supported, otherwise fuse-shell MCP server |
 
 **Network:** None. Fuse makes zero network calls. The optional [LLM judge](docs/TRUST_MODEL.md)
 invokes locally-installed CLI tools which may make their own API calls.
@@ -157,6 +157,9 @@ fuse install claude --secure  # + file tool path checks + recommended Claude set
 ```bash
 fuse install codex
 ```
+
+Uses Codex native Bash hooks when supported by the installed Codex CLI, with an
+automatic fallback to the fuse-shell MCP server on older versions or Windows.
 
 ### MCP proxy
 

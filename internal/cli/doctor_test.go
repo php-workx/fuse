@@ -277,6 +277,29 @@ func TestCheckCodexSecurityPosture_WarnsWhenConfigMissing(t *testing.T) {
 	}
 }
 
+func TestCheckCodexSecurityPosture_PassesWithNativeHooks(t *testing.T) {
+	codexHome := filepath.Join(t.TempDir(), ".codex")
+	t.Setenv("CODEX_HOME", codexHome)
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		t.Fatalf("mkdir codex home: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "config.toml"), []byte("[features]\ncodex_hooks = true\n"), 0o644); err != nil {
+		t.Fatalf("write codex config: %v", err)
+	}
+	hooksData, err := mergeCodexHooksJSON(nil)
+	if err != nil {
+		t.Fatalf("mergeCodexHooksJSON: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(codexHome, "hooks.json"), hooksData, 0o644); err != nil {
+		t.Fatalf("write codex hooks: %v", err)
+	}
+
+	got := checkCodexSecurityPosture()
+	if got.status != "PASS" {
+		t.Fatalf("checkCodexSecurityPosture() status = %q, want PASS; detail=%s", got.status, got.detail)
+	}
+}
+
 func TestRunDoctorSecurity_WarnsWhenCodexShellToolEnabledOrFuseShellMissing(t *testing.T) {
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)

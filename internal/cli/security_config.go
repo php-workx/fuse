@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -163,6 +164,68 @@ func codexSecurityWarnings(configText string) []string {
 	}
 
 	return warnings
+}
+
+func codexNativeHooksEnabled(configText string) bool {
+	featuresSection, hasFeatures := tomlSection(configText, "[features]")
+	if !hasFeatures {
+		return false
+	}
+	return tomlAssignment(featuresSection, "codex_hooks") == "true"
+}
+
+func codexNativeHookWarnings(configText string, hooksData []byte) []string {
+	var warnings []string
+	if !codexNativeHooksEnabled(configText) {
+		warnings = append(warnings, "features.codex_hooks should be true to enable native Codex hooks")
+	}
+	if !codexHooksJSONContainsFuseHook(hooksData) {
+		warnings = append(warnings, "hooks.json is missing the Fuse Bash PreToolUse hook")
+	}
+	return warnings
+}
+
+func codexHooksJSONContainsFuseHook(hooksData []byte) bool {
+	if strings.TrimSpace(string(hooksData)) == "" {
+		return false
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(hooksData, &settings); err != nil {
+		return false
+	}
+	hooksObj, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		return false
+	}
+	preToolUse, ok := extractPreToolUse(hooksObj)
+	if !ok {
+		return false
+	}
+	for _, raw := range preToolUse {
+		entry, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		matcher, _ := entry["matcher"].(string)
+		if matcher != "Bash" {
+			continue
+		}
+		hooks, ok := extractHooksArray(entry)
+		if !ok {
+			continue
+		}
+		for _, hookRaw := range hooks {
+			hook, ok := hookRaw.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			cmd, _ := hook["command"].(string)
+			if isFuseHookCommand(cmd) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func claudeMCPServerWarnings(settings map[string]interface{}, configured map[string]struct{}) ([]string, int) {

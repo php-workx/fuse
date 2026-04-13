@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"regexp"
@@ -159,13 +160,17 @@ func filterFuseHooks(hooks []interface{}) ([]interface{}, bool) {
 			continue
 		}
 		cmd, _ := hMap["command"].(string)
-		if cmd == "fuse hook evaluate" {
+		if isFuseHookCommand(cmd) {
 			removed = true
 			continue
 		}
 		remaining = append(remaining, h)
 	}
 	return remaining, removed
+}
+
+func isFuseHookCommand(cmd string) bool {
+	return strings.Contains(cmd, fuseHookCommand)
 }
 
 func uninstallCodex() error {
@@ -175,17 +180,53 @@ func uninstallCodex() error {
 	}
 	data, err := os.ReadFile(configPath)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			return err
+		}
+	} else {
+		cleaned := removeCodexIntegration(string(data))
+		if cleaned != string(data) {
+			if err := os.WriteFile(configPath, []byte(cleaned), 0o644); err != nil {
+				return err
+			}
+		}
+	}
+
+	return removeCodexHooksFile(codexHooksPathFromConfig(configPath))
+}
+
+func removeCodexHooksFile(hooksPath string) error {
+	hooksData, err := os.ReadFile(hooksPath)
+	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-
-	cleaned := removeCodexIntegration(string(data))
-	if cleaned == string(data) {
-		return nil
+	cleanedHooks, modified, err := removeCodexHooksJSON(hooksData)
+	if err != nil {
+		return fmt.Errorf("cleaning %s: %w", hooksPath, err)
 	}
-	return os.WriteFile(configPath, []byte(cleaned), 0o644)
+	if modified {
+		return os.WriteFile(hooksPath, cleanedHooks, 0o644)
+	}
+	return nil
+}
+
+func removeCodexHooksJSON(existing []byte) ([]byte, bool, error) {
+	var settings map[string]interface{}
+	if err := json.Unmarshal(existing, &settings); err != nil {
+		return nil, false, err
+	}
+	modified := removeFuseHook(settings)
+	if !modified {
+		return existing, false, nil
+	}
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return nil, false, err
+	}
+	return append(out, '\n'), true, nil
 }
 
 func removeCodexIntegration(existing string) string {

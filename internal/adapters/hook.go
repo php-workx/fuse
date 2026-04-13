@@ -62,6 +62,13 @@ type HookRequest struct {
 	Cwd       string          `json:"cwd"`
 }
 
+func hookAgent() string {
+	if agent := strings.TrimSpace(os.Getenv("FUSE_HOOK_AGENT")); agent != "" {
+		return agent
+	}
+	return "claude"
+}
+
 // BashToolInput is the tool_input for Bash tool calls.
 type BashToolInput struct {
 	Command string `json:"command"`
@@ -413,7 +420,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 		event := &db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: string(decision),
 			StructuralDecision: string(structuralDecision), Profile: profile,
-			RuleID: result.RuleID, Reason: result.Reason, Source: "hook", Agent: "claude", Cwd: req.Cwd,
+			RuleID: result.RuleID, Reason: result.Reason, Source: "hook", Agent: hookAgent(), Cwd: req.Cwd,
 		}
 		applyVerdict(event, verdict)
 		_ = database.LogEvent(event)
@@ -423,7 +430,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 		event := &db.EventRecord{
 			SessionID: req.SessionID, Command: cmd, Decision: "BLOCKED",
 			StructuralDecision: string(structuralDecision), Profile: profile,
-			RuleID: result.RuleID, Reason: "user denied", Source: "hook", Agent: "claude", Cwd: req.Cwd,
+			RuleID: result.RuleID, Reason: "user denied", Source: "hook", Agent: hookAgent(), Cwd: req.Cwd,
 		}
 		applyVerdict(event, verdict)
 		_ = database.LogEvent(event)
@@ -446,7 +453,7 @@ func logHookEventFields(sessionID, command, cwd, decision, ruleID, reason string
 		RuleID:    ruleID,
 		Reason:    reason,
 		Source:    "hook",
-		Agent:     "claude",
+		Agent:     hookAgent(),
 		Cwd:       cwd,
 	})
 	cleanupExecutionState(database, loadRuntimeConfig())
@@ -545,7 +552,7 @@ func logHookEventWithVerdict(
 		RuleID:             result.RuleID,
 		Reason:             result.Reason,
 		Source:             "hook",
-		Agent:              "claude",
+		Agent:              hookAgent(),
 		Cwd:                cwd,
 	}
 	applyVerdict(event, verdict)

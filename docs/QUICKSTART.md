@@ -77,7 +77,9 @@ fuse install claude --secure
 fuse install codex
 ```
 
-This adds a fuse-shell MCP server to `~/.codex/config.toml`.
+This uses Codex native Bash hooks when the installed Codex version supports
+them. Otherwise it falls back to a fuse-shell MCP server in
+`~/.codex/config.toml`.
 
 ## Verify
 

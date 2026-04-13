@@ -17,7 +17,8 @@ Fuse creates and modifies the following files:
 | Enabled marker | `~/.fuse/state/enabled` | Whether fuse is active | `fuse enable` |
 | Dry-run marker | `~/.fuse/state/dryrun` | Whether fuse is in dry-run mode | `fuse dryrun` |
 | Claude Code hook | `~/.claude/settings.json` | Adds `PreToolUse` hook entries for Bash, MCP, Read, Write, Edit, MultiEdit | `fuse install claude` |
-| Codex config | `~/.codex/config.toml` | Adds fuse-shell MCP server entry | `fuse install codex` |
+| Codex config | `~/.codex/config.toml` | Enables native hooks when supported; otherwise adds fuse-shell MCP server entry | `fuse install codex` |
+| Codex hooks | `~/.codex/hooks.json` | Adds a Bash `PreToolUse` hook when the installed Codex CLI supports native hooks | `fuse install codex` |
 
 ## Network Behavior
 
@@ -47,6 +48,7 @@ fuse disable
 - `~/.fuse/` (entire directory: config, state, database, secret)
 - Fuse hook entries from `~/.claude/settings.json`
 - Fuse MCP entry from `~/.codex/config.toml`
+- Fuse hook entries from `~/.codex/hooks.json`
 
 **What `uninstall --purge` does NOT remove:**
 - The `fuse` binary itself (installed via `go install` or package manager)
@@ -68,7 +70,7 @@ fuse disable
 - **Malicious agents deliberately evading classification** — an agent that
   obfuscates commands (base64 encoding, variable expansion, indirect execution)
   can bypass heuristic pattern matching
-- **TOCTOU in hook mode** — Claude Code asks fuse for approval, then executes
+- **TOCTOU in hook mode** — Claude Code or Codex asks fuse for approval, then executes
   the command itself. Fuse cannot guarantee the command that executes is the
   one that was classified. In proxy and run modes, fuse controls execution
   directly (no TOCTOU gap)
@@ -99,14 +101,17 @@ fuse disable
 | Mode | Enforcement | TOCTOU gap? |
 |------|------------|-------------|
 | **Hook** (Claude Code) | Advisory — fuse classifies, Claude Code executes | Yes — agent controls execution |
+| **Hook** (Codex CLI) | Advisory — fuse classifies Bash tool calls, Codex executes | Yes — agent controls execution |
 | **Proxy** (MCP) | Inline — fuse intercepts and gates tool calls | No — fuse controls the pipe |
 | **Run** (manual) | Inline — fuse classifies, then executes | No — fuse controls execution |
 | **Codex shell** (MCP) | Inline — fuse is the shell server | No — fuse controls execution |
 
-In hook mode, Claude Code respects fuse's classification (exit 0 = allow, exit 2
+In hook mode, the agent respects fuse's classification (exit 0 = allow, exit 2
 = block). But fuse cannot enforce this — a modified or misconfigured agent could
 ignore the exit code. This is a fundamental property of the hook architecture,
-not a bug.
+not a bug. Codex native hook mode currently covers Bash tool calls only; when
+native hooks are not available, `fuse install codex` falls back to the inline MCP
+shell server path.
 
 ## Data Retention
 

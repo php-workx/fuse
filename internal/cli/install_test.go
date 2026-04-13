@@ -26,6 +26,156 @@ func TestMergeCodexConfig(t *testing.T) {
 	}
 }
 
+func TestCodexVersionSupportsNativeHooks(t *testing.T) {
+	tests := []struct {
+		name   string
+		goos   string
+		output string
+		want   bool
+	}{
+		{name: "minimum supported version", goos: "linux", output: "codex-cli 0.115.0", want: true},
+		{name: "newer supported version", goos: "darwin", output: "codex-cli 0.120.0", want: true},
+		{name: "older version", goos: "linux", output: "codex-cli 0.114.9", want: false},
+		{name: "windows disabled", goos: "windows", output: "codex-cli 0.120.0", want: false},
+		{name: "unparseable version", goos: "linux", output: "codex-cli dev", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := codexVersionSupportsNativeHooks(tt.goos, tt.output); got != tt.want {
+				t.Fatalf("codexVersionSupportsNativeHooks(%q, %q) = %v, want %v", tt.goos, tt.output, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMergeCodexHooksJSON_PreservesUnrelatedHooksAndReplacesFuseHook(t *testing.T) {
+	existing := `{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "old fuse hook evaluate", "timeout": 1},
+          {"type": "command", "command": "other hook", "timeout": 2}
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {"type": "command", "command": "read hook", "timeout": 3}
+        ]
+      }
+    ]
+  }
+}`
+	got, err := mergeCodexHooksJSON([]byte(existing))
+	if err != nil {
+		t.Fatalf("mergeCodexHooksJSON: %v", err)
+	}
+
+	var hooks map[string]interface{}
+	if err := json.Unmarshal(got, &hooks); err != nil {
+		t.Fatalf("unmarshal merged hooks: %v\n%s", err, got)
+	}
+	preToolUse := hooks["hooks"].(map[string]interface{})["PreToolUse"].([]interface{})
+	if len(preToolUse) != 2 {
+		t.Fatalf("PreToolUse entry count = %d, want 2: %#v", len(preToolUse), preToolUse)
+	}
+	bashEntry := preToolUse[0].(map[string]interface{})
+	if bashEntry["matcher"] != "Bash" {
+		t.Fatalf("first matcher = %v, want Bash", bashEntry["matcher"])
+	}
+	bashHooks := bashEntry["hooks"].([]interface{})
+	var hasFuse, hasOldFuse, hasOther bool
+	for _, raw := range bashHooks {
+		entry := raw.(map[string]interface{})
+		command, _ := entry["command"].(string)
+		switch {
+		case command == "old fuse hook evaluate":
+			hasOldFuse = true
+		case strings.Contains(command, "fuse hook evaluate"):
+			hasFuse = true
+			if entry["statusMessage"] != "Fuse checking command" {
+				t.Fatalf("statusMessage = %v, want Fuse checking command", entry["statusMessage"])
+			}
+		case command == "other hook":
+			hasOther = true
+		}
+	}
+	if !hasFuse || hasOldFuse || !hasOther {
+		t.Fatalf("merged Bash hooks wrong: hasFuse=%v hasOldFuse=%v hasOther=%v hooks=%#v", hasFuse, hasOldFuse, hasOther, bashHooks)
+	}
+}
+
+func TestInstallCodexUsesNativeHooksWhenSupported(t *testing.T) {
+	tmpHome := t.TempDir()
+	codexHome := filepath.Join(tmpHome, ".codex")
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+	t.Setenv("PATH", t.TempDir())
+
+	prev := detectCodexNativeHooksSupport
+	detectCodexNativeHooksSupport = func() bool { return true }
+	t.Cleanup(func() { detectCodexNativeHooksSupport = prev })
+
+	if err := installCodexWithProfile(config.ProfileRelaxed); err != nil {
+		t.Fatalf("installCodexWithProfile: %v", err)
+	}
+
+	configData, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	configText := string(configData)
+	if !strings.Contains(configText, "codex_hooks = true") {
+		t.Fatalf("expected codex_hooks enabled, got:\n%s", configText)
+	}
+	if strings.Contains(configText, "fuse-shell") || strings.Contains(configText, "shell_tool = false") {
+		t.Fatalf("expected native hook install not to install MCP fallback config, got:\n%s", configText)
+	}
+
+	hooksData, err := os.ReadFile(filepath.Join(codexHome, "hooks.json"))
+	if err != nil {
+		t.Fatalf("read hooks.json: %v", err)
+	}
+	if !strings.Contains(string(hooksData), "fuse hook evaluate") || !strings.Contains(string(hooksData), "PreToolUse") {
+		t.Fatalf("expected Codex hooks file to contain fuse PreToolUse hook, got:\n%s", hooksData)
+	}
+}
+
+func TestInstallCodexFallsBackToMCPWhenNativeHooksUnsupported(t *testing.T) {
+	tmpHome := t.TempDir()
+	codexHome := filepath.Join(tmpHome, ".codex")
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("CODEX_HOME", codexHome)
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+	t.Setenv("PATH", t.TempDir())
+
+	prev := detectCodexNativeHooksSupport
+	detectCodexNativeHooksSupport = func() bool { return false }
+	t.Cleanup(func() { detectCodexNativeHooksSupport = prev })
+
+	if err := installCodexWithProfile(config.ProfileRelaxed); err != nil {
+		t.Fatalf("installCodexWithProfile: %v", err)
+	}
+
+	configData, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read config.toml: %v", err)
+	}
+	configText := string(configData)
+	for _, want := range []string{"shell_tool = false", "[mcp_servers.fuse-shell]", `args = ["proxy", "codex-shell"]`} {
+		if !strings.Contains(configText, want) {
+			t.Fatalf("expected fallback config to contain %q, got:\n%s", want, configText)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(codexHome, "hooks.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected fallback install not to create hooks.json, stat err=%v", err)
+	}
+}
+
 func TestRemoveCodexIntegration(t *testing.T) {
 	input := `[features]
 shell_tool = false
@@ -46,6 +196,44 @@ value = "keep"
 	}
 	if !strings.Contains(got, "[other]") {
 		t.Fatalf("expected unrelated config preserved:\n%s", got)
+	}
+}
+
+func TestRemoveCodexHooksJSON(t *testing.T) {
+	input := []byte(`{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {"type": "command", "command": "FUSE_HOOK_AGENT=codex fuse hook evaluate", "timeout": 300},
+          {"type": "command", "command": "other hook", "timeout": 2}
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {"type": "command", "command": "read hook", "timeout": 3}
+        ]
+      }
+    ]
+  }
+}`)
+	got, modified, err := removeCodexHooksJSON(input)
+	if err != nil {
+		t.Fatalf("removeCodexHooksJSON: %v", err)
+	}
+	if !modified {
+		t.Fatal("removeCodexHooksJSON modified = false, want true")
+	}
+	gotText := string(got)
+	if strings.Contains(gotText, "fuse hook evaluate") {
+		t.Fatalf("expected fuse hook removed, got:\n%s", gotText)
+	}
+	for _, want := range []string{"other hook", "read hook"} {
+		if !strings.Contains(gotText, want) {
+			t.Fatalf("expected unrelated hook %q preserved, got:\n%s", want, gotText)
+		}
 	}
 }
 

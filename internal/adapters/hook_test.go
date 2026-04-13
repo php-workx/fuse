@@ -65,6 +65,18 @@ func TestRunHook_NonBashTool(t *testing.T) {
 	}
 }
 
+func TestHookAgentDefaultsToClaudeAndHonorsEnv(t *testing.T) {
+	t.Setenv("FUSE_HOOK_AGENT", "")
+	if got := hookAgent(); got != "claude" {
+		t.Fatalf("hookAgent() = %q, want claude", got)
+	}
+
+	t.Setenv("FUSE_HOOK_AGENT", "codex")
+	if got := hookAgent(); got != "codex" {
+		t.Fatalf("hookAgent() = %q, want codex", got)
+	}
+}
+
 func TestRunHook_InvalidJSON(t *testing.T) {
 	enableHookForTest(t)
 

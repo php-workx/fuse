@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -15,9 +18,13 @@ const (
 	codexConfigDir  = ".codex"
 	codexConfigFile = "config.toml"
 
-	// fuseHookCommand is the command string used in Claude Code PreToolUse hook entries.
+	// fuseHookCommand is the command string used in PreToolUse hook entries.
 	fuseHookCommand = "fuse hook evaluate"
+
+	codexFuseHookCommand = "FUSE_HOOK_AGENT=codex " + fuseHookCommand
 )
+
+var detectCodexNativeHooksSupport = defaultDetectCodexNativeHooksSupport
 
 var installCmd = &cobra.Command{
 	Use:     "install [claude|codex]",
@@ -42,9 +49,10 @@ func init() {
 
 // fuseHookEntry is the hook configuration entry for a single matcher.
 type fuseHookEntry struct {
-	Type    string `json:"type"`
-	Command string `json:"command"`
-	Timeout int    `json:"timeout"`
+	Type          string `json:"type"`
+	Command       string `json:"command"`
+	Timeout       int    `json:"timeout"`
+	StatusMessage string `json:"statusMessage,omitempty"`
 }
 
 // fuseMatcherEntry is a PreToolUse matcher entry.
@@ -278,11 +286,15 @@ func ensureFuseHookInEntry(entry map[string]interface{}) map[string]interface{} 
 func fuseHooksToInterface(hooks []fuseHookEntry) []interface{} {
 	result := make([]interface{}, len(hooks))
 	for i, h := range hooks {
-		result[i] = map[string]interface{}{
+		entry := map[string]interface{}{
 			"type":    h.Type,
 			"command": h.Command,
 			"timeout": float64(h.Timeout),
 		}
+		if h.StatusMessage != "" {
+			entry["statusMessage"] = h.StatusMessage
+		}
+		result[i] = entry
 	}
 	return result
 }
@@ -375,12 +387,43 @@ func installCodexWithProfile(profile string) error {
 		return fmt.Errorf("reading %s: %w", configPath, err)
 	}
 
-	updated := mergeCodexConfig(string(existing))
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
 		return fmt.Errorf("creating directory %s: %w", filepath.Dir(configPath), err)
 	}
+
+	if detectCodexNativeHooksSupport() {
+		updated := mergeCodexNativeHooksConfig(string(existing))
+		if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", configPath, err)
+		}
+
+		hooksPath := codexHooksPathFromConfig(configPath)
+		hooksExisting, err := os.ReadFile(hooksPath)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("reading %s: %w", hooksPath, err)
+		}
+		mergedHooks, err := mergeCodexHooksJSON(hooksExisting)
+		if err != nil {
+			return fmt.Errorf("merging %s: %w", hooksPath, err)
+		}
+		if err := os.WriteFile(hooksPath, mergedHooks, 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", hooksPath, err)
+		}
+
+		if err := ensureFuseConfigScaffold(profile); err != nil {
+			return err
+		}
+
+		fmt.Printf("fuse Codex native hook installed in %s\n", hooksPath)
+		return nil
+	}
+
+	updated := mergeCodexConfig(string(existing))
 	if err := os.WriteFile(configPath, []byte(updated), 0o644); err != nil {
 		return fmt.Errorf("writing %s: %w", configPath, err)
+	}
+	if err := removeCodexHooksFile(codexHooksPathFromConfig(configPath)); err != nil {
+		return err
 	}
 
 	if err := ensureFuseConfigScaffold(profile); err != nil {
@@ -395,6 +438,46 @@ func installCodexWithProfile(profile string) error {
 	return nil
 }
 
+func defaultDetectCodexNativeHooksSupport() bool {
+	if runtime.GOOS == "windows" {
+		return false
+	}
+	codexPath, err := exec.LookPath("codex")
+	if err != nil {
+		return false
+	}
+	output, err := exec.Command(codexPath, "--version").CombinedOutput()
+	if err != nil {
+		return false
+	}
+	return codexVersionSupportsNativeHooks(runtime.GOOS, string(output))
+}
+
+func codexVersionSupportsNativeHooks(goos, output string) bool {
+	if goos == "windows" {
+		return false
+	}
+	versionRe := regexp.MustCompile(`\b(\d+)\.(\d+)\.(\d+)\b`)
+	matches := versionRe.FindStringSubmatch(output)
+	if matches == nil {
+		return false
+	}
+	major, _ := strconv.Atoi(matches[1])
+	minor, _ := strconv.Atoi(matches[2])
+	patch, _ := strconv.Atoi(matches[3])
+	if major != 0 {
+		return major > 0
+	}
+	if minor != 115 {
+		return minor > 115
+	}
+	return patch >= 0
+}
+
+func codexHooksPathFromConfig(configPath string) string {
+	return filepath.Join(filepath.Dir(configPath), "hooks.json")
+}
+
 func mergeCodexConfig(existing string) string {
 	result := strings.TrimSpace(existing)
 	result = upsertTOMLAssignment(result, `(?ms)^\[features\]\n(?:[^\[]*\n)?`, "[features]\n", "shell_tool = false")
@@ -403,6 +486,67 @@ func mergeCodexConfig(existing string) string {
 		result += "\n"
 	}
 	return result
+}
+
+func mergeCodexNativeHooksConfig(existing string) string {
+	result := strings.TrimSpace(removeCodexIntegration(existing))
+	result = upsertTOMLAssignment(result, `(?ms)^\[features\]\n(?:[^\[]*\n)?`, "[features]\n", "codex_hooks = true")
+	if !strings.HasSuffix(result, "\n") {
+		result += "\n"
+	}
+	return result
+}
+
+func mergeCodexHooksJSON(existing []byte) ([]byte, error) {
+	var settings map[string]interface{}
+	if strings.TrimSpace(string(existing)) == "" {
+		settings = make(map[string]interface{})
+	} else if err := json.Unmarshal(existing, &settings); err != nil {
+		return nil, err
+	}
+
+	hooksObj, _ := settings["hooks"].(map[string]interface{})
+	if hooksObj == nil {
+		hooksObj = make(map[string]interface{})
+		settings["hooks"] = hooksObj
+	}
+
+	preToolUse, _ := extractPreToolUse(hooksObj)
+	hooksObj["PreToolUse"] = upsertCodexFuseHook(preToolUse)
+
+	out, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(out, '\n'), nil
+}
+
+func upsertCodexFuseHook(preToolUse []interface{}) []interface{} {
+	wanted := map[string]interface{}{
+		"type":          "command",
+		"command":       codexFuseHookCommand,
+		"timeout":       float64(300),
+		"statusMessage": "Fuse checking command",
+	}
+	for i, raw := range preToolUse {
+		entry, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		matcher, _ := entry["matcher"].(string)
+		if matcher != "Bash" {
+			continue
+		}
+		hooks, _ := extractHooksArray(entry)
+		filtered, _ := filterFuseHooks(hooks)
+		entry["hooks"] = append(filtered, wanted)
+		preToolUse[i] = entry
+		return preToolUse
+	}
+	return append(preToolUse, map[string]interface{}{
+		"matcher": "Bash",
+		"hooks":   []interface{}{wanted},
+	})
 }
 
 func upsertTOMLAssignment(existing, sectionPattern, sectionHeader, assignment string) string {
@@ -418,7 +562,8 @@ func upsertTOMLAssignment(existing, sectionPattern, sectionHeader, assignment st
 	start := loc[0]
 	sectionEnd := nextTOMLSectionBoundary(existing, loc[1])
 	section := existing[start:sectionEnd]
-	assignRe := regexp.MustCompile(`(?m)^shell_tool\s*=.*$`)
+	key := strings.TrimSpace(strings.SplitN(assignment, "=", 2)[0])
+	assignRe := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(key) + `\s*=.*$`)
 	if assignRe.MatchString(section) {
 		section = assignRe.ReplaceAllString(section, assignment)
 	} else {

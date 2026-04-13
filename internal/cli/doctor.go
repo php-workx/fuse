@@ -780,7 +780,36 @@ func checkCodexSecurityPosture() checkResult {
 		}
 	}
 
-	warnings := codexSecurityWarnings(string(data))
+	configText := string(data)
+	hooksPath := codexHooksPathFromConfig(configPath)
+	hooksData, hooksErr := os.ReadFile(hooksPath)
+	if hooksErr != nil && !os.IsNotExist(hooksErr) {
+		return checkResult{
+			name:   checkNameCodexSecurityPosture,
+			status: "WARN",
+			detail: fmt.Sprintf("cannot inspect Codex hooks: %v", hooksErr),
+		}
+	}
+
+	if codexNativeHooksEnabled(configText) {
+		warnings := codexNativeHookWarnings(configText, hooksData)
+		if len(warnings) == 0 {
+			return checkResult{
+				name:   checkNameCodexSecurityPosture,
+				status: "PASS",
+				detail: fmt.Sprintf("Codex native hook looks correct in %s", hooksPath),
+			}
+		}
+		return checkResult{
+			name:    checkNameCodexSecurityPosture,
+			status:  "WARN",
+			detail:  strings.Join(warnings, "; "),
+			fixHint: "fuse install codex",
+			fixFunc: installCodex,
+		}
+	}
+
+	warnings := codexSecurityWarnings(configText)
 	if len(warnings) > 0 {
 		return checkResult{
 			name:    checkNameCodexSecurityPosture,
