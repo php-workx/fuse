@@ -1,15 +1,15 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
+This project uses **tk** for task and ticket tracking.
 
 ## Quick Reference
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd sync               # Sync with git
+tk ready              # Find available work
+tk show <id>          # View ticket details
+tk start <id>         # Mark work in progress
+tk close <id>         # Complete work
+tk create "Title"     # Create a new ticket
 ```
 
 ## Non-Interactive Shell Commands
@@ -36,16 +36,15 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
-<!-- BEGIN BEADS INTEGRATION -->
-## Issue Tracking with bd (beads)
+## Issue Tracking with tk
 
-**IMPORTANT**: This project uses **bd (beads)** for ALL issue tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+**IMPORTANT**: This project uses **tk** for ALL task and ticket tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
 
-### Why bd?
+### Why tk?
 
-- Dependency-aware: Track blockers and relationships between issues
-- Version-controlled: Built on Dolt with cell-level merge
-- Agent-optimized: JSON output, ready work detection, discovered-from links
+- Dependency-aware: Track blockers and relationships between tickets
+- Plain markdown: Tickets are readable directly from `.tickets/`
+- Agent-optimized: Ready work detection, partial ID matching, and timestamped notes
 - Prevents duplicate tracking systems and confusion
 
 ### Quick Start
@@ -53,30 +52,30 @@ cp -rf source dest          # NOT: cp -r source dest
 **Check for ready work:**
 
 ```bash
-bd ready --json
+tk ready
 ```
 
-**Create new issues:**
+**Create new tickets:**
 
 ```bash
-bd create "Issue title" --description="Detailed context" -t bug|feature|task -p 0-4 --json
-bd create "Issue title" --description="What this issue is about" -p 1 --deps discovered-from:bd-123 --json
+tk create "Ticket title" -d "Detailed context" -t bug|feature|task|epic|chore -p 0-4
+tk create "Follow-up task" -d "What this issue is about"
 ```
 
-**Claim and update:**
+**Start and update:**
 
 ```bash
-bd update <id> --claim --json
-bd update bd-42 --priority 1 --json
+tk start <id>
+tk add-note <id> "Implementation note"
 ```
 
 **Complete work:**
 
 ```bash
-bd close bd-42 --reason "Completed" --json
+tk close <id>
 ```
 
-### Issue Types
+### Ticket Types
 
 - `bug` - Something broken
 - `feature` - New functionality
@@ -94,32 +93,22 @@ bd close bd-42 --reason "Completed" --json
 
 ### Workflow for AI Agents
 
-1. **Check ready work**: `bd ready` shows unblocked issues
-2. **Claim your task atomically**: `bd update <id> --claim`
+1. **Check ready work**: `tk ready` shows open tickets with dependencies resolved
+2. **Start your task**: `tk start <id>`
 3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create linked issue:
-   - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
-5. **Complete**: `bd close <id> --reason "Done"`
-
-### Auto-Sync
-
-bd automatically syncs with git:
-
-- Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
+4. **Discover new work?** Create a ticket with detailed context:
+   - `tk create "Found bug" -d "Details about what was found" -p 1`
+5. **Complete**: `tk close <id>`
 
 ### Important Rules
 
-- ✅ Use bd for ALL task tracking
-- ✅ Always use `--json` flag for programmatic use
-- ✅ Link discovered work with `discovered-from` dependencies
-- ✅ Check `bd ready` before asking "what should I work on?"
+- ✅ Use `tk` for ALL task and ticket tracking
+- ✅ Read live ticket state with `tk show`, `tk ready`, and `tk ls`
+- ✅ Add notes with `tk add-note` when useful context should survive sessions
+- ✅ Check `tk ready` before asking "what should I work on?"
 - ❌ Do NOT create markdown TODO lists
 - ❌ Do NOT use external issue trackers
 - ❌ Do NOT duplicate tracking systems
-
-For more details, see README.md and docs/QUICKSTART.md.
 
 ## Landing the Plane (Session Completion)
 
@@ -127,13 +116,12 @@ For more details, see README.md and docs/QUICKSTART.md.
 
 **MANDATORY WORKFLOW:**
 
-1. **File issues for remaining work** - Create issues for anything that needs follow-up
+1. **File tickets for remaining work** - Create tickets for anything that needs follow-up
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
 4. **PUSH TO REMOTE** - This is MANDATORY:
    ```bash
    git pull --rebase
-   bd sync
    git push
    git status  # MUST show "up to date with origin"
    ```
@@ -146,5 +134,3 @@ For more details, see README.md and docs/QUICKSTART.md.
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push
 - If push fails, resolve and retry until it succeeds
-
-<!-- END BEADS INTEGRATION -->

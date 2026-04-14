@@ -6,7 +6,7 @@
 
 **Architecture:** Keep `fuse` focused on local guardrails rather than turning it into a sandbox. Strengthen the product in three layers: installation-time host configuration, runtime mediation/trust checks, and diagnostic/audit visibility. Reuse the existing `install`, `doctor`, policy, and adapter seams rather than introducing a daemon or external service.
 
-**Tech Stack:** Go 1.24+, Cobra CLI, existing Claude `settings.json` merge logic, Codex `config.toml` merge logic, MCP proxy/runtime adapters, YAML config, golden tests, `go test`, `bd`
+**Tech Stack:** Go 1.24+, Cobra CLI, existing Claude `settings.json` merge logic, Codex `config.toml` merge logic, MCP proxy/runtime adapters, YAML config, golden tests, `go test`, `tk`
 
 ---
 
@@ -449,12 +449,12 @@ git commit -m "docs: publish hardened security guidance"
 3. Whether Codex config exposes enough structure to reliably detect all shell bypass paths.
 4. Which sensitive-path reads should be `CAUTION` versus `APPROVAL` to avoid making daily use annoying.
 
-## Beads Follow-Up
+## tk Follow-Up
 
-Create or update linked `bd` tasks before implementation begins:
+Create or update linked `tk` tickets before implementation begins:
 
 ```bash
-bd create "Add secure Claude install mode" --description "Merge recommended Claude security defaults into settings.json via fuse install claude --secure." -t task -p 1 --deps discovered-from:fu-u9o --json
-bd create "Add security posture diagnostics" --description "Teach fuse doctor to validate secure Claude/Codex settings and mediated MCP posture." -t task -p 1 --deps discovered-from:fu-u9o --json
-bd create "Protect sensitive native file tools" --description "Add narrow Claude native file-tool path protections for secret and config files." -t task -p 1 --deps discovered-from:fu-u9o --json
+tk create "Add secure Claude install mode" -d "Merge recommended Claude security defaults into settings.json via fuse install claude --secure." -t task -p 1
+tk create "Add security posture diagnostics" -d "Teach fuse doctor to validate secure Claude/Codex settings and mediated MCP posture." -t task -p 1
+tk create "Protect sensitive native file tools" -d "Add narrow Claude native file-tool path protections for secret and config files." -t task -p 1
 ```

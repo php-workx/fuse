@@ -16,7 +16,7 @@ coverage.html
 # Firebase
 firebase-debug.log
 
-# Dolt database files (added by bd init)
+# Local database files
 .dolt/
 *.db
 .env
