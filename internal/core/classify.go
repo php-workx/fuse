@@ -571,7 +571,11 @@ func applyURLInspection(sub *SubCommandResult, cmd, inlineBody string) {
 			sub.RuleID = ""
 		}
 	}
-	if d, r := InspectCommandURLs(cmd); d != "" {
+	cmdForURLInspection := cmd
+	if inlineBody != "" {
+		cmdForURLInspection = stripHeredocBodiesForURLInspection(cmd)
+	}
+	if d, r := InspectCommandURLs(cmdForURLInspection); d != "" {
 		escalate(d, r)
 	}
 	if inlineBody != "" {
@@ -580,11 +584,74 @@ func applyURLInspection(sub *SubCommandResult, cmd, inlineBody string) {
 			if line == "" {
 				continue
 			}
+			if !shouldInspectInlineURLLine(line) {
+				continue
+			}
 			if d, r := InspectCommandURLs(line); d != "" {
 				escalate(d, r)
 			}
 		}
 	}
+}
+
+var inlineActiveNetworkCallPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\burlopen\s*\(`),
+	regexp.MustCompile(`\brequests\.(?:request|get|post|put|patch|delete|head|options)\s*\(`),
+	regexp.MustCompile(`\bhttpx\.(?:request|get|post|put|patch|delete|head|options|stream)\s*\(`),
+}
+
+var heredocDelimiterPattern = regexp.MustCompile(`<<-?\s*(?:"([^"]+)"|'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))`)
+
+func stripHeredocBodiesForURLInspection(cmd string) string {
+	lines := strings.Split(cmd, "\n")
+	if len(lines) < 2 {
+		return cmd
+	}
+
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		out = append(out, line)
+		for _, delimiter := range heredocDelimiters(line) {
+			i++
+			for i < len(lines) && strings.TrimSpace(lines[i]) != delimiter {
+				i++
+			}
+			if i < len(lines) {
+				out = append(out, lines[i])
+			}
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+func heredocDelimiters(line string) []string {
+	matches := heredocDelimiterPattern.FindAllStringSubmatch(line, -1)
+	delimiters := make([]string, 0, len(matches))
+	for _, match := range matches {
+		for _, group := range match[1:] {
+			if group != "" {
+				delimiters = append(delimiters, group)
+				break
+			}
+		}
+	}
+	return delimiters
+}
+
+func shouldInspectInlineURLLine(line string) bool {
+	if !strings.Contains(line, "://") {
+		return false
+	}
+	if networkCommandBasenames[extractCmdBasename(line)] {
+		return true
+	}
+	for _, pattern := range inlineActiveNetworkCallPatterns {
+		if pattern.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 type commandClassificationResult struct {

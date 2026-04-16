@@ -872,6 +872,94 @@ func TestClassify_InlineBodyURLBlocked(t *testing.T) {
 	}
 }
 
+func TestClassify_PythonHeredocLoopbackLiteralsAreInert(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{
+			name: "python config literals",
+			command: "python - <<'PY'\n" +
+				"host = '127.0.0.1'\n" +
+				"base_url = 'http://localhost:8080'\n" +
+				"bind = '0.0.0.0'\n" +
+				"print(base_url)\n" +
+				"PY",
+		},
+		{
+			name: "uv run local ASGI client setup",
+			command: "uv run python - <<'PY'\n" +
+				"import httpx\n" +
+				"from app import app\n" +
+				"client = httpx.AsyncClient(app=app, base_url='http://127.0.0.1:8000')\n" +
+				"print(client)\n" +
+				"PY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if core.DecisionSeverity(result.Decision) >= core.DecisionSeverity(core.DecisionBlocked) {
+				t.Fatalf("got %s, want below BLOCKED (reason: %s, subresults: %#v)",
+					result.Decision, result.Reason, result.SubResults)
+			}
+		})
+	}
+}
+
+func TestClassify_ActiveLoopbackNetworkCommandsRemainBlocked(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{
+			name:    "curl loopback",
+			command: "curl http://127.0.0.1:8080",
+		},
+		{
+			name:    "curl non-canonical loopback",
+			command: "curl http://0x7f000001:8080",
+		},
+		{
+			name: "python urlopen loopback",
+			command: "python - <<'PY'\n" +
+				"import urllib.request\n" +
+				"urllib.request.urlopen('http://127.0.0.1:8080')\n" +
+				"PY",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != core.DecisionBlocked {
+				t.Fatalf("got %s, want BLOCKED (reason: %s)", result.Decision, result.Reason)
+			}
+		})
+	}
+}
+
 func TestClassify_PercentEncodedURLFailsClosed(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 	req := core.ShellRequest{
