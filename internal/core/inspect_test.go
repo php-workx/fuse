@@ -111,6 +111,72 @@ func TestInspectFile_DangerousShell(t *testing.T) {
 	}
 }
 
+func TestInspectFile_SignalReasonIncludesSpecificSignals(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "dangerous.sh")
+	content := []byte("#!/bin/sh\nrm -rf /tmp/demo\n")
+	if err := os.WriteFile(scriptPath, content, 0o755); err != nil {
+		t.Fatalf("failed to write script: %v", err)
+	}
+
+	result, err := InspectFile(scriptPath, DefaultMaxBytes)
+	if err != nil {
+		t.Fatalf("InspectFile returned error: %v", err)
+	}
+	if result.Decision != DecisionCaution {
+		t.Fatalf("decision got %s, want CAUTION", result.Decision)
+	}
+	if !strings.Contains(result.Reason, "destructive_fs") || !strings.Contains(result.Reason, "rm -rf") {
+		t.Fatalf("reason %q does not include specific signal category and match", result.Reason)
+	}
+}
+
+func TestClassify_LocalWrapperHelpWithSignalsStaysBelowApproval(t *testing.T) {
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "wrapper.sh")
+	content := []byte("#!/bin/sh\nrm -rf /tmp/generated\n")
+	if err := os.WriteFile(scriptPath, content, 0o755); err != nil {
+		t.Fatalf("failed to write script: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		command  string
+		expected Decision
+	}{
+		{
+			name:     "help invocation",
+			command:  "bash wrapper.sh --help",
+			expected: DecisionCaution,
+		},
+		{
+			name:     "mutating invocation",
+			command:  "bash wrapper.sh --write",
+			expected: DecisionCaution,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := Classify(ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        tmpDir,
+				Source:     "test",
+				SessionID:  "test-session",
+			}, nil)
+			if err != nil {
+				t.Fatalf("Classify returned error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("decision got %s, want %s (reason: %s)", result.Decision, tt.expected, result.Reason)
+			}
+			if !strings.Contains(result.Reason, "destructive_fs") {
+				t.Fatalf("reason %q does not include specific script signal", result.Reason)
+			}
+		})
+	}
+}
+
 func TestInspectFile_SafeJS(t *testing.T) {
 	path := filepath.Join(testdataDir(t), "safe_script.js")
 	result, err := InspectFile(path, DefaultMaxBytes)

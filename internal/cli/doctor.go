@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"os"
@@ -720,8 +721,36 @@ func checkFuseInPath() checkResult {
 	return checkResult{
 		name:   checkNameFuseInPath,
 		status: "PASS",
-		detail: fusePath,
+		detail: describeFuseBinary(fusePath),
 	}
+}
+
+func describeFuseBinary(path string) string {
+	return fmt.Sprintf("path: %s; version: %s", path, fuseBinaryVersion(path))
+}
+
+func fuseBinaryVersion(path string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// path comes from exec.LookPath("fuse") in checkFuseInPath; doctor reports
+	// the installed hook binary metadata and does not accept arbitrary command input.
+	output, err := exec.CommandContext(ctx, path, "version").CombinedOutput() // nosemgrep: dangerous-exec-command
+	if ctx.Err() == context.DeadlineExceeded {
+		return "unavailable (version command timed out)"
+	}
+	if err != nil {
+		trimmed := strings.TrimSpace(string(output))
+		if trimmed != "" {
+			return fmt.Sprintf("unavailable (%v: %s)", err, trimmed)
+		}
+		return fmt.Sprintf("unavailable (%v)", err)
+	}
+	trimmed := strings.TrimSpace(string(output))
+	if trimmed == "" {
+		return "unavailable (version command produced no output)"
+	}
+	return trimmed
 }
 
 // checkLiveClassification runs a test classification to verify the pipeline.

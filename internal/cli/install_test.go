@@ -371,9 +371,11 @@ func TestInstallClaudePreservesCurrentBehaviorByDefault(t *testing.T) {
 
 func TestInstallClaudePromptsForBalancedProfileAndWarnsWhenNoProvider(t *testing.T) {
 	tmpHome := t.TempDir()
+	binDir := t.TempDir()
+	fusePath := writeFuseVersionExecutable(t, binDir, "fuse 1.2.3 (install-test) built 2026-04-16")
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
-	t.Setenv("PATH", t.TempDir())
+	t.Setenv("PATH", binDir)
 
 	stdout, stderr, err := captureCLIOutput(t, func() error {
 		rootCmd.SetArgs([]string{"install", "claude"})
@@ -388,6 +390,8 @@ func TestInstallClaudePromptsForBalancedProfileAndWarnsWhenNoProvider(t *testing
 	for _, want := range []string{
 		"Pick a profile [1-3] (default: 1):",
 		"profile selected: balanced",
+		"Hook binary: path: " + fusePath,
+		"fuse 1.2.3 (install-test)",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
@@ -401,10 +405,12 @@ func TestInstallClaudePromptsForBalancedProfileAndWarnsWhenNoProvider(t *testing
 
 func TestInstallCodexDefaultsToRelaxedProfileWhenInputIsEmpty(t *testing.T) {
 	tmpHome := t.TempDir()
+	binDir := t.TempDir()
+	fusePath := writeFuseVersionExecutable(t, binDir, "fuse 2.3.4 (codex-install-test) built 2026-04-16")
 	t.Setenv("HOME", tmpHome)
 	t.Setenv("CODEX_HOME", filepath.Join(tmpHome, ".codex"))
 	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
-	t.Setenv("PATH", t.TempDir())
+	t.Setenv("PATH", binDir)
 
 	stdout, stderr, err := captureCLIOutput(t, func() error {
 		rootCmd.SetArgs([]string{"install", "codex"})
@@ -418,6 +424,11 @@ func TestInstallCodexDefaultsToRelaxedProfileWhenInputIsEmpty(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "profile selected: relaxed") {
 		t.Fatalf("expected relaxed selection output, got:\n%s", stdout)
+	}
+	for _, want := range []string{"Hook binary: path: " + fusePath, "fuse 2.3.4 (codex-install-test)"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
+		}
 	}
 	if stderr != "" {
 		t.Fatalf("expected no stderr for relaxed default, got %q", stderr)

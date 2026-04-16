@@ -468,6 +468,133 @@ func TestClassify_AuditMktempCleanupDowngradesVariablePathBlock(t *testing.T) {
 	}
 }
 
+func TestClassify_LeadingWorkspaceCDReadOnlyChainsAreSafe(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+	}{
+		{
+			name:     "git status after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && git status --short",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "read-only pipeline after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && nl -ba README.md | sed -n '1,40p'",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "chained read-only git commands after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && git log --oneline -5 && git status --short",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "write command after workspace cd remains cautious",
+			command:  "cd /Users/runger/workspaces/fuse && git add .",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "relative cd remains cautious",
+			command:  "cd relative/path && git status --short",
+			expected: core.DecisionCaution,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("got %s, want %s (reason: %s, subresults: %#v)",
+					result.Decision, tt.expected, result.Reason, result.SubResults)
+			}
+		})
+	}
+}
+
+func TestClassify_ReadOnlyInspectionCommandsAreSafe(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name            string
+		command         string
+		expected        core.Decision
+		disallowUnknown bool
+	}{
+		{
+			name:            "colgrep read-only search",
+			command:         `colgrep "query" -k 10`,
+			expected:        core.DecisionSafe,
+			disallowUnknown: true,
+		},
+		{
+			name:            "git grep read-only search",
+			command:         `git grep -n pattern -- src`,
+			expected:        core.DecisionSafe,
+			disallowUnknown: true,
+		},
+		{
+			name:            "tk show is read-only",
+			command:         `tk show fus-1234`,
+			expected:        core.DecisionSafe,
+			disallowUnknown: true,
+		},
+		{
+			name:     "tk close mutates ticket state",
+			command:  `tk close fus-1234`,
+			expected: core.DecisionCaution,
+		},
+		{
+			name:            "go tool linter version is read-only",
+			command:         `go tool -modfile=tools.mod golangci-lint version`,
+			expected:        core.DecisionSafe,
+			disallowUnknown: true,
+		},
+		{
+			name:     "timeout wrapped just test remains cautious",
+			command:  `timeout 900 just test`,
+			expected: core.DecisionCaution,
+		},
+		{
+			name:            "timeout wrapped tk show is read-only",
+			command:         `timeout 30 tk show fus-1234`,
+			expected:        core.DecisionSafe,
+			disallowUnknown: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("got %s, want %s (reason: %s, subresults: %#v)",
+					result.Decision, tt.expected, result.Reason, result.SubResults)
+			}
+			if tt.disallowUnknown && strings.Contains(result.Reason, "unknown command") {
+				t.Fatalf("got unknown fallback reason %q, want explicit safe rule", result.Reason)
+			}
+		})
+	}
+}
+
 func TestClassify_EmptyCommand(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
@@ -913,6 +1040,101 @@ func TestClassify_PythonHeredocLoopbackLiteralsAreInert(t *testing.T) {
 			if core.DecisionSeverity(result.Decision) >= core.DecisionSeverity(core.DecisionBlocked) {
 				t.Fatalf("got %s, want below BLOCKED (reason: %s, subresults: %#v)",
 					result.Decision, result.Reason, result.SubResults)
+			}
+		})
+	}
+}
+
+func TestClassify_PythonHeredocBodiesDriveDecision(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name          string
+		command       string
+		maxSeverity   core.Decision
+		minSeverity   core.Decision
+		wantFailClose bool
+	}{
+		{
+			name: "json analysis is below approval",
+			command: "python - <<'PY'\n" +
+				"import json, sys\n" +
+				"data = json.loads('{\"count\": 3}')\n" +
+				"print(data['count'])\n" +
+				"PY",
+			maxSeverity: core.DecisionCaution,
+		},
+		{
+			name: "python3 computed value is below approval",
+			command: "python3 - <<PY\n" +
+				"import math\n" +
+				"print(math.sqrt(16))\n" +
+				"PY",
+			maxSeverity: core.DecisionCaution,
+		},
+		{
+			name: "uv run source analysis is below approval",
+			command: "uv run python - <<'PY'\n" +
+				"from pathlib import Path\n" +
+				"print(Path('internal/core/classify.go').read_text().count('Classify'))\n" +
+				"PY",
+			maxSeverity: core.DecisionCaution,
+		},
+		{
+			name: "subprocess stays cautious",
+			command: "python - <<'PY'\n" +
+				"import subprocess\n" +
+				"subprocess.run(['rm', '-rf', '/tmp/demo'])\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "file write stays cautious",
+			command: "python - <<'PY'\n" +
+				"from pathlib import Path\n" +
+				"Path('generated.txt').write_text('changed')\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "secret file read stays cautious",
+			command: "uv run python - <<'PY'\n" +
+				"from pathlib import Path\n" +
+				"print(Path('.env').read_text())\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "malformed heredoc remains fail closed",
+			command: "python - <<'PY'\n" +
+				"print('unterminated')\n",
+			minSeverity:   core.DecisionApproval,
+			wantFailClose: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        testRepoRoot(t),
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if tt.maxSeverity != "" && core.DecisionSeverity(result.Decision) > core.DecisionSeverity(tt.maxSeverity) {
+				t.Fatalf("got %s, want at most %s (reason: %s, subresults: %#v)",
+					result.Decision, tt.maxSeverity, result.Reason, result.SubResults)
+			}
+			if tt.minSeverity != "" && core.DecisionSeverity(result.Decision) < core.DecisionSeverity(tt.minSeverity) {
+				t.Fatalf("got %s, want at least %s (reason: %s, subresults: %#v)",
+					result.Decision, tt.minSeverity, result.Reason, result.SubResults)
+			}
+			if result.FailClosed != tt.wantFailClose {
+				t.Fatalf("FailClosed got %v, want %v (decision: %s, reason: %s, subresults: %#v)",
+					result.FailClosed, tt.wantFailClose, result.Decision, result.Reason, result.SubResults)
 			}
 		})
 	}

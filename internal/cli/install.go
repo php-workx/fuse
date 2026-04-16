@@ -169,6 +169,7 @@ func installClaudeWithProfile(secure bool, profile string) error {
 	}
 
 	fmt.Printf("fuse hook installed in %s\n", settingsPath)
+	printHookBinaryInfo()
 	fmt.Println("Claude Code will now use fuse for command safety checks.")
 	return nil
 }
@@ -415,6 +416,7 @@ func installCodexWithProfile(profile string) error {
 		}
 
 		fmt.Printf("fuse Codex native hook installed in %s\n", hooksPath)
+		printHookBinaryInfo()
 		return nil
 	}
 
@@ -435,7 +437,17 @@ func installCodexWithProfile(profile string) error {
 	}
 
 	fmt.Printf("fuse Codex MCP server installed in %s\n", configPath)
+	printHookBinaryInfo()
 	return nil
+}
+
+func printHookBinaryInfo() {
+	fusePath, err := exec.LookPath("fuse")
+	if err != nil {
+		fmt.Println("Hook binary: fuse (not found in PATH; run `go install .` or install a release, then rerun `fuse doctor`)")
+		return
+	}
+	fmt.Println("Hook binary:", describeFuseBinary(fusePath))
 }
 
 func defaultDetectCodexNativeHooksSupport() bool {

@@ -3,6 +3,7 @@ package core
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -164,7 +165,28 @@ func inferSignalDecision(result *FileInspection, signals []inspect.Signal, trunc
 		return
 	}
 	result.Decision = inferDecisionFromSignals(signals)
-	result.Reason = "signals detected"
+	result.Reason = formatSignalReason(signals)
+}
+
+func formatSignalReason(signals []inspect.Signal) string {
+	const maxSignals = 3
+	parts := make([]string, 0, min(len(signals), maxSignals))
+	for i, signal := range signals {
+		if i >= maxSignals {
+			break
+		}
+		match := strings.TrimSpace(signal.Match)
+		if match == "" {
+			parts = append(parts, fmt.Sprintf("%s line %d", signal.Category, signal.Line))
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s line %d match %q", signal.Category, signal.Line, match))
+	}
+	reason := "signals detected: " + strings.Join(parts, "; ")
+	if len(signals) > maxSignals {
+		reason += fmt.Sprintf("; +%d more", len(signals)-maxSignals)
+	}
+	return reason
 }
 
 // inferDecisionFromSignals returns the decision based on the highest-severity

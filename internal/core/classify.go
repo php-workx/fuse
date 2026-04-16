@@ -891,6 +891,24 @@ var dangerousPythonInline = regexp.MustCompile(
 		`boto3|google\.cloud|azure\.)`,
 )
 
+var pythonHeredocCommandPattern = regexp.MustCompile(`\b(?:uv\s+run\s+)?python[23]?(?:\s+-[A-Za-z0-9]+)*\s+-\s+<<-?\s*['"]?\w+['"]?`)
+
+var dangerousPythonHeredocBody = regexp.MustCompile(
+	`(?i)\b(subprocess|os\s*\.\s*(system|exec|popen|spawn|remove|unlink|rmdir|rename|makedirs)|` +
+		`shutil\s*\.\s*(rmtree|move|copy|copyfile|copytree)|` +
+		`(?:Path|pathlib\s*\.\s*Path)\s*\([^)]*\)\s*\.\s*(unlink|rmdir|rename|replace|write_text|write_bytes|mkdir)|` +
+		`open\s*\([^)]*,\s*['"][wa+x]|` +
+		`requests\s*\.|urllib\s*\.|httpx\s*\.|http\.client|socket\s*\.|` +
+		`__import__|eval\s*\(|exec\s*\(|compile\s*\(|getattr\s*\(|` +
+		`ctypes|cffi|pty\s*\.\s*spawn|multiprocessing|` +
+		`pip\s*\.\s*main|\bpip\s+install\b|setuptools|pkg_resources\s*\.\s*require|` +
+		`boto3|google\.cloud|azure\.)`,
+)
+
+var pythonSecretReadPattern = regexp.MustCompile(
+	`(?i)(?:open|Path|pathlib\s*\.\s*Path)\s*\(\s*['"][^'"]*(?:\.env|id_rsa|id_ed25519|private[_-]?key|secret|token|credential)[^'"]*['"]`,
+)
+
 // Safe Python modules commonly used by agents for read-only introspection.
 // Excludes os.path (allows os.remove via import os.path; os.remove),
 // pip/setuptools/pkg_resources (can install/remove packages).
@@ -980,6 +998,26 @@ func isSafePythonInline(cmd string) bool {
 		return false
 	}
 	return !dangerousPythonInline.MatchString(cmd)
+}
+
+func isPythonHeredocCommand(cmd string) bool {
+	return pythonHeredocCommandPattern.MatchString(cmd)
+}
+
+func classifyPythonHeredocBody(body string) extractedSubCommandResult {
+	if pythonSecretReadPattern.MatchString(body) {
+		return extractedSubCommandResult{
+			decision: DecisionCaution,
+			reason:   "Python heredoc reads secret-like file",
+		}
+	}
+	if dangerousPythonHeredocBody.MatchString(body) {
+		return extractedSubCommandResult{
+			decision: DecisionCaution,
+			reason:   "Python heredoc contains side-effect or network operation",
+		}
+	}
+	return extractedSubCommandResult{decision: DecisionSafe, reason: "Python heredoc body is read-only"}
 }
 
 // escalateDecision applies the sudo/doas escalation modifier.
@@ -1101,7 +1139,11 @@ func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd st
 	}
 
 	heredocBody, heredocComplete := extractHeredocBody(cmd)
-	cmdSubsts, cmdSubstComplete := extractCommandSubstitutions(cmd)
+	cmdForSubstitutionExtraction := cmd
+	if heredocBody != "" {
+		cmdForSubstitutionExtraction = stripHeredocBodiesForURLInspection(cmd)
+	}
+	cmdSubsts, cmdSubstComplete := extractCommandSubstitutions(cmdForSubstitutionExtraction)
 
 	if heredocBody == "" && len(cmdSubsts) == 0 {
 		return inlineBodiesResult{complete: heredocComplete && cmdSubstComplete}
@@ -1110,7 +1152,11 @@ func classifyInlineBodiesRecursive(cmd string, evaluator PolicyEvaluator, cwd st
 	acc := &inlineAccumulator{complete: heredocComplete && cmdSubstComplete}
 
 	if heredocBody != "" {
-		acc.classifyHeredocBody(heredocBody, evaluator, cwd, depth)
+		if isPythonHeredocCommand(cmd) {
+			acc.applyResult(classifyPythonHeredocBody(heredocBody), "inline Python heredoc")
+		} else {
+			acc.classifyHeredocBody(heredocBody, evaluator, cwd, depth)
+		}
 	}
 	for _, subst := range cmdSubsts {
 		acc.classifyExtractedCmd(subst, "inline $()", evaluator, cwd, depth)

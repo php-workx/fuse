@@ -914,6 +914,43 @@ func TestCheckFuseInPath_WarnWhenNotInPath(t *testing.T) {
 	}
 }
 
+func TestCheckFuseInPath_ReportsPathAndVersion(t *testing.T) {
+	binDir := t.TempDir()
+	fusePath := writeFuseVersionExecutable(t, binDir, "fuse 9.9.9 (abc123) built 2026-04-16")
+	t.Setenv("PATH", binDir)
+
+	got := checkFuseInPath()
+	if got.status != "PASS" {
+		t.Fatalf("checkFuseInPath() status = %q, want PASS", got.status)
+	}
+	for _, want := range []string{fusePath, "fuse 9.9.9", "abc123"} {
+		if !strings.Contains(got.detail, want) {
+			t.Fatalf("detail %q missing %q", got.detail, want)
+		}
+	}
+}
+
+func writeFuseVersionExecutable(t *testing.T, dir, version string) string {
+	t.Helper()
+
+	name := "fuse"
+	content := []byte("#!/bin/sh\nif [ \"$1\" = \"version\" ]; then echo \"" + version + "\"; exit 0; fi\nexit 0\n")
+	if runtime.GOOS == "windows" {
+		name += ".bat"
+		content = []byte("@echo off\r\nif \"%1\"==\"version\" echo " + version + "\r\nexit /b 0\r\n")
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, content, 0o755); err != nil {
+		t.Fatalf("write fuse executable: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(path, 0o755); err != nil {
+			t.Fatalf("chmod fuse executable: %v", err)
+		}
+	}
+	return path
+}
+
 func TestCheckApprovalTerminalTrust_WarnsInCI(t *testing.T) {
 	t.Setenv("CI", "true")
 	t.Setenv("SSH_CONNECTION", "")
