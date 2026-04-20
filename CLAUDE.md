@@ -60,7 +60,7 @@ just check          # Full gate including SonarQube
 ```bash
 just test           # Tests with race detector + coverage report
 just build          # Build binary to bin/fuse
-just format         # Auto-fix formatting (when `just fmt` fails)
+just format         # Auto-fix formatting (when `just format-check` fails)
 just lint           # golangci-lint
 just vuln           # govulncheck
 just budgets        # Enforce suppression budgets (max 6 //nolint, 0 #nosec)
@@ -126,7 +126,7 @@ GitHub Actions (`.github/workflows/ci.yml`) with three parallel jobs:
 - **Formatter:** gofumpt (stricter than gofmt)
 - **Linter:** golangci-lint v2 (config in `.golangci.yml`)
 - **Suppression budgets:** Max 6 `//nolint` directives, 0 `#nosec` — enforced in CI
-- **Security scanning:** semgrep (SAST), gitleaks (secrets), govulncheck (dependencies)
+- **Security scanning:** semgrep (SAST), betterleaks (secrets), govulncheck (dependencies)
 - **Pre-commit hooks:** Configured via `scripts/` directory
 
 ## Key Conventions

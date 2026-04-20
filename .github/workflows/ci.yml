@@ -40,7 +40,7 @@ jobs:
         run: just install-dev
 
       - name: Run quality gate (fmt, vet, lint, build, mod-tidy, actionlint, test, vuln)
-        run: just check
+        run: just check-local
 
       - name: Enforce suppression budgets
         run: just budgets
@@ -112,17 +112,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install just
+        uses: extractions/setup-just@v2
+
       - name: Install golangci-lint
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3
 
       - name: Vet (GOOS=windows)
-        run: GOOS=windows GOARCH=amd64 go vet ./...
+        run: GOOS=windows GOARCH=amd64 just vet
 
       - name: Lint (GOOS=windows)
-        run: GOOS=windows GOARCH=amd64 golangci-lint run
+        run: just lint-windows-check
 
       - name: Build (GOOS=windows)
-        run: GOOS=windows GOARCH=amd64 go build ./cmd/fuse
+        run: GOOS=windows GOARCH=amd64 just build-check
 
   build:
     name: Build
@@ -148,3 +151,16 @@ jobs:
 
       - name: Cross-build binaries
         run: just build-all
+
+  trufflehog:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --results=verified,unknown

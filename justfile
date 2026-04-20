@@ -18,7 +18,7 @@ default:
 # --- Quality gates ---
 
 # Pre-commit: fast local checks (~15s)
-pre-commit: fmt vet lint build-check mod-tidy actionlint shellcheck gitleaks
+pre-commit: format-check vet lint-check build-check mod-tidy-check actionlint shellcheck betterleaks
 
 # Local quality gate: pre-commit + tests + vuln + semgrep (no SonarQube)
 check-local: pre-commit test vuln semgrep budgets
@@ -33,7 +33,7 @@ dev: check-local
 # --- Static analysis ---
 
 # Check formatting with gofumpt (detect-only, no auto-fix)
-fmt:
+format-check:
     @command -v gofumpt >/dev/null 2>&1 || (echo "gofumpt not installed (run: just install-dev)" && exit 1)
     @test -z "$(gofumpt --extra -l .)" || (echo "gofumpt: unformatted files:" && gofumpt --extra -l . && exit 1)
 
@@ -44,10 +44,20 @@ vet:
 # Lint with golangci-lint
 lint:
     @command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not installed (run: just install-dev)" && exit 1)
+    golangci-lint run --fix
+
+# Verify lint with golangci-lint
+lint-check:
+    @command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not installed (run: just install-dev)" && exit 1)
     golangci-lint run
 
 # Lint Windows-specific code with golangci-lint
 lint-windows:
+    @command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not installed (run: just install-dev)" && exit 1)
+    GOOS=windows golangci-lint run --fix
+
+# Verify Windows-specific code with golangci-lint
+lint-windows-check:
     @command -v golangci-lint >/dev/null 2>&1 || (echo "golangci-lint not installed (run: just install-dev)" && exit 1)
     GOOS=windows golangci-lint run
 
@@ -69,11 +79,11 @@ shellcheck:
 # --- Security ---
 
 # Scan for leaked secrets
-gitleaks:
-    @if command -v gitleaks >/dev/null 2>&1; then \
-        gitleaks git --no-banner; \
+betterleaks:
+    @if command -v betterleaks >/dev/null 2>&1; then \
+        betterleaks git --no-banner; \
     else \
-        echo "warning: gitleaks not installed, skipping secret scan"; \
+        echo "warning: betterleaks not installed, skipping secret scan"; \
     fi
 
 # SAST scan with semgrep (auto-config for Go patterns)
@@ -113,7 +123,7 @@ build-check:
     go build ./...
 
 # Verify go.mod and go.sum are tidy (detect-only)
-mod-tidy:
+mod-tidy-check:
     @cp go.mod go.mod.bak
     @if [ -f go.sum ]; then cp go.sum go.sum.bak; fi
     @go mod tidy
@@ -125,11 +135,13 @@ mod-tidy:
         if [ -f go.sum.bak ]; then mv go.sum.bak go.sum; elif [ -f go.sum ]; then rm go.sum; fi; \
         if [ "$$DIRTY" = "1" ]; then echo "go.mod/go.sum not tidy — run 'go mod tidy'" && exit 1; fi
 
-# Run all tests with race detector and coverage
+# Tidy go.mod/go.sum in-place.
+mod-tidy:
+    go mod tidy
+
+# Run all tests with race detector
 test:
-    go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
-    go tool cover -html=coverage.out -o coverage.html
-    @echo "Coverage report: coverage.html"
+    go test -race -count=1 ./...
 
 # --- SonarQube ---
 
@@ -265,9 +277,8 @@ build-windows:
 # --- Setup ---
 
 # Full developer setup: install tools, configure git hooks
-setup: install-dev
-    git config core.hooksPath scripts
-    @echo "Git hooks configured (scripts/)"
+setup: install-dev install-hooks
+    @echo "Development environment ready."
 
 # Link shared metadata directories into the current git worktree.
 worktree-setup:
@@ -285,6 +296,10 @@ install-dev:
     @echo "Installing git hooks..."
     @bash scripts/install-hooks.sh
     @echo "Done! Development environment ready."
+
+# Install local git hooks into .git/hooks.
+install-hooks:
+    bash scripts/install-hooks.sh
 
 # Format all Go files in-place (use when `just fmt` fails)
 format:

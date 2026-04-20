@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Pre-push: local quality gate — excludes SonarQube, which remains a CI/manual gate.
-# Install: git config core.hooksPath .githooks  OR  just install-dev
+# Pre-push: local quality gate excluding SonarQube.
+# Install: just install-hooks
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/go/bin:$HOME/.cargo/bin:$PATH"
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
 
-just check-local
+exec just check-local
