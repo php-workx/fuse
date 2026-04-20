@@ -442,12 +442,26 @@ func installCodexWithProfile(profile string) error {
 }
 
 func printHookBinaryInfo() {
-	fusePath, err := exec.LookPath("fuse")
+	status, err := resolveHookBinaryStatus()
 	if err != nil {
 		fmt.Println("Hook binary: fuse (not found in PATH; run `go install .` or install a release, then rerun `fuse doctor`)")
 		return
 	}
-	fmt.Println("Hook binary:", describeFuseBinary(fusePath))
+	fmt.Println("Hook binary:", describeFuseBinary(status.HookPath))
+
+	// Same file or same version: hooks will run the current build. Nothing
+	// more to report.
+	if status.PathsMatch || status.VersionsMatch {
+		return
+	}
+	// Without build metadata we cannot claim a mismatch; a `go install`
+	// without ldflags also leaves Version="dev" on the installed binary,
+	// so a version-string comparison would produce false positives.
+	if !status.VersionKnown {
+		return
+	}
+	fmt.Printf("WARNING: hook binary appears stale or mismatched with current build (%s).\n", status.SelfVersion)
+	fmt.Println("Reinstall fuse (e.g. `go install ./cmd/fuse` or download the latest release) so the hook uses the current build.")
 }
 
 func defaultDetectCodexNativeHooksSupport() bool {

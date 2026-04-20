@@ -391,11 +391,17 @@ func TestInstallClaudePromptsForBalancedProfileAndWarnsWhenNoProvider(t *testing
 		"Pick a profile [1-3] (default: 1):",
 		"profile selected: balanced",
 		"Hook binary: path: " + fusePath,
-		"fuse 1.2.3 (install-test)",
+		// PATH fuse is a shell fixture; doctor must surface it as
+		// unverified rather than executing it to read a version.
+		"unverified",
+		"not executed",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
 		}
+	}
+	if strings.Contains(stdout, "fuse 1.2.3") || strings.Contains(stdout, "install-test") {
+		t.Fatalf("stdout must not leak unexecuted PATH binary's claimed version, got:\n%s", stdout)
 	}
 	if !strings.Contains(stderr, "judge provider") {
 		t.Fatalf("expected stderr warning about missing judge provider, got:\n%s", stderr)
@@ -425,10 +431,19 @@ func TestInstallCodexDefaultsToRelaxedProfileWhenInputIsEmpty(t *testing.T) {
 	if !strings.Contains(stdout, "profile selected: relaxed") {
 		t.Fatalf("expected relaxed selection output, got:\n%s", stdout)
 	}
-	for _, want := range []string{"Hook binary: path: " + fusePath, "fuse 2.3.4 (codex-install-test)"} {
+	for _, want := range []string{
+		"Hook binary: path: " + fusePath,
+		// PATH fuse is a shell fixture; doctor must surface it as
+		// unverified rather than executing it to read a version.
+		"unverified",
+		"not executed",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
 		}
+	}
+	if strings.Contains(stdout, "fuse 2.3.4") || strings.Contains(stdout, "codex-install-test") {
+		t.Fatalf("stdout must not leak unexecuted PATH binary's claimed version, got:\n%s", stdout)
 	}
 	if stderr != "" {
 		t.Fatalf("expected no stderr for relaxed default, got %q", stderr)
@@ -599,6 +614,92 @@ func claudeMatchersFromHooks(t *testing.T, preToolUse []interface{}) []string {
 	}
 	sort.Strings(matchers)
 	return matchers
+}
+
+func TestInstallClaudeWarnsWhenHookBinaryIsStale(t *testing.T) {
+	// Simulate the case fus-dv6k described: the user rebuilt fuse but the
+	// stale binary is still on PATH. The install command must surface that
+	// the hook will invoke the old binary so the user reinstalls rather
+	// than running silently with stale policy.
+	withBuildMetadata(t, "1.4.0", "fresh-commit", "2026-04-18")
+
+	tmpHome := t.TempDir()
+	binDir := t.TempDir()
+	writeFuseVersionExecutable(t, binDir, "fuse 1.3.0 (stale-commit) built 2026-04-01")
+	t.Setenv("HOME", tmpHome)
+	t.Setenv("FUSE_HOME", filepath.Join(tmpHome, ".fuse"))
+	t.Setenv("PATH", binDir)
+
+	if err := installClaude(false); err != nil {
+		t.Fatalf("installClaude(false): %v", err)
+	}
+}
+
+func TestPrintHookBinaryInfo_WarnsWhenHookBinaryIsStale(t *testing.T) {
+	// Current build metadata is known and the PATH fuse is an untrusted
+	// third-party file (different bytes from os.Executable). doctor /
+	// install must flag the mismatch from static metadata alone without
+	// executing the PATH binary to read its version string.
+	withBuildMetadata(t, "1.4.0", "fresh-commit", "2026-04-18")
+
+	binDir := t.TempDir()
+	fusePath := writeFuseVersionExecutable(t, binDir, "fuse 1.3.0 (stale-commit) built 2026-04-01")
+	t.Setenv("PATH", binDir)
+
+	stdout, _, err := captureCLIOutput(t, func() error {
+		printHookBinaryInfo()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("captureCLIOutput: %v", err)
+	}
+	for _, want := range []string{
+		"Hook binary: path: " + fusePath,
+		"unverified",
+		"not executed",
+		"WARNING",
+		"stale or mismatched",
+		"fuse 1.4.0 (fresh-commit)",
+		"Reinstall fuse",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
+		}
+	}
+	// The PATH script's advertised version must not leak — we did not run it.
+	for _, forbidden := range []string{"fuse 1.3.0", "stale-commit"} {
+		if strings.Contains(stdout, forbidden) {
+			t.Fatalf("stdout must not leak unexecuted PATH binary's %q, got:\n%s", forbidden, stdout)
+		}
+	}
+}
+
+func TestPrintHookBinaryInfo_NoWarningWhenHookBinaryMatches(t *testing.T) {
+	// After reinstalling from current source the hook binary on PATH is the
+	// same on-disk artifact as the running process (identical SHA-256). No
+	// stale warning should be printed — emitting one would train users to
+	// ignore real stale-binary alerts.
+	withBuildMetadata(t, "1.4.0", "matching-commit", "2026-04-18")
+
+	fusePath := stageSelfAsFuseInPath(t)
+
+	stdout, _, err := captureCLIOutput(t, func() error {
+		printHookBinaryInfo()
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("captureCLIOutput: %v", err)
+	}
+	for _, want := range []string{"Hook binary: path: " + fusePath, "fuse 1.4.0 (matching-commit)"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
+		}
+	}
+	for _, unwanted := range []string{"WARNING", "stale", "Reinstall fuse", "unverified"} {
+		if strings.Contains(stdout, unwanted) {
+			t.Fatalf("unexpected %q in stdout:\n%s", unwanted, stdout)
+		}
+	}
 }
 
 func assertProfileAwareConfigScaffold(t *testing.T, configPath, wantProfile string) {

@@ -1,4 +1,4 @@
-# gitleaks configuration for fuse
+# betterleaks configuration for fuse
 # Extend the bundled rules — only add repo-specific allowlists.
 [extend]
   useDefault = true

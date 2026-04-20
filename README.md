@@ -71,10 +71,12 @@ echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | fuse hook evalua
 
 # Integrate with your agent
 fuse install claude    # or: fuse install codex
-fuse doctor            # verify the setup
+fuse doctor            # verify the setup (prints hook binary path + version;
+                       # warns if the binary on PATH is stale)
 ```
 
-See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full walkthrough.
+See [docs/QUICKSTART.md](docs/QUICKSTART.md) for the full walkthrough, including
+how to [recognize and fix a stale hook binary](docs/QUICKSTART.md#detecting-a-stale-hook-binary).
 
 ## What fuse is
 
@@ -126,6 +128,30 @@ fuse enable
 
 > `fuse uninstall` removes integrations and optionally `~/.fuse/`. It does not
 > remove the binary itself. To fully remove: `fuse uninstall --purge && rm $(which fuse)`
+
+## Updating
+
+Agent hooks invoke the `fuse` binary resolved from `PATH`, so to pick up new
+classification rules or bug fixes you must reinstall the binary — restarting
+your agent is not enough.
+
+```bash
+# From source
+go install github.com/php-workx/fuse/cmd/fuse@latest
+
+# Homebrew
+brew upgrade php-workx/tap/fuse
+
+# Verify the hook will run the new build
+fuse doctor
+```
+
+`fuse doctor` reports the hook binary path and version and warns with
+`[ WARN ] fuse binary in PATH` when the `PATH` binary drifts from the build
+you ran `doctor` with. The same warning is emitted by `fuse install claude` and
+`fuse install codex`. See
+[docs/QUICKSTART.md](docs/QUICKSTART.md#detecting-a-stale-hook-binary) for the
+full output and fix workflow.
 
 ## Why fuse?
 

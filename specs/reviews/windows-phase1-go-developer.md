@@ -210,14 +210,14 @@ The plan says to add `windows-latest` to the quality gate OS matrix. The current
 Converting `check` to a matrix (`ubuntu-latest` + `windows-latest`) means every step runs on both OSes. But several steps will fail on Windows:
 - `semgrep` -- not supported on Windows
 - `shellcheck` -- may not be available (the current recipe handles this with `command -v` but `find scripts` may behave differently)
-- `gitleaks` -- may be slow or unavailable
+- `betterleaks` -- may be slow or unavailable
 - `actionlint` -- should work
 - `golangci-lint` -- needs Windows-compatible cache paths
 - `sonar` -- skipped already (local only, not in CI)
 - Coverage upload -- should work
 
 **Severity:** WARN
-**Recommendation:** Do NOT add Windows to the existing `check` job matrix. Instead, create a dedicated `windows-check` job with a reduced scope: `go build ./...`, `go vet ./...`, `go test ./... -race`, and optionally `golangci-lint`. Skip semgrep, shellcheck, gitleaks, budgets (which use bash-specific syntax). This is cleaner and avoids littering the existing job with `if: runner.os != 'Windows'` conditionals.
+**Recommendation:** Do NOT add Windows to the existing `check` job matrix. Instead, create a dedicated `windows-check` job with a reduced scope: `go build ./...`, `go vet ./...`, `go test ./... -race`, and optionally `golangci-lint`. Skip semgrep, shellcheck, betterleaks, budgets (which use bash-specific syntax). This is cleaner and avoids littering the existing job with `if: runner.os != 'Windows'` conditionals.
 
 ---
 
@@ -350,6 +350,6 @@ The plan does not mention `integration_test.go` at the repo root. If it runs she
 
 3. **Empty `trustedPath()` on Windows reaching production before Phase 2 (LOW probability, HIGH severity).** If any code path calls `BuildChildEnv` on Windows in a non-stubbed context (e.g., the MCP proxy, which uses `buildProxyEnv` -- a different function), the empty PATH could cause failures. Current inspection shows `BuildChildEnv` is only called from `executeShellCommand` and `executeCapturedShellCommandWithStdin`, both of which are stubbed. But future changes could add a call. Mitigation: return a real Windows PATH now.
 
-4. **CI Windows job hitting unexpected tooling failures (HIGH probability, LOW severity).** golangci-lint, semgrep, shellcheck, and gitleaks all have Windows-specific quirks. The plan handwaves this with "may need cache path adjustment." In practice, the first CI run will likely fail on tooling setup, not code compilation. Mitigation: create a minimal Windows CI job (build + vet + test only) and add tooling incrementally.
+4. **CI Windows job hitting unexpected tooling failures (HIGH probability, LOW severity).** golangci-lint, semgrep, shellcheck, and betterleaks all have Windows-specific quirks. The plan handwaves this with "may need cache path adjustment." In practice, the first CI run will likely fail on tooling setup, not code compilation. Mitigation: create a minimal Windows CI job (build + vet + test only) and add tooling incrementally.
 
 5. **GoReleaser v2 syntax mismatch (MEDIUM probability, LOW severity).** The proposed `format_overrides` YAML may not match the exact GoReleaser v2 schema. Mitigation: run `goreleaser check` locally before merging.

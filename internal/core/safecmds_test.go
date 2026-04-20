@@ -823,3 +823,125 @@ func TestIsConditionallySafe_ServiceAndRegistryQueries(t *testing.T) {
 		})
 	}
 }
+
+// TestIsGitSubcommandReadOnly locks in the explicit read-only classification
+// for `git grep`, `git blame`, and other inspection subcommands. Without this
+// direct coverage the classifier's SAFE decision could come from the default
+// unknown-command fallback rather than from an allowlisted rule.
+func TestIsGitSubcommandReadOnly(t *testing.T) {
+	tests := []struct {
+		name     string
+		sub      string
+		args     []string
+		wantSafe bool
+	}{
+		// Unconditionally safe subcommands — argument-independent.
+		{"git grep", "grep", []string{"-n", "pattern", "--", "src"}, true},
+		{"git blame", "blame", []string{"README.md"}, true},
+		{"git status", "status", nil, true},
+		{"git log", "log", []string{"--oneline", "-5"}, true},
+		{"git diff", "diff", []string{"HEAD~1"}, true},
+		{"git show", "show", []string{"HEAD"}, true},
+		{"git rev-parse", "rev-parse", []string{"HEAD"}, true},
+		{"git describe", "describe", []string{"--tags"}, true},
+		{"git ls-files", "ls-files", nil, true},
+		{"git ls-tree", "ls-tree", []string{"HEAD"}, true},
+		{"git shortlog", "shortlog", []string{"-sn"}, true},
+		{"git fetch", "fetch", []string{"origin"}, true},
+
+		// Conditionally safe subcommands — argument-dependent.
+		{"git checkout -b safe", "checkout", []string{"-b", "feat"}, true},
+		{"git checkout branch unsafe", "checkout", []string{"main"}, false},
+		{"git branch list safe", "branch", []string{"-a"}, true},
+		{"git branch -D unsafe", "branch", []string{"-D", "old"}, false},
+		{"git restore --staged safe", "restore", []string{"--staged", "README.md"}, true},
+		{"git restore worktree unsafe", "restore", []string{"--staged", "--worktree", "README.md"}, false},
+
+		// Non-allowlisted mutating subcommands should not be read-only.
+		{"git push", "push", []string{"origin", "main"}, false},
+		{"git commit", "commit", []string{"-m", "msg"}, false},
+		{"git add", "add", []string{"."}, false},
+		{"git reset", "reset", []string{"--hard", "HEAD~1"}, false},
+
+		// Defensive: empty subcommand must not match anything.
+		{"empty sub", "", nil, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsGitSubcommandReadOnly(tt.sub, tt.args)
+			if got != tt.wantSafe {
+				t.Errorf("IsGitSubcommandReadOnly(%q, %v) = %v, want %v",
+					tt.sub, tt.args, got, tt.wantSafe)
+			}
+		})
+	}
+}
+
+// TestIsGoToolReportSafe pins down the `go tool` report-only allowlist. The
+// classifier relies on this helper to classify `go tool … version|--help` as
+// SAFE via an explicit rule rather than the default-safe fallback.
+func TestIsGoToolReportSafe(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantSafe bool
+	}{
+		{"bare version", []string{"version"}, true},
+		{"long version flag", []string{"--version"}, true},
+		{"short version flag", []string{"-version"}, true},
+		{"help subcommand", []string{"help"}, true},
+		{"long help flag", []string{"--help"}, true},
+		{"short help flag", []string{"-h"}, true},
+		{"wrapper flag then version", []string{"-modfile=tools.mod", "golangci-lint", "version"}, true},
+		{"wrapper flag then help", []string{"-modfile=tools.mod", "golangci-lint", "--help"}, true},
+		// Negative: anything that isn't a pure version/help reporter must be rejected.
+		{"empty args", nil, false},
+		{"run invocation", []string{"golangci-lint", "run"}, false},
+		{"version not last", []string{"version", "run"}, false},
+		{"arbitrary tool", []string{"staticcheck", "./..."}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsGoToolReportSafe(tt.args)
+			if got != tt.wantSafe {
+				t.Errorf("IsGoToolReportSafe(%v) = %v, want %v", tt.args, got, tt.wantSafe)
+			}
+		})
+	}
+}
+
+// TestIsTimeoutWrapped verifies the token-shape check that the classifier
+// relies on to recognize `timeout <duration> <cmd …>` wrappers. The helper
+// does not classify the inner command — it only confirms the wrapper form.
+func TestIsTimeoutWrapped(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     string
+		wantHit bool
+	}{
+		{"timeout with duration and cmd", "timeout 30 tk show fus-1234", true},
+		{"timeout with just wrapper", "timeout 900 just test", true},
+		{"timeout with -s flag and duration", "timeout -s TERM 30 go test ./...", true},
+		{"timeout with -k flag and duration", "timeout -k 5s 30s go test ./...", true},
+		{"timeout with combined flag", "timeout --preserve-status 30 go test ./...", true},
+		{"timeout with -- before cmd", "timeout 30 -- go test ./...", true},
+		{"absolute path timeout binary", "/usr/bin/timeout 30 tk show fus-1234", true},
+
+		// Negative cases.
+		{"plain go test has no timeout wrapper", "go test ./...", false},
+		{"timeout alone is not a wrapper", "timeout", false},
+		{"timeout without inner cmd", "timeout 30", false},
+		{"empty command is not a wrapper", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsTimeoutWrapped(tt.cmd)
+			if got != tt.wantHit {
+				t.Errorf("IsTimeoutWrapped(%q) = %v, want %v", tt.cmd, got, tt.wantHit)
+			}
+		})
+	}
+}

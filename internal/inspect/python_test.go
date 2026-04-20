@@ -135,6 +135,51 @@ func TestScanPython_SpecificPatterns(t *testing.T) {
 		{"__import__", `mod = __import__('os')`, "dynamic_import"},
 		{"importlib.import_module", `importlib.import_module('os')`, "dynamic_import"},
 		{"compile with exec", `code = compile("x=1", "<string>", "exec")`, "dynamic_exec"},
+
+		// Network import aliases: guard alias/import coverage gap where
+		// "from urllib.request import urlopen" or "import httpx" surfaces
+		// only a generic inline CAUTION instead of a network-scoped signal.
+		{"import urllib", `import urllib.request`, "network_io"},
+		{"from urllib import", `from urllib.request import urlopen`, "network_io"},
+		{"import http.client", `import http.client`, "network_io"},
+		{"import socket", `import socket`, "network_io"},
+		{"import requests", `import requests`, "network_io"},
+		{"import httpx", `import httpx`, "network_io"},
+
+		// Network call primitives.
+		{"urlopen call", `urlopen("https://example.com/")`, "network_io"},
+		{"urllib.request.urlopen", `urllib.request.urlopen("https://example.com/")`, "network_io"},
+		{"requests.get", `requests.get("https://example.com/")`, "network_io"},
+		{"httpx.post", `httpx.post("https://example.com/", json={})`, "network_io"},
+		{"httpx.AsyncClient", `async with httpx.AsyncClient() as client:`, "network_io"},
+		{"socket.socket", `s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)`, "network_io"},
+		{"http.client.HTTPSConnection", `conn = http.client.HTTPSConnection("example.com")`, "network_io"},
+
+		// Write-mode opens and pathlib.Path write/delete — previously only
+		// surfaced the generic inline marker when aliased through pathlib.
+		{"open write mode", `open("out.txt", "w")`, "destructive_fs"},
+		{"open append mode", `open("out.txt", "a")`, "destructive_fs"},
+		{"open exclusive mode", `open("out.txt", "x")`, "destructive_fs"},
+		{"Path write_text", `Path("out.txt").write_text("data")`, "destructive_fs"},
+		{"Path write_bytes", `Path("out.bin").write_bytes(b"data")`, "destructive_fs"},
+		{"Path mkdir", `Path("/tmp/new").mkdir(parents=True)`, "destructive_fs"},
+		{"Path unlink", `Path("/tmp/file").unlink()`, "destructive_fs"},
+		{"Path rename", `Path("/tmp/a").rename("/tmp/b")`, "destructive_fs"},
+		{"Path replace", `Path("/tmp/a").replace("/tmp/b")`, "destructive_fs"},
+		{"Path.open write", `Path("out.txt").open("w").write("data")`, "destructive_fs"},
+		{"pathlib.Path write_text", `pathlib.Path("out.txt").write_text("data")`, "destructive_fs"},
+
+		// Additional os destructive ops.
+		{"os.makedirs", `os.makedirs("/tmp/new")`, "destructive_fs"},
+		{"os.rename", `os.rename("/tmp/a", "/tmp/b")`, "destructive_fs"},
+		{"shutil.copytree", `shutil.copytree("/tmp/a", "/tmp/b")`, "destructive_fs"},
+		{"shutil.copyfile", `shutil.copyfile("/tmp/a", "/tmp/b")`, "destructive_fs"},
+
+		// Secret-like reads: alias through pathlib and bare open both fire.
+		{"open .env", `open(".env").read()`, "secret_read"},
+		{"Path id_rsa", `Path("~/.ssh/id_rsa").read_text()`, "secret_read"},
+		{"pathlib.Path secret", `pathlib.Path("/etc/credentials").read_text()`, "secret_read"},
+		{"open token file", `open("token.txt", "r")`, "secret_read"},
 	}
 
 	for _, tt := range tests {
@@ -149,6 +194,90 @@ func TestScanPython_SpecificPatterns(t *testing.T) {
 			}
 			if !found {
 				t.Errorf("expected category %q for code %q, got signals: %v", tt.category, tt.code, signals)
+			}
+		})
+	}
+}
+
+// TestScanPython_AliasImportRetained verifies that "from X import <dangerous-fn>"
+// style imports are NOT filtered by scopeImportSignals even when no prefixed call
+// (e.g. os.system, shutil.rmtree) appears in the body.  The programmer
+// explicitly aliased in the dangerous symbol, so the signal must survive.
+//
+// It also verifies the complementary case: bare "import os" / "import shutil"
+// without any dangerous call continue to be filtered (avoiding false positives
+// for code that uses os.path or shutil.which).
+func TestScanPython_AliasImportRetained(t *testing.T) {
+	tests := []struct {
+		name     string
+		code     string
+		wantCat  string // expected category in surviving signals
+		wantKeep bool   // true → expect a signal; false → expect no signals
+	}{
+		// Alias imports that introduce dangerous os functions must be retained.
+		{
+			name:     "from os import system with bare call",
+			code:     "from os import system\nsystem('rm -rf /tmp/demo')\n",
+			wantCat:  "subprocess",
+			wantKeep: true,
+		},
+		{
+			name:     "from os import remove with bare call",
+			code:     "from os import remove\nremove('/tmp/file')\n",
+			wantCat:  "subprocess",
+			wantKeep: true,
+		},
+		{
+			name:     "from os import unlink with bare call",
+			code:     "from os import unlink\nunlink('/tmp/file')\n",
+			wantCat:  "subprocess",
+			wantKeep: true,
+		},
+		// Alias imports that introduce dangerous shutil functions must be retained.
+		{
+			name:     "from shutil import rmtree with bare call",
+			code:     "from shutil import rmtree\nrmtree('/tmp/dir')\n",
+			wantCat:  "destructive_fs",
+			wantKeep: true,
+		},
+		{
+			name:     "from shutil import move with bare call",
+			code:     "from shutil import move\nmove('/tmp/a', '/tmp/b')\n",
+			wantCat:  "destructive_fs",
+			wantKeep: true,
+		},
+		// Bare module imports without any dangerous call should still be filtered.
+		{
+			name:     "import os alone is filtered",
+			code:     "import os\nprint(os.getcwd())\n",
+			wantCat:  "subprocess",
+			wantKeep: false,
+		},
+		{
+			name:     "import shutil alone is filtered",
+			code:     "import shutil\nprint(shutil.which('git'))\n",
+			wantCat:  "destructive_fs",
+			wantKeep: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			signals := ScanPython([]byte(tt.code))
+			found := false
+			for _, s := range signals {
+				if s.Category == tt.wantCat {
+					found = true
+					break
+				}
+			}
+			if tt.wantKeep && !found {
+				t.Errorf("expected category %q to survive scopeImportSignals for code:\n%s\ngot signals: %v",
+					tt.wantCat, tt.code, signals)
+			}
+			if !tt.wantKeep && found {
+				t.Errorf("expected category %q to be filtered by scopeImportSignals for code:\n%s\ngot signals: %v",
+					tt.wantCat, tt.code, signals)
 			}
 		})
 	}

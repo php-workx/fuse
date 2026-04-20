@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -914,20 +915,202 @@ func TestCheckFuseInPath_WarnWhenNotInPath(t *testing.T) {
 	}
 }
 
-func TestCheckFuseInPath_ReportsPathAndVersion(t *testing.T) {
+func TestCheckFuseInPath_ReportsPathAndStaticMetadataForUntrustedBinary(t *testing.T) {
+	// The fuse found in PATH is a shell script, not the running test binary.
+	// It is untrusted — doctor must not execute it and must not surface any
+	// version string the script would have printed. Static identifiers (the
+	// path plus a sha256 digest) are reported instead.
 	binDir := t.TempDir()
 	fusePath := writeFuseVersionExecutable(t, binDir, "fuse 9.9.9 (abc123) built 2026-04-16")
 	t.Setenv("PATH", binDir)
 
 	got := checkFuseInPath()
 	if got.status != "PASS" {
-		t.Fatalf("checkFuseInPath() status = %q, want PASS", got.status)
+		t.Fatalf("checkFuseInPath() status = %q, want PASS; detail=%q", got.status, got.detail)
 	}
-	for _, want := range []string{fusePath, "fuse 9.9.9", "abc123"} {
+	if !strings.Contains(got.detail, fusePath) {
+		t.Fatalf("detail should include path %q, got %q", fusePath, got.detail)
+	}
+	for _, forbidden := range []string{"fuse 9.9.9", "abc123"} {
+		if strings.Contains(got.detail, forbidden) {
+			t.Fatalf("detail should not leak unexecuted PATH binary's claimed %q, got %q", forbidden, got.detail)
+		}
+	}
+	for _, want := range []string{"unverified", "sha256", "not executed"} {
+		if !strings.Contains(got.detail, want) {
+			t.Fatalf("detail should include %q for unverified binary, got %q", want, got.detail)
+		}
+	}
+}
+
+// TestCheckFuseInPath_DoesNotExecuteUntrustedPathBinary guards the core
+// security property of the check: `fuse doctor` must not execute an
+// arbitrary fuse binary resolved from PATH, because that binary may be
+// stale or malicious. The fixture installs a shell script that writes a
+// canary file on any invocation; the check must leave no canary.
+func TestCheckFuseInPath_DoesNotExecuteUntrustedPathBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// The canary fixture uses a POSIX shell script.
+		t.Skip("POSIX-only canary fixture")
+	}
+
+	binDir := t.TempDir()
+	canary := filepath.Join(binDir, "executed.canary")
+	writeCanaryFuseExecutable(t, binDir, canary)
+	t.Setenv("PATH", binDir)
+
+	_ = checkFuseInPath()
+
+	if _, err := os.Stat(canary); !os.IsNotExist(err) {
+		t.Fatalf("doctor executed untrusted PATH fuse; canary exists: %v", err)
+	}
+}
+
+func TestCheckFuseInPath_WarnsWhenHookBinaryStale(t *testing.T) {
+	// Pretend the current process is a release build with known metadata,
+	// while the fuse binary in PATH is a different, untrusted on-disk file
+	// (different bytes → different SHA-256). The check cannot safely
+	// execute the PATH binary to read its version, so it must surface the
+	// mismatch from static metadata alone with a reinstall hint rather
+	// than silently running stale policy.
+	withBuildMetadata(t, "1.4.0", "new-commit", "2026-04-18")
+
+	binDir := t.TempDir()
+	fusePath := writeFuseVersionExecutable(t, binDir, "fuse 1.3.0 (old-commit) built 2026-04-01")
+	t.Setenv("PATH", binDir)
+
+	got := checkFuseInPath()
+	if got.status != "WARN" {
+		t.Fatalf("checkFuseInPath() status = %q, want WARN; detail=%q", got.status, got.detail)
+	}
+	// Current-build metadata must be surfaced alongside the PATH binary
+	// path so the operator can compare what is installed vs. running.
+	for _, want := range []string{fusePath, "fuse 1.4.0", "new-commit", "stale or mismatched", "unverified"} {
+		if !strings.Contains(got.detail, want) {
+			t.Fatalf("expected detail to contain %q, got %q", want, got.detail)
+		}
+	}
+	// The script's advertised version must not appear — we did not execute it.
+	for _, forbidden := range []string{"fuse 1.3.0", "old-commit"} {
+		if strings.Contains(got.detail, forbidden) {
+			t.Fatalf("detail must not leak unexecuted PATH binary's %q, got %q", forbidden, got.detail)
+		}
+	}
+	if got.fixHint == "" {
+		t.Fatalf("expected fixHint for stale hook binary, got empty")
+	}
+	if !strings.Contains(got.fixHint, "reinstall") {
+		t.Fatalf("expected reinstall instruction in fixHint, got %q", got.fixHint)
+	}
+}
+
+func TestCheckFuseInPath_PassesWhenHookBinaryMatchesCurrentBuild(t *testing.T) {
+	// Trust is established by byte-equality with the currently running
+	// process, not by parsing untrusted `fuse version` output. We stage a
+	// copy of os.Executable() at binDir/fuse; its SHA-256 matches the
+	// running test binary, so the check reports PASS with the live build
+	// metadata and no stale warning.
+	withBuildMetadata(t, "1.4.0", "matching-commit", "2026-04-18")
+
+	fusePath := stageSelfAsFuseInPath(t)
+
+	got := checkFuseInPath()
+	if got.status != "PASS" {
+		t.Fatalf("checkFuseInPath() status = %q, want PASS; detail=%q", got.status, got.detail)
+	}
+	for _, want := range []string{fusePath, "fuse 1.4.0", "matching-commit"} {
 		if !strings.Contains(got.detail, want) {
 			t.Fatalf("detail %q missing %q", got.detail, want)
 		}
 	}
+	if strings.Contains(got.detail, "stale") {
+		t.Fatalf("did not expect 'stale' in current-build detail, got %q", got.detail)
+	}
+	if strings.Contains(got.detail, "unverified") {
+		t.Fatalf("trusted binary detail must not be marked 'unverified', got %q", got.detail)
+	}
+}
+
+// withBuildMetadata temporarily overrides the build-time metadata so tests
+// can simulate running from a release binary where a stale vs. current hook
+// binary can be distinguished by version string.
+func withBuildMetadata(t *testing.T, version, commit, date string) {
+	t.Helper()
+
+	prevVersion, prevCommit, prevDate := Version, GitCommit, BuildDate
+	Version = version
+	GitCommit = commit
+	BuildDate = date
+	t.Cleanup(func() {
+		Version = prevVersion
+		GitCommit = prevCommit
+		BuildDate = prevDate
+	})
+}
+
+// writeCanaryFuseExecutable installs a fuse shim in dir that writes a
+// canary file on every invocation. Tests use it to verify that doctor
+// does NOT spawn the PATH fuse binary.
+func writeCanaryFuseExecutable(t *testing.T, dir, canary string) string {
+	t.Helper()
+
+	// POSIX shell form only; callers skip on windows.
+	path := filepath.Join(dir, "fuse")
+	content := []byte("#!/bin/sh\n: > \"" + canary + "\"\nexit 0\n")
+	if err := os.WriteFile(path, content, 0o755); err != nil {
+		t.Fatalf("write canary fuse executable: %v", err)
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("chmod canary fuse executable: %v", err)
+	}
+	return path
+}
+
+// stageSelfAsFuseInPath copies the running test binary into a fresh temp
+// dir as `fuse` (or `fuse.exe` on Windows), sets PATH to that dir, and
+// returns the staged path. The resulting fuse binary has identical bytes
+// to os.Executable(), which is how checkFuseInPath establishes trust
+// without executing the PATH hit.
+func stageSelfAsFuseInPath(t *testing.T) string {
+	t.Helper()
+
+	selfPath, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	binDir := t.TempDir()
+	name := "fuse"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	fusePath := filepath.Join(binDir, name)
+	if err := copyFileForTest(selfPath, fusePath); err != nil {
+		t.Fatalf("copy self binary: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(fusePath, 0o755); err != nil {
+			t.Fatalf("chmod staged fuse: %v", err)
+		}
+	}
+	t.Setenv("PATH", binDir)
+	return fusePath
+}
+
+func copyFileForTest(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = out.Close() }()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Close()
 }
 
 func writeFuseVersionExecutable(t *testing.T, dir, version string) string {

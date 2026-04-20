@@ -501,6 +501,94 @@ func TestClassify_LeadingWorkspaceCDReadOnlyChainsAreSafe(t *testing.T) {
 			command:  "cd relative/path && git status --short",
 			expected: core.DecisionCaution,
 		},
+		{
+			name:     "cd to root filesystem remains cautious",
+			command:  "cd / && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /etc remains cautious",
+			command:  "cd /etc && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /etc subdirectory remains cautious",
+			command:  "cd /etc/ssh && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /usr/local remains cautious",
+			command:  "cd /usr/local && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /var/log remains cautious",
+			command:  "cd /var/log && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /System remains cautious",
+			command:  "cd /System && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /Library remains cautious",
+			command:  "cd /Library && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /private/etc remains cautious",
+			command:  "cd /private/etc && ls",
+			expected: core.DecisionCaution,
+		},
+		// Non-sensitive but also non-workspace paths must remain cautious.
+		{
+			name:     "cd to /tmp remains cautious",
+			command:  "cd /tmp && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /tmp subdirectory remains cautious",
+			command:  "cd /tmp/project && git status --short",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /mnt remains cautious",
+			command:  "cd /mnt/data && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /srv remains cautious",
+			command:  "cd /srv/myapp && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /run remains cautious",
+			command:  "cd /run/user/1000 && ls",
+			expected: core.DecisionCaution,
+		},
+		// Trusted user workspace roots themselves are not workspaces.
+		{
+			name:     "cd to /home root remains cautious",
+			command:  "cd /home && ls",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "cd to /Users root remains cautious",
+			command:  "cd /Users && ls",
+			expected: core.DecisionCaution,
+		},
+		// Trusted user workspace paths: at least one level under /home/* or /Users/*.
+		{
+			name:     "cd to Linux user home is safe for read-only chain",
+			command:  "cd /home/alice/project && git status --short",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "cd to Linux user home directory itself is safe for read-only chain",
+			command:  "cd /home/alice && ls",
+			expected: core.DecisionSafe,
+		},
 	}
 
 	for _, tt := range tests {
@@ -525,51 +613,59 @@ func TestClassify_LeadingWorkspaceCDReadOnlyChainsAreSafe(t *testing.T) {
 func TestClassify_ReadOnlyInspectionCommandsAreSafe(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
+	// Each case asserts the decision AND one of wantReason/wantReasonContains so
+	// we can distinguish an explicit safe-rule match (UnconditionallySafeReason /
+	// ConditionallySafeReason / a specific unsafe message) from the default-safe
+	// fallback (UnknownCommandFallbackReason). Previously these tests only
+	// checked the decision level, which silently accepted fallthrough-to-SAFE.
 	tests := []struct {
-		name            string
-		command         string
-		expected        core.Decision
-		disallowUnknown bool
+		name              string
+		command           string
+		expected          core.Decision
+		wantReason        string // exact match when non-empty
+		wantReasonContain string // substring match when non-empty
 	}{
 		{
-			name:            "colgrep read-only search",
-			command:         `colgrep "query" -k 10`,
-			expected:        core.DecisionSafe,
-			disallowUnknown: true,
+			name:       "colgrep read-only search",
+			command:    `colgrep "query" -k 10`,
+			expected:   core.DecisionSafe,
+			wantReason: core.UnconditionallySafeReason,
 		},
 		{
-			name:            "git grep read-only search",
-			command:         `git grep -n pattern -- src`,
-			expected:        core.DecisionSafe,
-			disallowUnknown: true,
+			name:       "git grep read-only search",
+			command:    `git grep -n pattern -- src`,
+			expected:   core.DecisionSafe,
+			wantReason: core.ConditionallySafeReason,
 		},
 		{
-			name:            "tk show is read-only",
-			command:         `tk show fus-1234`,
-			expected:        core.DecisionSafe,
-			disallowUnknown: true,
+			name:       "tk show is read-only",
+			command:    `tk show fus-1234`,
+			expected:   core.DecisionSafe,
+			wantReason: core.ConditionallySafeReason,
 		},
 		{
-			name:     "tk close mutates ticket state",
-			command:  `tk close fus-1234`,
-			expected: core.DecisionCaution,
+			name:              "tk close mutates ticket state",
+			command:           `tk close fus-1234`,
+			expected:          core.DecisionCaution,
+			wantReasonContain: "tk command is not read-only",
 		},
 		{
-			name:            "go tool linter version is read-only",
-			command:         `go tool -modfile=tools.mod golangci-lint version`,
-			expected:        core.DecisionSafe,
-			disallowUnknown: true,
+			name:       "go tool linter version is read-only",
+			command:    `go tool -modfile=tools.mod golangci-lint version`,
+			expected:   core.DecisionSafe,
+			wantReason: core.ConditionallySafeReason,
 		},
 		{
-			name:     "timeout wrapped just test remains cautious",
-			command:  `timeout 900 just test`,
-			expected: core.DecisionCaution,
+			name:              "timeout wrapped just test remains cautious",
+			command:           `timeout 900 just test`,
+			expected:          core.DecisionCaution,
+			wantReasonContain: "just recipe is not allowlisted as read-only",
 		},
 		{
-			name:            "timeout wrapped tk show is read-only",
-			command:         `timeout 30 tk show fus-1234`,
-			expected:        core.DecisionSafe,
-			disallowUnknown: true,
+			name:       "timeout wrapped tk show is read-only",
+			command:    `timeout 30 tk show fus-1234`,
+			expected:   core.DecisionSafe,
+			wantReason: core.ConditionallySafeReason,
 		},
 	}
 
@@ -588,10 +684,50 @@ func TestClassify_ReadOnlyInspectionCommandsAreSafe(t *testing.T) {
 				t.Fatalf("got %s, want %s (reason: %s, subresults: %#v)",
 					result.Decision, tt.expected, result.Reason, result.SubResults)
 			}
-			if tt.disallowUnknown && strings.Contains(result.Reason, "unknown command") {
-				t.Fatalf("got unknown fallback reason %q, want explicit safe rule", result.Reason)
+			// Guard against silent fallthrough for every case — no safe rule is
+			// allowed to share a reason string with the unknown-command fallback.
+			if result.Reason == core.UnknownCommandFallbackReason ||
+				strings.Contains(result.Reason, "unknown command") {
+				t.Fatalf("got unknown fallback reason %q, want explicit rule match", result.Reason)
+			}
+			if tt.wantReason != "" && result.Reason != tt.wantReason {
+				t.Fatalf("reason = %q, want %q (decision=%s subresults=%#v)",
+					result.Reason, tt.wantReason, result.Decision, result.SubResults)
+			}
+			if tt.wantReasonContain != "" && !strings.Contains(result.Reason, tt.wantReasonContain) {
+				t.Fatalf("reason = %q, want substring %q (decision=%s subresults=%#v)",
+					result.Reason, tt.wantReasonContain, result.Decision, result.SubResults)
 			}
 		})
+	}
+}
+
+// TestClassify_UnknownCommandFallbackSurfacesExplicitReason documents the
+// fallback contract for unknown commands: the classifier must default to SAFE,
+// and that SAFE decision must carry the UnknownCommandFallbackReason so logs
+// and callers can tell the fallback fired (versus a real safe rule matching).
+// This regression complements TestClassify_ReadOnlyInspectionCommandsAreSafe,
+// which asserts the opposite direction (explicit rules must NOT surface as the
+// fallback reason).
+func TestClassify_UnknownCommandFallbackSurfacesExplicitReason(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	req := core.ShellRequest{
+		RawCommand: "definitely-not-a-real-command-xyz --probe",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionSafe {
+		t.Fatalf("expected SAFE for unknown command, got %s (reason: %s)",
+			result.Decision, result.Reason)
+	}
+	if result.Reason != core.UnknownCommandFallbackReason {
+		t.Fatalf("expected reason %q, got %q", core.UnknownCommandFallbackReason, result.Reason)
 	}
 }
 
@@ -1089,10 +1225,66 @@ func TestClassify_PythonHeredocBodiesDriveDecision(t *testing.T) {
 			minSeverity: core.DecisionCaution,
 		},
 		{
+			name: "subprocess alias import stays cautious",
+			command: "python - <<'PY'\n" +
+				"from subprocess import run\n" +
+				"run(['rm', '-rf', '/tmp/demo'])\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "os alias import stays cautious",
+			command: "python - <<'PY'\n" +
+				"from os import system\n" +
+				"system('rm -rf /tmp/demo')\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
 			name: "file write stays cautious",
 			command: "python - <<'PY'\n" +
 				"from pathlib import Path\n" +
 				"Path('generated.txt').write_text('changed')\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "pathlib open write mode stays cautious",
+			command: "python - <<'PY'\n" +
+				"from pathlib import Path\n" +
+				"Path('generated.txt').open('w').write('data')\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "open write mode stays cautious",
+			command: "python - <<'PY'\n" +
+				"with open('generated.txt', 'w') as fh:\n" +
+				"    fh.write('data')\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "requests network stays cautious",
+			command: "python - <<'PY'\n" +
+				"import requests\n" +
+				"requests.get('https://example.com/api')\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "httpx network stays cautious",
+			command: "python - <<'PY'\n" +
+				"import httpx\n" +
+				"httpx.post('https://example.com/api', json={})\n" +
+				"PY",
+			minSeverity: core.DecisionCaution,
+		},
+		{
+			name: "urllib urlopen stays cautious",
+			command: "python - <<'PY'\n" +
+				"from urllib.request import urlopen\n" +
+				"urlopen('https://example.com/api')\n" +
 				"PY",
 			minSeverity: core.DecisionCaution,
 		},
@@ -1135,6 +1327,138 @@ func TestClassify_PythonHeredocBodiesDriveDecision(t *testing.T) {
 			if result.FailClosed != tt.wantFailClose {
 				t.Fatalf("FailClosed got %v, want %v (decision: %s, reason: %s, subresults: %#v)",
 					result.FailClosed, tt.wantFailClose, result.Decision, result.Reason, result.SubResults)
+			}
+		})
+	}
+}
+
+// TestClassify_PythonHeredocBodyReasonReplacesGeneric verifies that when a
+// Python heredoc body produces a CAUTION classification with a specific,
+// actionable reason (e.g. "subprocess", "secret_read", "network I/O") it
+// replaces the generic "inline script detected: ..." CAUTION marker even
+// though both sit at the same severity. Without this, operators only see a
+// regex dump instead of what actually fired inside the heredoc.
+func TestClassify_PythonHeredocBodyReasonReplacesGeneric(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		wantFrag string
+	}{
+		{
+			name: "subprocess body reason wins over inline marker",
+			command: "python - <<'PY'\n" +
+				"import subprocess\n" +
+				"subprocess.run(['ls'])\n" +
+				"PY",
+			wantFrag: "subprocess",
+		},
+		{
+			name: "destructive fs body reason wins over inline marker",
+			command: "python - <<'PY'\n" +
+				"from pathlib import Path\n" +
+				"Path('out.txt').open('w').write('x')\n" +
+				"PY",
+			wantFrag: "destructive filesystem",
+		},
+		{
+			name: "network body reason wins over inline marker",
+			command: "python - <<'PY'\n" +
+				"import requests\n" +
+				"requests.get('https://example.com/')\n" +
+				"PY",
+			wantFrag: "network",
+		},
+		{
+			name: "secret read body reason wins over inline marker",
+			command: "uv run python - <<'PY'\n" +
+				"from pathlib import Path\n" +
+				"print(Path('.env').read_text())\n" +
+				"PY",
+			wantFrag: "secret-like file",
+		},
+
+		// Alias / import-scoping regressions (fus-3qgy): dangerous functions
+		// imported via "from X import <fn>" must produce an actionable body
+		// reason, not the generic "inline script detected: ..." marker.
+
+		{
+			// "from os import system" aliases in os.system; scopeImportSignals
+			// must not filter the signal just because no "os.system" prefixed
+			// call appears in the body.  Use a call that does not independently
+			// match a builtin rm-rf rule, so the inline Python reason is the
+			// most specific signal available and must replace the generic marker.
+			name: "from os import system alias body reason wins over inline marker",
+			command: "python - <<'PY'\n" +
+				"from os import system\n" +
+				"system('ls -la /tmp')\n" +
+				"PY",
+			wantFrag: "subprocess",
+		},
+		{
+			// "from subprocess import run" aliased call: the import-level
+			// subprocess signal must survive and produce an actionable reason.
+			name: "from subprocess import run alias body reason wins over inline marker",
+			command: "python - <<'PY'\n" +
+				"from subprocess import run\n" +
+				"run(['ls', '-la'])\n" +
+				"PY",
+			wantFrag: "subprocess",
+		},
+		{
+			// "from shutil import rmtree" aliased call: scopeImportSignals must
+			// treat this as a destructive call, not filter the import signal.
+			name: "from shutil import rmtree alias body reason wins over inline marker",
+			command: "python - <<'PY'\n" +
+				"from shutil import rmtree\n" +
+				"rmtree('/tmp/build')\n" +
+				"PY",
+			wantFrag: "destructive filesystem",
+		},
+		{
+			// "Path(...).open('w')" write-mode: the pathlib write pattern in the
+			// Python scanner must fire and surface an actionable reason.
+			name: "pathlib open write mode body reason wins over inline marker",
+			command: "python - <<'PY'\n" +
+				"from pathlib import Path\n" +
+				"Path('out.txt').open('w').write('data')\n" +
+				"PY",
+			wantFrag: "destructive filesystem",
+		},
+		{
+			// "from urllib.request import urlopen\nurlopen(...)" network alias:
+			// both the import and call-site patterns must fire and the reason
+			// must be network-specific.
+			name: "urllib urlopen alias body reason wins over inline marker",
+			command: "python - <<'PY'\n" +
+				"from urllib.request import urlopen\n" +
+				"urlopen('https://example.com/api')\n" +
+				"PY",
+			wantFrag: "network",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        testRepoRoot(t),
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if core.DecisionSeverity(result.Decision) < core.DecisionSeverity(core.DecisionCaution) {
+				t.Fatalf("expected at least CAUTION, got %s (reason: %s)", result.Decision, result.Reason)
+			}
+			if !strings.Contains(result.Reason, tt.wantFrag) {
+				t.Fatalf("reason %q should contain %q (decision: %s, subresults: %#v)",
+					result.Reason, tt.wantFrag, result.Decision, result.SubResults)
+			}
+			if strings.HasPrefix(result.Reason, "inline script detected: ") {
+				t.Fatalf("reason should not remain the generic inline-script marker, got %q", result.Reason)
 			}
 		})
 	}

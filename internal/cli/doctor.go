@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"context"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -695,9 +695,14 @@ func checkSQLiteDB() checkResult {
 	}
 }
 
-// checkFuseInPath checks that the fuse binary is in PATH.
+// checkFuseInPath checks that the fuse binary is in PATH and, when possible,
+// verifies that the hook-resolved binary matches the current build. Hooks
+// invoke `fuse` from PATH; if the PATH binary is older than the running build
+// (e.g. the user rebuilt from source but did not reinstall) the hook will
+// apply stale policy. This check reports WARN in that case so users see a
+// concrete reinstall instruction instead of silently stale behavior.
 func checkFuseInPath() checkResult {
-	fusePath, err := exec.LookPath("fuse")
+	status, err := resolveHookBinaryStatus()
 	if err != nil {
 		// Also check if the current binary name is in PATH.
 		selfPath, selfErr := os.Executable()
@@ -718,39 +723,187 @@ func checkFuseInPath() checkResult {
 		}
 	}
 
+	desc := describeFuseBinary(status.HookPath)
+
+	// Same on-disk binary as the running process — trivially matches.
+	if status.PathsMatch {
+		return checkResult{
+			name:   checkNameFuseInPath,
+			status: "PASS",
+			detail: desc,
+		}
+	}
+
+	// Different files but version strings match — still effectively current.
+	if status.VersionsMatch {
+		return checkResult{
+			name:   checkNameFuseInPath,
+			status: "PASS",
+			detail: desc + "; matches current build",
+		}
+	}
+
+	// Without meaningful build metadata (e.g. `go install` without ldflags)
+	// we cannot determine whether the hook binary is stale. Stay silent
+	// about mismatch to avoid false positives in dev installs; callers
+	// running from a release binary will have metadata and hit the branch
+	// below when the hook is actually stale.
+	if !status.VersionKnown {
+		return checkResult{
+			name:   checkNameFuseInPath,
+			status: "PASS",
+			detail: desc + " (current build metadata unavailable; unable to verify hook binary is current)",
+		}
+	}
+
 	return checkResult{
 		name:   checkNameFuseInPath,
-		status: "PASS",
-		detail: describeFuseBinary(fusePath),
+		status: "WARN",
+		detail: fmt.Sprintf("hook binary appears stale or mismatched: %s; current build: %s", desc, status.SelfVersion),
+		fixHint: "reinstall fuse (e.g. `go install ./cmd/fuse` or download the latest release) " +
+			"so the hook uses the current build",
 	}
+}
+
+// hookBinaryStatus describes whether the fuse binary hooks resolve from PATH
+// matches the currently running binary and/or the current build metadata.
+type hookBinaryStatus struct {
+	HookPath      string
+	HookVersion   string
+	SelfPath      string
+	SelfVersion   string
+	PathsMatch    bool
+	VersionsMatch bool
+	VersionKnown  bool
+}
+
+// resolveHookBinaryStatus compares the PATH-resolved fuse binary against the
+// running binary and the build-time version metadata. Hooks invoke the PATH
+// binary; when it differs from the current build, fuse's classification
+// policy may be out of date.
+func resolveHookBinaryStatus() (hookBinaryStatus, error) {
+	var status hookBinaryStatus
+
+	hookPath, err := exec.LookPath("fuse")
+	if err != nil {
+		return status, err
+	}
+	status.HookPath = hookPath
+	status.HookVersion = fuseBinaryVersion(hookPath)
+
+	if selfPath, selfErr := os.Executable(); selfErr == nil {
+		status.SelfPath = selfPath
+		status.PathsMatch = canonicalPath(hookPath) == canonicalPath(selfPath)
+	}
+
+	status.SelfVersion = currentBuildVersionString()
+	status.VersionKnown = Version != "dev" || GitCommit != "unknown" || BuildDate != "unknown"
+	status.VersionsMatch = status.HookVersion != "" && status.HookVersion == status.SelfVersion
+
+	return status, nil
+}
+
+// canonicalPath returns an absolute, symlink-resolved form of p so path
+// comparisons are not fooled by /usr/local/bin -> /opt/homebrew style links.
+// If a component cannot be resolved, it falls back to the best available form
+// rather than returning an error — path comparison is best-effort.
+func canonicalPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		abs = p
+	}
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return abs
+	}
+	return resolved
+}
+
+// currentBuildVersionString renders the running binary's version in the same
+// format `fuse version` prints, so hook-binary output and in-process metadata
+// can be compared as strings.
+func currentBuildVersionString() string {
+	return fmt.Sprintf("fuse %s (%s) built %s", Version, GitCommit, BuildDate)
 }
 
 func describeFuseBinary(path string) string {
 	return fmt.Sprintf("path: %s; version: %s", path, fuseBinaryVersion(path))
 }
 
+// fuseBinaryVersion returns a human-readable identifier for the fuse binary
+// at path. It never executes an untrusted PATH binary: if the binary can be
+// proven to be the same on-disk artifact as the currently running process
+// (canonical paths match, or file contents hash identically) the current
+// build's version metadata is reported; otherwise only static file metadata
+// (path + sha256 prefix + size) is emitted and no subprocess is spawned.
+//
+// Running `fuse version` on an arbitrary PATH hit would let a stale or
+// malicious binary influence doctor output (and worse, side-effect the
+// host); see ticket fus-tkf0.
 func fuseBinaryVersion(path string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
+	if isTrustedSelfBinary(path) {
+		return currentBuildVersionString()
+	}
+	return staticFuseBinaryDescription(path)
+}
 
-	// path comes from exec.LookPath("fuse") in checkFuseInPath; doctor reports
-	// the installed hook binary metadata and does not accept arbitrary command input.
-	output, err := exec.CommandContext(ctx, path, "version").CombinedOutput() // nosemgrep: dangerous-exec-command
-	if ctx.Err() == context.DeadlineExceeded {
-		return "unavailable (version command timed out)"
-	}
+// isTrustedSelfBinary reports whether the file at path is the same on-disk
+// binary as the currently running process. Trust is established when the
+// canonical path matches os.Executable() (handles symlinks, hardlinks, and
+// shadowed bin dirs) or when the two files have identical SHA-256 digests.
+// Any other result — including failure to read either file — is treated as
+// untrusted.
+func isTrustedSelfBinary(path string) bool {
+	selfPath, err := os.Executable()
 	if err != nil {
-		trimmed := strings.TrimSpace(string(output))
-		if trimmed != "" {
-			return fmt.Sprintf("unavailable (%v: %s)", err, trimmed)
-		}
-		return fmt.Sprintf("unavailable (%v)", err)
+		return false
 	}
-	trimmed := strings.TrimSpace(string(output))
-	if trimmed == "" {
-		return "unavailable (version command produced no output)"
+	if canonicalPath(path) == canonicalPath(selfPath) {
+		return true
 	}
-	return trimmed
+	selfHash, selfErr := fuseBinaryFileHash(selfPath)
+	if selfErr != nil {
+		return false
+	}
+	pathHash, pathErr := fuseBinaryFileHash(path)
+	if pathErr != nil {
+		return false
+	}
+	return selfHash == pathHash
+}
+
+// staticFuseBinaryDescription renders an identifier for an untrusted fuse
+// binary on disk without executing it. Callers use this to surface what
+// was found in PATH while making it explicit that the binary was not run.
+func staticFuseBinaryDescription(path string) string {
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Sprintf("unverified (cannot stat: %v; not executed)", err)
+	}
+	hash, err := fuseBinaryFileHash(path)
+	if err != nil {
+		return fmt.Sprintf("unverified (cannot hash: %v; not executed)", err)
+	}
+	prefix := hash
+	if len(prefix) > 16 {
+		prefix = prefix[:16]
+	}
+	return fmt.Sprintf("unverified (sha256:%s, size: %d bytes; not executed)", prefix, info.Size())
+}
+
+// fuseBinaryFileHash returns the hex-encoded SHA-256 digest of the file at
+// path. The file is read as bytes only; no subprocess is spawned.
+func fuseBinaryFileHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = f.Close() }()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }
 
 // checkLiveClassification runs a test classification to verify the pipeline.

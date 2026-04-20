@@ -6,10 +6,22 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/php-workx/fuse/internal/inspect"
 )
 
 // maxInputSize is the maximum allowed raw command length (64 KB).
 const maxInputSize = 64 * 1024
+
+// Reason strings emitted by the fallback layers. Exported so tests and callers
+// can distinguish an explicit safe-rule match (UnconditionallySafeReason /
+// ConditionallySafeReason) from the default-safe fallback
+// (UnknownCommandFallbackReason).
+const (
+	UnconditionallySafeReason    = "unconditionally safe command"
+	ConditionallySafeReason      = "conditionally safe command"
+	UnknownCommandFallbackReason = "unknown command (no matching rule)"
+)
 
 // ClassifyResult holds the full result of command classification.
 type ClassifyResult struct {
@@ -230,6 +242,7 @@ func classifyAllSubCommands(result *ClassifyResult, subCmds []string, evaluator 
 	overallReason := "all sub-commands safe"
 	overallRuleID := ""
 	var fileHashes []string
+	singleSubCommand := len(subCmds) == 1
 
 	for _, subCmd := range subCmds {
 		sub := classifySubCommand(subCmd, evaluator, cwd)
@@ -237,7 +250,10 @@ func classifyAllSubCommands(result *ClassifyResult, subCmds []string, evaluator 
 		result.DryRunMatches = append(result.DryRunMatches, sub.DryRunMatches...)
 
 		newOverall := MaxDecision(overallDecision, sub.Decision)
-		if newOverall != overallDecision {
+		// Propagate the sub-command's reason when the decision escalates OR when
+		// there is only one sub-command — otherwise a lone explicit SAFE rule is
+		// hidden behind the generic "all sub-commands safe" aggregate.
+		if newOverall != overallDecision || singleSubCommand {
 			overallDecision = newOverall
 			overallReason = sub.Reason
 			overallRuleID = sub.RuleID
@@ -342,7 +358,81 @@ func simpleLeadingAbsoluteCD(subCmds []string, currentCwd string) (string, bool)
 		strings.Contains(target, "..") {
 		return currentCwd, false
 	}
-	return filepath.Clean(target), true
+	cleaned := filepath.Clean(target)
+	if isSensitiveCDTarget(cleaned) || !isTrustedWorkspace(cleaned) {
+		return currentCwd, false
+	}
+	return cleaned, true
+}
+
+// sensitiveCDTargetRoots are absolute path prefixes (and the prefixes
+// themselves) considered system-sensitive. A leading `cd <prefix>` into one of
+// these locations must retain the cwd-change CAUTION escalation, even when
+// followed by an otherwise read-only chain. Subdirectories under these roots
+// inherit the sensitivity (e.g. /etc/ssh, /usr/local/bin).
+var sensitiveCDTargetRoots = []string{
+	// Linux/Unix system roots.
+	"/etc",
+	"/usr",
+	"/bin",
+	"/sbin",
+	"/boot",
+	"/dev",
+	"/proc",
+	"/sys",
+	"/lib",
+	"/lib32",
+	"/lib64",
+	"/root",
+	"/opt",
+	"/var",
+	// macOS system roots.
+	"/System",
+	"/Library",
+	"/Applications",
+	"/Volumes",
+	"/cores",
+	// Resolved firmlinks for the system roots above (macOS).
+	"/private/etc",
+	"/private/var",
+	"/private/usr",
+}
+
+// isSensitiveCDTarget reports whether the given absolute, cleaned path is a
+// sensitive system location. Sensitive targets must not have their cwd-change
+// CAUTION suppressed, regardless of how benign subsequent commands look.
+func isSensitiveCDTarget(target string) bool {
+	if target == "/" {
+		return true
+	}
+	for _, root := range sensitiveCDTargetRoots {
+		if target == root || strings.HasPrefix(target, root+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// trustedWorkspaceRoots are the directory roots under which ordinary user
+// workspace directories live. CAUTION suppression for a leading absolute cd is
+// only allowed when the target is strictly inside one of these roots (the
+// roots themselves are not considered trusted workspaces).
+var trustedWorkspaceRoots = []string{
+	"/home",  // Linux user home directories
+	"/Users", // macOS user home directories
+}
+
+// isTrustedWorkspace reports whether the given absolute, cleaned path falls
+// within a trusted user workspace hierarchy. Only paths strictly under /home/*
+// or /Users/* qualify; paths like /tmp, /mnt, /srv, or the roots /home and
+// /Users themselves do not.
+func isTrustedWorkspace(target string) bool {
+	for _, root := range trustedWorkspaceRoots {
+		if strings.HasPrefix(target, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func applyCompoundPolicyMatch(result *ClassifyResult, pr policyResult) {
@@ -457,6 +547,7 @@ func classifyAllNormalizedCommands(sub *SubCommandResult, classified ClassifiedC
 	bestRuleID := ""
 	var allDryRunMatches []BuiltinMatch
 	tagOverrideEnforced := false
+	sawClassification := false
 
 	for i, cmd := range allCmds {
 		if cmd == "" {
@@ -468,12 +559,16 @@ func classifyAllNormalizedCommands(sub *SubCommandResult, classified ClassifiedC
 		}
 		classification := classifySingleCommand(cmd, evaluator, cwd, currentInspection)
 		combined := MaxDecision(bestDecision, classification.decision)
-		if combined != bestDecision {
+		// Propagate the reason when the decision escalates, or when this is the
+		// first real classification we've seen — so callers can tell whether an
+		// explicit SAFE rule fired vs the default-safe fallback.
+		if combined != bestDecision || !sawClassification {
 			bestDecision = combined
 			bestReason = classification.reason
 			bestRuleID = classification.ruleID
 			tagOverrideEnforced = classification.tagOverrideEnforced
 		}
+		sawClassification = true
 		if classification.failClosed {
 			sub.FailClosed = true
 		}
@@ -547,10 +642,20 @@ func applyInlineClassification(sub *SubCommandResult, subCmd string, evaluator P
 	}
 	if inlineResult.decision != "" {
 		combined := MaxDecision(sub.Decision, inlineResult.decision)
-		if combined != sub.Decision {
+		switch {
+		case combined != sub.Decision:
 			sub.Decision = combined
 			sub.Reason = inlineResult.reason
 			sub.RuleID = "" // inline analysis wins — clear stale RuleID
+		case inlineResult.reason != "" &&
+			DecisionSeverity(inlineResult.decision) == DecisionSeverity(sub.Decision) &&
+			isGenericInlineReason(sub.Reason):
+			// Same-severity body finding is more actionable than the generic
+			// "inline script detected" marker (or an absent reason) that fired
+			// earlier — prefer the inline body reason so operators see what
+			// actually happened inside the heredoc.
+			sub.Reason = inlineResult.reason
+			sub.RuleID = ""
 		}
 	}
 	if !inlineResult.complete && DecisionSeverity(sub.Decision) < DecisionSeverity(DecisionApproval) {
@@ -833,12 +938,12 @@ func classifyFallbackLayers(
 ) commandClassificationResult {
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
-		return commandClassificationResult{decision: DecisionSafe, reason: "unconditionally safe command", dryRunMatches: dryRunMatches}
+		return commandClassificationResult{decision: DecisionSafe, reason: UnconditionallySafeReason, dryRunMatches: dryRunMatches}
 	}
 
 	// Layer 5: Conditionally safe commands.
 	if IsConditionallySafe(basename, cmd) {
-		return commandClassificationResult{decision: DecisionSafe, reason: "conditionally safe command", dryRunMatches: dryRunMatches}
+		return commandClassificationResult{decision: DecisionSafe, reason: ConditionallySafeReason, dryRunMatches: dryRunMatches}
 	}
 
 	if reason, ok := KnownUnsafeInspectionVariant(basename, cmd); ok {
@@ -866,7 +971,7 @@ func classifyFallbackLayers(
 	}
 
 	// Fallback: SAFE for unknown commands (preserves the default-safe contract).
-	return commandClassificationResult{decision: DecisionSafe, reason: "unknown command (no matching rule)", dryRunMatches: dryRunMatches}
+	return commandClassificationResult{decision: DecisionSafe, reason: UnknownCommandFallbackReason, dryRunMatches: dryRunMatches}
 }
 
 func inspectionIsFailClosed(fileInspection *FileInspection) bool {
@@ -893,21 +998,18 @@ var dangerousPythonInline = regexp.MustCompile(
 
 var pythonHeredocCommandPattern = regexp.MustCompile(`\b(?:uv\s+run\s+)?python[23]?(?:\s+-[A-Za-z0-9]+)*\s+-\s+<<-?\s*['"]?\w+['"]?`)
 
-var dangerousPythonHeredocBody = regexp.MustCompile(
-	`(?i)\b(subprocess|os\s*\.\s*(system|exec|popen|spawn|remove|unlink|rmdir|rename|makedirs)|` +
-		`shutil\s*\.\s*(rmtree|move|copy|copyfile|copytree)|` +
-		`(?:Path|pathlib\s*\.\s*Path)\s*\([^)]*\)\s*\.\s*(unlink|rmdir|rename|replace|write_text|write_bytes|mkdir)|` +
-		`open\s*\([^)]*,\s*['"][wa+x]|` +
-		`requests\s*\.|urllib\s*\.|httpx\s*\.|http\.client|socket\s*\.|` +
-		`__import__|eval\s*\(|exec\s*\(|compile\s*\(|getattr\s*\(|` +
-		`ctypes|cffi|pty\s*\.\s*spawn|multiprocessing|` +
-		`pip\s*\.\s*main|\bpip\s+install\b|setuptools|pkg_resources\s*\.\s*require|` +
-		`boto3|google\.cloud|azure\.)`,
-)
-
-var pythonSecretReadPattern = regexp.MustCompile(
-	`(?i)(?:open|Path|pathlib\s*\.\s*Path)\s*\(\s*['"][^'"]*(?:\.env|id_rsa|id_ed25519|private[_-]?key|secret|token|credential)[^'"]*['"]`,
-)
+// Residual regexes that surface patterns not yet covered by the Python scanner.
+// They are consulted as a supplement to inspect.ScanPython so heredoc analysis
+// still catches packaging, FFI, getattr, and broader dangerous primitives.
+var supplementalPythonHeredocPatterns = []struct {
+	re       *regexp.Regexp
+	category string
+}{
+	{regexp.MustCompile(`\bgetattr\s*\(`), "dynamic_exec"},
+	{regexp.MustCompile(`\b(?:pty\s*\.\s*spawn|multiprocessing)\b`), "subprocess"},
+	{regexp.MustCompile(`\bctypes\b|\bcffi\b`), "subprocess"},
+	{regexp.MustCompile(`\bpip\s*\.\s*main\s*\(|\bpip\s+install\b|\bsetuptools\b|\bpkg_resources\s*\.\s*require\b`), "package_install"},
+}
 
 // Safe Python modules commonly used by agents for read-only introspection.
 // Excludes os.path (allows os.remove via import os.path; os.remove),
@@ -942,6 +1044,21 @@ func isExemptInlinePattern(re *regexp.Regexp, cmd string) bool {
 	}
 }
 
+// genericInlineReasonPrefix is emitted by detectInlineScript when an inline
+// script pattern (heredoc, pipe-to-interpreter, command substitution, etc.)
+// matches but no more specific body analysis has replaced it. When a
+// subsequent inline body classification produces a more actionable reason at
+// the same severity, we replace the generic marker — it is less useful to an
+// operator than a concrete "Python heredoc reads secret-like file" string.
+const genericInlineReasonPrefix = "inline script detected: "
+
+// isGenericInlineReason reports whether the given reason is the generic
+// inline-script marker (or empty) and therefore safe to supersede with a more
+// specific inline body reason at the same severity.
+func isGenericInlineReason(reason string) bool {
+	return reason == "" || strings.HasPrefix(reason, genericInlineReasonPrefix)
+}
+
 // detectInlineScript checks for inline script/heredoc patterns (§5.4).
 // Returns the decision and reason if a pattern matches, or empty strings if none.
 func detectInlineScript(cmd string) (Decision, string) {
@@ -959,12 +1076,12 @@ func detectInlineScript(cmd string) (Decision, string) {
 		}
 		if bestDecision == "" {
 			bestDecision = d
-			bestReason = "inline script detected: " + p.re.String()
+			bestReason = genericInlineReasonPrefix + p.re.String()
 		} else {
 			combined := MaxDecision(bestDecision, d)
 			if combined != bestDecision {
 				bestDecision = combined
-				bestReason = "inline script detected: " + p.re.String()
+				bestReason = genericInlineReasonPrefix + p.re.String()
 			}
 		}
 	}
@@ -1004,20 +1121,106 @@ func isPythonHeredocCommand(cmd string) bool {
 	return pythonHeredocCommandPattern.MatchString(cmd)
 }
 
+// classifyPythonHeredocBody inspects a Python heredoc body using the shared
+// Python scanner (inspect.ScanPython) plus supplemental heredoc-only regexes.
+// The shared scanner provides alias-aware imports (e.g. "from subprocess
+// import run"), pathlib write semantics (e.g. "Path(...).open('w')"), and
+// network I/O detection; the supplemental patterns cover packaging, FFI,
+// getattr, and other primitives not worth promoting to the general scanner.
+// Category is mapped to a short actionable reason so callers can surface
+// what specifically fired instead of a generic "side effect" string.
 func classifyPythonHeredocBody(body string) extractedSubCommandResult {
-	if pythonSecretReadPattern.MatchString(body) {
-		return extractedSubCommandResult{
-			decision: DecisionCaution,
-			reason:   "Python heredoc reads secret-like file",
+	signals := inspect.ScanPython([]byte(body))
+
+	// Secret-like file reads take precedence so the reason stays specific.
+	for _, s := range signals {
+		if s.Category == "secret_read" {
+			return extractedSubCommandResult{
+				decision: DecisionCaution,
+				reason:   "Python heredoc " + pythonHeredocReasonFor(s.Category),
+			}
 		}
 	}
-	if dangerousPythonHeredocBody.MatchString(body) {
+
+	// Prefer the highest-priority scanner signal (ordering matches the list in
+	// pythonHeredocCategoryPriority — more specific categories before generic
+	// side effects).
+	if sig := highestPriorityPythonSignal(signals); sig != nil {
 		return extractedSubCommandResult{
 			decision: DecisionCaution,
-			reason:   "Python heredoc contains side-effect or network operation",
+			reason:   "Python heredoc " + pythonHeredocReasonFor(sig.Category),
 		}
 	}
+
+	// Fall back to supplemental heredoc-only patterns (packaging, FFI,
+	// getattr, pty.spawn, multiprocessing) for classes of risk the shared
+	// scanner deliberately does not flag in arbitrary Python files.
+	for _, p := range supplementalPythonHeredocPatterns {
+		if p.re.MatchString(body) {
+			return extractedSubCommandResult{
+				decision: DecisionCaution,
+				reason:   "Python heredoc " + pythonHeredocReasonFor(p.category),
+			}
+		}
+	}
+
 	return extractedSubCommandResult{decision: DecisionSafe, reason: "Python heredoc body is read-only"}
+}
+
+// pythonHeredocCategoryPriority orders scanner categories so more specific
+// risks (secret reads, subprocess, destructive filesystem) are reported
+// before broader ones when multiple fire on the same body.
+var pythonHeredocCategoryPriority = []string{
+	"secret_read",
+	"subprocess",
+	"destructive_fs",
+	"http_control_plane",
+	"cloud_sdk",
+	"dynamic_exec",
+	"dynamic_import",
+	"network_io",
+	"package_install",
+}
+
+// highestPriorityPythonSignal returns the first signal whose category appears
+// earliest in pythonHeredocCategoryPriority, or nil if none match.
+func highestPriorityPythonSignal(signals []inspect.Signal) *inspect.Signal {
+	for _, cat := range pythonHeredocCategoryPriority {
+		for i := range signals {
+			if signals[i].Category == cat {
+				return &signals[i]
+			}
+		}
+	}
+	return nil
+}
+
+// pythonHeredocReasonFor maps a signal category to a short, actionable reason
+// fragment appended to "Python heredoc ". Unknown categories fall back to a
+// generic side-effect description so we never emit an empty reason.
+func pythonHeredocReasonFor(category string) string {
+	switch category {
+	case "secret_read":
+		return "reads secret-like file"
+	case "subprocess":
+		return "spawns subprocess or invokes os.system"
+	case "destructive_fs":
+		return "performs destructive filesystem operation"
+	case "http_control_plane":
+		return "calls cloud control-plane HTTP API"
+	case "cloud_sdk":
+		return "invokes cloud SDK destructive operation"
+	case "dynamic_exec":
+		return "executes dynamic code (eval/exec/getattr/compile)"
+	case "dynamic_import":
+		return "performs dynamic import"
+	case "network_io":
+		return "performs network I/O"
+	case "package_install":
+		return "installs or manipulates Python packages"
+	default:
+		return "contains side-effect or network operation"
+	}
 }
 
 // escalateDecision applies the sudo/doas escalation modifier.

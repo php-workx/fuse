@@ -90,6 +90,60 @@ fuse doctor
 Check that all items show `[ PASS ]`. If `fuse doctor --live` is available, it
 also tests classification and TTY capabilities.
 
+The `fuse binary in PATH` check also reports the path and version of the
+binary your agent hooks will actually invoke, for example:
+
+```
+  [ PASS ]  fuse binary in PATH
+           path: /usr/local/bin/fuse; version: fuse 1.4.0 (abc1234) built 2026-04-18
+```
+
+### Detecting a stale hook binary
+
+Agent hooks call `fuse` from `PATH`. If that binary is older than the `fuse`
+you just ran `fuse doctor` with (for example, you rebuilt from source but did
+not reinstall, or you still have an older release on `PATH` shadowing a new
+install), your hooks will apply stale classification policy. `fuse doctor`
+flags this with `[ WARN ]` and a concrete fix hint:
+
+```
+  [ WARN ]  fuse binary in PATH
+           hook binary appears stale or mismatched: path: /usr/local/bin/fuse; version: fuse 1.3.0 (old-commit) built 2026-04-01; current build: fuse 1.4.0 (new-commit) built 2026-04-18
+           fix: reinstall fuse (e.g. `go install ./cmd/fuse` or download the latest release) so the hook uses the current build
+```
+
+(Without `--verbose`, `fuse doctor` truncates detail lines longer than 120
+characters; run `fuse doctor --verbose` to see the full path and version
+strings.)
+
+The same warning is printed at the end of `fuse install claude` and `fuse
+install codex` when the installer detects drift.
+
+To fix it, reinstall `fuse` so the binary on `PATH` matches the build you want
+your agents to run, then rerun `fuse doctor`:
+
+```bash
+# From source
+go install github.com/php-workx/fuse/cmd/fuse@latest
+
+# Or from a release (macOS Homebrew example)
+brew upgrade php-workx/tap/fuse
+
+# Verify
+fuse doctor
+```
+
+Notes:
+
+- When the running binary has no build metadata (e.g. a `go install` without
+  ldflags), `fuse doctor` cannot distinguish stale from current and reports
+  PASS with a note that the hook binary could not be verified. Install a
+  release build or rebuild with the project `justfile` targets to get
+  meaningful drift detection.
+- When the running process and the `PATH` binary resolve to the same file on
+  disk (after symlink resolution), the check passes without running `fuse
+  version` — there is no drift to report.
+
 ## Optional: Start in Dry-Run Mode
 
 If you want to observe classifications without blocking anything:

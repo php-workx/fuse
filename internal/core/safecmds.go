@@ -186,6 +186,7 @@ func IsConditionallySafe(basename, fullCmd string) bool {
 var conditionalSafeCheckers = map[string]func([]string) bool{
 	"find":      isFindSafe,
 	"git":       isGitSafe,
+	"go":        isGoSafe,
 	"sed":       isSedSafe,
 	"base64":    isBase64Safe,
 	"xargs":     isXargsSafe,
@@ -346,6 +347,10 @@ var unconditionalSafeGitSubs = map[string]bool{
 	"status": true, "log": true, "diff": true, "show": true,
 	"fetch": true, "rev-parse": true, "describe": true,
 	"shortlog": true, "ls-files": true, "ls-tree": true,
+	// `git grep` is a read-only content search across tracked files; it never mutates the repo.
+	"grep": true,
+	// `git blame` is a read-only annotation of line-level history.
+	"blame": true,
 }
 
 // conditionalGitCheckers map git subcommands to argument validators.
@@ -1044,6 +1049,128 @@ func isGofumptSafe(fields []string) bool {
 
 func isJustSafe(fields []string) bool {
 	return len(fields) >= 2 && commandTokenMatches(fields[0], "just") && fields[1] == "check"
+}
+
+// unconditionalSafeGoSubs lists `go` subcommands whose entire invocation is
+// read-only regardless of arguments. Covers version/help reporters and the
+// standard lint/format/test workflow commands already allow-listed as safe
+// prefixes — listing them here lets the explicit conditional safe rule match
+// instead of the unknown-command fallback.
+var unconditionalSafeGoSubs = map[string]bool{
+	"version": true,
+	"help":    true,
+	"env":     true,
+	"list":    true,
+	"doc":     true,
+	"vet":     true,
+	"test":    true,
+	"fmt":     true,
+	"build":   true,
+}
+
+// isGoSafe: `go` is safe for read-only subcommands (version, env, list, doc,
+// vet, test, fmt, build) and for `go tool … <version|--version|--help>`.
+// Other `go tool` invocations can execute project tools and remain unclassified
+// here so they fall through to the default SAFE fallback — the ticket accepts
+// that behavior but wants an explicit rule for the common version/help form.
+func isGoSafe(fields []string) bool {
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "go") {
+		return false
+	}
+	sub := fields[1]
+	if unconditionalSafeGoSubs[sub] {
+		return true
+	}
+	if sub == "tool" {
+		return IsGoToolReportSafe(fields[2:])
+	}
+	return false
+}
+
+// IsGoToolReportSafe returns true when `go tool` is invoked purely as a
+// version/help reporter: the final positional token must be "version",
+// "--version", "-version", "--help", "-h", or "help". Flags before it are
+// allowed because wrappers like `-modfile=tools.mod` are common.
+//
+// Exported so tests and external callers can verify read-only `go tool` usage
+// without re-implementing the token-shape check that the classifier relies on.
+func IsGoToolReportSafe(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	last := args[len(args)-1]
+	switch last {
+	case "version", "--version", "-version", "--help", "-h", "help":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsGitSubcommandReadOnly reports whether a bare `git <sub> …` invocation is
+// a read-only operation according to the built-in safe-command tables. It is
+// the public counterpart of isGitSafe, used by tests (and potential external
+// callers) to confirm that subcommands like `grep`, `log`, and `status` match
+// an explicit allowlist rather than the default-safe fallback.
+//
+// args contains the tokens after the subcommand (the equivalent of the `rest`
+// slice in isGitSafe). Passing nil/empty is valid for bare subcommand forms
+// like `git status`.
+func IsGitSubcommandReadOnly(sub string, args []string) bool {
+	if sub == "" {
+		return false
+	}
+	if unconditionalSafeGitSubs[sub] {
+		return true
+	}
+	if checker, ok := conditionalGitCheckers[sub]; ok {
+		return checker(args)
+	}
+	return false
+}
+
+// IsTimeoutWrapped reports whether the command begins with the `timeout`
+// wrapper invocation (`timeout <duration> <inner cmd …>`). It only inspects
+// the raw token structure — it does not itself strip the wrapper. Use
+// ClassificationNormalize for the full wrapper-stripping pipeline; this helper
+// exists so tests can assert that a command is intentionally timeout-wrapped
+// before classifying its inner command.
+func IsTimeoutWrapped(cmd string) bool {
+	fields := strings.Fields(cmd)
+	if len(fields) < 3 {
+		return false
+	}
+	if filepath.Base(fields[0]) != "timeout" {
+		return false
+	}
+	// Skip any leading timeout flags (e.g. -s TERM, -k 5s) to find the
+	// duration argument. The duration must be the first positional token.
+	i := 1
+	for i < len(fields) {
+		t := fields[i]
+		if t == "--" {
+			i++
+			break
+		}
+		if timeoutFlagsWithArg[t] {
+			i += 2
+			continue
+		}
+		if timeoutFlagsNoArg[t] {
+			i++
+			continue
+		}
+		if isTimeoutCombinedFlag(t) {
+			i++
+			continue
+		}
+		break
+	}
+	// Need a duration token plus at least one command token after it.
+	if i >= len(fields) || strings.HasPrefix(fields[i], "-") {
+		return false
+	}
+	return i+1 < len(fields)
 }
 
 func isHelpOrVersion(args []string) bool {

@@ -10,10 +10,10 @@ repos:
       - id: check-added-large-files
         args: ["--maxkb=500"]
 
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.24.2
+  - repo: https://github.com/betterleaks/betterleaks
+    rev: v1.1.2
     hooks:
-      - id: gitleaks
+      - id: betterleaks-system
 
   - repo: local
     hooks:
