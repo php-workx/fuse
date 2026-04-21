@@ -71,7 +71,7 @@ echo '{"tool_name":"Bash","tool_input":{"command":"ls -la"}}' | fuse hook evalua
 
 # Integrate with your agent
 fuse install claude    # or: fuse install codex
-fuse doctor            # verify the setup (prints hook binary path + version;
+fuse doctor            # verify the setup (prints hook binary path + build info;
                        # warns if the binary on PATH is stale)
 ```
 
@@ -146,10 +146,12 @@ brew upgrade php-workx/tap/fuse
 fuse doctor
 ```
 
-`fuse doctor` reports the hook binary path and version and warns with
-`[ WARN ] fuse binary in PATH` when the `PATH` binary drifts from the build
-you ran `doctor` with. The same warning is emitted by `fuse install claude` and
-`fuse install codex`. See
+`fuse doctor` reports the resolved hook binary path and — when the PATH binary
+matches the running build — its version. For a different (unverified) PATH
+binary, it reports the SHA-256 hash and file size instead of executing it. It
+warns with `[ WARN ] fuse binary in PATH` when the PATH binary drifts from the
+build you ran `doctor` with. The same warning is emitted by `fuse install
+claude` and `fuse install codex`. See
 [docs/QUICKSTART.md](docs/QUICKSTART.md#detecting-a-stale-hook-binary) for the
 full output and fix workflow.
 

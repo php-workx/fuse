@@ -108,13 +108,20 @@ flags this with `[ WARN ]` and a concrete fix hint:
 
 ```
   [ WARN ]  fuse binary in PATH
-           hook binary appears stale or mismatched: path: /usr/local/bin/fuse; version: fuse 1.3.0 (old-commit) built 2026-04-01; current build: fuse 1.4.0 (new-commit) built 2026-04-18
+           hook binary appears stale or mismatched: path: /usr/local/bin/fuse; version: unverified (sha256:abcdef1234567890, size: 18070551 bytes; not executed); current build: fuse 1.4.0 (new-commit) built 2026-04-18
            fix: reinstall fuse (e.g. `go install ./cmd/fuse` or download the latest release) so the hook uses the current build
 ```
 
+**Why `unverified`?** `fuse doctor` never executes the PATH binary. Instead it
+compares the on-disk file's SHA-256 hash against the running process. When the
+hashes differ (a different binary is on `PATH`), the output shows
+`unverified (sha256:..., size: N bytes; not executed)` rather than a version
+string. The build you are currently running — the version your hooks *should*
+use — appears alongside as `current build: ...`.
+
 (Without `--verbose`, `fuse doctor` truncates detail lines longer than 120
-characters; run `fuse doctor --verbose` to see the full path and version
-strings.)
+characters to their first item; run `fuse doctor --verbose` to see the full
+SHA-256 hash, file size, and current-build version strings.)
 
 The same warning is printed at the end of `fuse install claude` and `fuse
 install codex` when the installer detects drift.
@@ -141,8 +148,8 @@ Notes:
   release build or rebuild with the project `justfile` targets to get
   meaningful drift detection.
 - When the running process and the `PATH` binary resolve to the same file on
-  disk (after symlink resolution), the check passes without running `fuse
-  version` — there is no drift to report.
+  disk (after symlink resolution), or their SHA-256 digests are identical, the
+  check passes without any stale warning — there is no drift to report.
 
 ## Optional: Start in Dry-Run Mode
 
