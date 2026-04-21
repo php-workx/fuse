@@ -24,6 +24,7 @@ firebase-debug.log
 .worktrees
 .tickets
 .attest/runs
+.verk
 
 # SonarQube
 .sonarqube/
