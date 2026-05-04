@@ -960,7 +960,15 @@ type heredocCollector struct {
 }
 
 // visit is the syntax.Walk callback for heredoc extraction.
+// Skips heredocs inside $(cat <<EOF ... EOF) substitutions: cat does not
+// execute the body, so the heredoc is a multi-line string literal, not shell
+// code. Parsing such bodies as bash mis-fires on markdown punctuation like
+// backticks, parens, or env-like assignments in commit messages. Pipe forms
+// like `cat <<EOF | bash` are still walked because the body IS executed.
 func (c *heredocCollector) visit(node syntax.Node) bool {
+	if cs, ok := node.(*syntax.CmdSubst); ok {
+		return !isCmdSubstCat(cs)
+	}
 	stmt, ok := node.(*syntax.Stmt)
 	if !ok {
 		return true
