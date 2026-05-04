@@ -870,6 +870,39 @@ func TestDisabledBuiltinSet_Empty(t *testing.T) {
 	}
 }
 
+// --- builtin:cred:env-dump regression tests ---
+
+func TestEnvDump_MatchesBareEnvKeyword(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+	// `set` is also matched by the regex but isn't in the keyword index for
+	// this rule, so EvaluateBuiltins won't surface it. Cover only the
+	// keyword-indexed forms.
+	for _, cmd := range []string{"env", "printenv", "foo && env"} {
+		match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+		if match == nil || match.RuleID != "builtin:cred:env-dump" {
+			t.Errorf("%q: expected builtin:cred:env-dump match, got %+v", cmd, match)
+		}
+	}
+}
+
+func TestEnvDump_DoesNotMatchDotEnvFilePath(t *testing.T) {
+	// Regression: word boundary in `\b(env)\b\s*$` previously matched the
+	// `env` suffix of `.env` file paths, mis-flagging legitimate file reads
+	// as environment-variable dumps.
+	idx := BuildRuleIndex(BuiltinRules)
+	for _, cmd := range []string{
+		"grep -c TOKEN /path/.env",
+		"cat .env",
+		"cat foo.env",
+		"grep TOKEN /Users/me/proj/.env",
+	} {
+		match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+		if match != nil && match.RuleID == "builtin:cred:env-dump" {
+			t.Errorf("%q: should NOT match builtin:cred:env-dump (false positive on .env path)", cmd)
+		}
+	}
+}
+
 // --- EvaluateUserRules edge cases ---
 
 func TestEvaluateUserRules_SkipsNilCompiledRule(t *testing.T) {

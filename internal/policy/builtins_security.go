@@ -114,8 +114,11 @@ func init() {
 		// §6.3.15 Credential access & secret exposure
 		// ---------------------------------------------------------------
 		{
-			ID:      "builtin:cred:env-dump",
-			Pattern: regexp.MustCompile(`\b(env|printenv|set)\b\s*$`),
+			ID: "builtin:cred:env-dump",
+			// Require start-of-line or whitespace before the keyword so that
+			// file paths ending in `.env` (e.g. `grep TOKEN /path/.env`) are
+			// not mistaken for a bare `env` invocation.
+			Pattern: regexp.MustCompile(`(?:^|\s)(env|printenv|set)\s*$`),
 			Action:  core.DecisionCaution,
 			Reason:  "Dumps all environment variables (may contain secrets)",
 		},
