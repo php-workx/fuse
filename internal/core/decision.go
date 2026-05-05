@@ -70,10 +70,16 @@ type ClassifiedCommand struct {
 }
 
 // ComputeDecisionKey produces a SHA-256 hash used for approval record lookup.
-// Uses length-prefixed fields: source + displayNormalized + fileHash.
-func ComputeDecisionKey(source, displayNormalized, fileHash string) string {
+// Uses length-prefixed fields: displayNormalized + fileHash.
+//
+// Source is intentionally NOT part of the key so an approval granted from one
+// adapter (tui/hook/run/codex-shell/mcp-proxy/claude-file) is honoured by
+// every other adapter for the same command. Per-source isolation was never a
+// trust boundary — all adapters funnel through the same classification core,
+// and source remains a label on events/pending requests for observability.
+// See ticket fus-vu5r.
+func ComputeDecisionKey(displayNormalized, fileHash string) string {
 	h := sha256.New()
-	writeField(h, source)
 	writeField(h, displayNormalized)
 	writeField(h, fileHash)
 	return hex.EncodeToString(h.Sum(nil))

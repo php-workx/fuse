@@ -174,7 +174,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 		result.Decision = DecisionApproval
 		result.Reason = fmt.Sprintf("command exceeds maximum size of %d bytes", maxInputSize)
 		result.FailClosed = true
-		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
+		result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 		return result, nil
 	}
 
@@ -184,14 +184,14 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	if IsProvableMktempCleanup(displayNorm) {
 		result.Decision = DecisionCaution
 		result.Reason = "provable mktemp cleanup"
-		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
+		result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 		return result, nil
 	}
 
 	// Step 3: Compound command splitting.
 	subCmds, err := SplitCompoundCommand(displayNorm)
 	if err != nil {
-		return classifyCompoundSplitError(result, displayNorm, req.Source, evaluator, err)
+		return classifyCompoundSplitError(result, displayNorm, evaluator, err)
 	}
 	effectiveCwd, suppressCwdEscalation := simpleLeadingAbsoluteCD(subCmds, req.Cwd)
 
@@ -203,14 +203,14 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 
 	// Step 12: Compute decision key.
 	combinedHash := strings.Join(fileHashes, ":")
-	result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, combinedHash)
+	result.DecisionKey = ComputeDecisionKey(displayNorm, combinedHash)
 
 	return result, nil
 }
 
 // classifyCompoundSplitError handles the case where compound splitting fails.
 // Checks hardcoded rules before falling back to fail-closed APPROVAL.
-func classifyCompoundSplitError(result *ClassifyResult, displayNorm, source string, evaluator PolicyEvaluator, splitErr error) (*ClassifyResult, error) {
+func classifyCompoundSplitError(result *ClassifyResult, displayNorm string, evaluator PolicyEvaluator, splitErr error) (*ClassifyResult, error) {
 	if evaluator != nil {
 		classified := ClassificationNormalize(displayNorm)
 		candidates := []string{displayNorm, classified.Outer}
@@ -222,7 +222,7 @@ func classifyCompoundSplitError(result *ClassifyResult, displayNorm, source stri
 			if d, reason := evaluator.EvaluateHardcoded(candidate); d != "" {
 				result.Decision = d
 				result.Reason = reason
-				result.DecisionKey = ComputeDecisionKey(source, displayNorm, "")
+				result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 				return result, nil
 			}
 		}
@@ -231,7 +231,7 @@ func classifyCompoundSplitError(result *ClassifyResult, displayNorm, source stri
 	result.Decision = DecisionApproval
 	result.Reason = fmt.Sprintf("compound split error (fail-closed): %v", splitErr)
 	result.FailClosed = true
-	result.DecisionKey = ComputeDecisionKey(source, displayNorm, "")
+	result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 	return result, nil
 }
 

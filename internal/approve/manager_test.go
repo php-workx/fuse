@@ -121,6 +121,101 @@ func TestConsume_InvalidHMAC(t *testing.T) {
 	}
 }
 
+// fus-vu5r: a single decision_key is shared by every adapter (tui, hook,
+// run, codex-shell, mcp-proxy, claude-file). These tests exercise the
+// approval-cache fast path under each scope to confirm cross-source reuse.
+
+func TestCrossSource_OnceScope_HookConsumesTUIApproval(t *testing.T) {
+	m := setupTestManager(t)
+
+	// TUI grants once-scope approval. Hook then consumes it.
+	key := core.ComputeDecisionKey("git add docs/spec.md", "")
+	if err := m.CreateApproval(key, string(core.DecisionApproval), "once", "sess-1"); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+
+	// Hook adapter consumes — same key derived independently.
+	got, err := m.ConsumeApproval(key, "sess-1")
+	if err != nil {
+		t.Fatalf("ConsumeApproval: %v", err)
+	}
+	if got != core.DecisionApproval {
+		t.Fatalf("hook did not see TUI approval: got %q", got)
+	}
+
+	// Once-scope is consumed; second call returns empty.
+	got2, _ := m.ConsumeApproval(key, "sess-1")
+	if got2 != "" {
+		t.Fatalf("once-scope should consume after first use, got %q", got2)
+	}
+}
+
+func TestCrossSource_CommandScope_ReusableAcrossAdapters(t *testing.T) {
+	m := setupTestManager(t)
+
+	key := core.ComputeDecisionKey("kubectl get pods", "")
+	if err := m.CreateApproval(key, string(core.DecisionApproval), "command", "sess-2"); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+
+	// Multiple adapter calls (hook, run, codex-shell) all hit the same cache.
+	for i := 0; i < 3; i++ {
+		got, err := m.ConsumeApproval(key, "sess-2")
+		if err != nil {
+			t.Fatalf("attempt %d: %v", i+1, err)
+		}
+		if got != core.DecisionApproval {
+			t.Fatalf("attempt %d: command scope should be reusable, got %q", i+1, got)
+		}
+	}
+}
+
+func TestCrossSource_SessionScope_RequiresMatchingSession(t *testing.T) {
+	m := setupTestManager(t)
+
+	key := core.ComputeDecisionKey("aws s3 ls", "")
+	if err := m.CreateApproval(key, string(core.DecisionApproval), "session", "sess-A"); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+
+	// Same session, any source — satisfied.
+	got, err := m.ConsumeApproval(key, "sess-A")
+	if err != nil {
+		t.Fatalf("ConsumeApproval same session: %v", err)
+	}
+	if got != core.DecisionApproval {
+		t.Fatalf("same session should match: got %q", got)
+	}
+
+	// Different session — must NOT match (scope='session' filter).
+	got2, err := m.ConsumeApproval(key, "sess-B")
+	if err != nil {
+		t.Fatalf("ConsumeApproval other session: %v", err)
+	}
+	if got2 != "" {
+		t.Fatalf("session scope leaked across sessions: got %q", got2)
+	}
+}
+
+func TestCrossSource_ForeverScope_SatisfiesIndefinitely(t *testing.T) {
+	m := setupTestManager(t)
+
+	key := core.ComputeDecisionKey("rm -rf node_modules", "")
+	if err := m.CreateApproval(key, string(core.DecisionApproval), "forever", "sess-3"); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+
+	for i := 0; i < 5; i++ {
+		got, err := m.ConsumeApproval(key, "sess-3")
+		if err != nil {
+			t.Fatalf("attempt %d: %v", i+1, err)
+		}
+		if got != core.DecisionApproval {
+			t.Fatalf("attempt %d: forever scope should always satisfy, got %q", i+1, got)
+		}
+	}
+}
+
 func TestNewManager(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	database, err := db.OpenDB(dbPath)
