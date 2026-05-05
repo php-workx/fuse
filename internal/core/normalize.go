@@ -68,6 +68,21 @@ func DisplayNormalize(raw string) string {
 	// 7. Collapse internal runs of whitespace to single space
 	s = reInternalWS.ReplaceAllString(s, " ")
 
+	// 8. Anti-evasion: expand ANSI-C $'...' literals so $'\x72\x6d' becomes
+	//    "rm". Runs before percent/path decoding because the decoded bytes
+	//    can themselves be percent or path tokens.
+	s = expandAnsiCQuoting(s)
+
+	// 9. Anti-evasion: percent-decode the path portion of URL-shaped tokens
+	//    so https://%65vil.com/x becomes https://evil.com/x. Query strings
+	//    and non-URL tokens are untouched.
+	s = decodeURLPercents(s)
+
+	// 10. Anti-evasion: collapse `..` segments inside absolute-path tokens so
+	//     /foo/../etc/passwd becomes /etc/passwd. Bounded iteration prevents
+	//     adversarial blow-up.
+	s = collapsePaths(s)
+
 	return s
 }
 

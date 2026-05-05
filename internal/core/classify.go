@@ -10,8 +10,10 @@ import (
 	"github.com/php-workx/fuse/internal/inspect"
 )
 
-// maxInputSize is the maximum allowed raw command length (64 KB).
-const maxInputSize = 64 * 1024
+// maxInputSize is the maximum allowed raw command length (10 KB). Tightened
+// from 64 KB so the ~150 builtin regexes have a bounded worst-case input;
+// realistic commands are well below 10 KB (see commands.yaml fixture corpus).
+const maxInputSize = 10 * 1024
 
 // Reason strings emitted by the fallback layers. Exported so tests and callers
 // can distinguish an explicit safe-rule match (UnconditionallySafeReason /
