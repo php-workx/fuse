@@ -496,8 +496,73 @@ func TestClassify_LeadingWorkspaceCDReadOnlyChainsAreSafe(t *testing.T) {
 			expected: core.DecisionSafe,
 		},
 		{
+			name:     "yarn test after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && yarn test",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "yarn lint after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && yarn lint --max-warnings=0",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "yarn check after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && yarn check",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "npm test after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && npm test -- --runInBand",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "npm run lint after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && npm run lint",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "npm run check after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && npm run check",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "pnpm test after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && pnpm test",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "pnpm lint after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && pnpm lint",
+			expected: core.DecisionSafe,
+		},
+		{
+			name:     "pnpm check after workspace cd",
+			command:  "cd /Users/runger/workspaces/fuse && pnpm run check",
+			expected: core.DecisionSafe,
+		},
+		{
 			name:     "write command after workspace cd remains cautious",
 			command:  "cd /Users/runger/workspaces/fuse && git add .",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "package manager fix flag after workspace cd remains cautious",
+			command:  "cd /Users/runger/workspaces/fuse && yarn lint --fix",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "package manager snapshot update after workspace cd remains cautious",
+			command:  "cd /Users/runger/workspaces/fuse && npm test -- --updateSnapshot",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "package manager deploy after workspace cd remains cautious",
+			command:  "cd /Users/runger/workspaces/fuse && pnpm run deploy",
+			expected: core.DecisionCaution,
+		},
+		{
+			name:     "destructive command after workspace cd remains cautious",
+			command:  "cd /Users/runger/workspaces/fuse && rm -rf src",
 			expected: core.DecisionCaution,
 		},
 		{

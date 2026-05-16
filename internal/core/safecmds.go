@@ -91,8 +91,7 @@ var unconditionalSafePrefixes = []string{
 	// Development tools (read-only)
 	"cargo check", "cargo test", "cargo clippy", "cargo fmt",
 	"go vet", "go test", "go fmt", "go help", "go build",
-	"npm test", "npm run lint", "npm run test", "npx jest",
-	"yarn test", "pnpm test", "bun test",
+	"npx jest", "bun test",
 	"pytest", "python -m pytest", "python -m unittest",
 	"tsc --noEmit", "tsc --version",
 	"make check", "make test", "make lint",
@@ -142,6 +141,10 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 	}
 	basename := fields[0]
 
+	if isPackageManagerReadOnlyScript(fields) {
+		return true
+	}
+
 	// Check single-word safe set (includes Windows cmdlets and CMD builtins).
 	if IsUnconditionalSafe(basename) {
 		return true
@@ -164,6 +167,53 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 		}
 	}
 
+	return false
+}
+
+var packageManagerReadOnlyScripts = map[string]bool{
+	"test":  true,
+	"lint":  true,
+	"check": true,
+}
+
+func isPackageManagerReadOnlyScript(fields []string) bool {
+	if len(fields) < 2 {
+		return false
+	}
+
+	manager := fields[0]
+	if manager != "npm" && manager != "yarn" && manager != "pnpm" {
+		return false
+	}
+
+	scriptIndex := 1
+	if fields[1] == "run" {
+		scriptIndex = 2
+	} else if manager == "npm" && fields[1] != "test" {
+		return false
+	}
+	if len(fields) <= scriptIndex || !packageManagerReadOnlyScripts[fields[scriptIndex]] {
+		return false
+	}
+
+	return !hasPackageManagerMutatingFlag(fields[scriptIndex+1:])
+}
+
+func hasPackageManagerMutatingFlag(args []string) bool {
+	for _, arg := range args {
+		lowerArg := strings.ToLower(arg)
+		switch lowerArg {
+		case "-f", "--force", "-u", "--update", "--updatesnapshot", "--update-snapshot", "-w", "--write", "--fix":
+			return true
+		}
+		if strings.HasPrefix(lowerArg, "--fix=") ||
+			strings.HasPrefix(lowerArg, "--write=") ||
+			strings.HasPrefix(lowerArg, "--update=") ||
+			strings.HasPrefix(lowerArg, "--updatesnapshot=") ||
+			strings.HasPrefix(lowerArg, "--update-snapshot=") {
+			return true
+		}
+	}
 	return false
 }
 
@@ -258,6 +308,10 @@ func KnownUnsafeInspectionVariant(basename, fullCmd string) (string, bool) {
 	case "fuse":
 		if len(fields) > 0 && !isFuseSafe(fields) {
 			return "fuse command is not allowlisted as read-only", true
+		}
+	case "npm", "yarn", "pnpm":
+		if len(fields) > 0 && !isPackageManagerReadOnlyScript(fields) {
+			return "package manager command is not allowlisted as read-only", true
 		}
 	}
 	return "", false
