@@ -23,32 +23,37 @@ type replayEventsOptions struct {
 }
 
 type replayEventsReport struct {
-	Total                     int                         `json:"total"`
-	HistoricalByDecision      map[string]int              `json:"historical_by_decision"`
-	CurrentByDecision         map[string]int              `json:"current_by_decision"`
-	DecisionMatrix            map[string]map[string]int   `json:"decision_matrix"`
-	HistoricalApprovalEvents  int                         `json:"historical_approval_events"`
-	CurrentApprovalEvents     int                         `json:"current_approval_events"`
-	DedupedApprovalPromptKeys int                         `json:"deduped_approval_prompt_keys"`
-	EstimatedLivePromptKeys   int                         `json:"estimated_live_prompt_keys"`
-	ReplayDriftApprovalEvents int                         `json:"replay_drift_approval_events"`
-	ReplayDriftPromptKeys     int                         `json:"replay_drift_prompt_keys"`
-	RemainingClusters         []replayEventsCluster       `json:"remaining_clusters"`
-	ReplayDriftClusters       []replayEventsCluster       `json:"replay_drift_clusters"`
-	ClassificationErrors      []replayClassificationError `json:"classification_errors,omitempty"`
+	Total                          int                         `json:"total"`
+	HistoricalByDecision           map[string]int              `json:"historical_by_decision"`
+	CurrentByDecision              map[string]int              `json:"current_by_decision"`
+	DecisionMatrix                 map[string]map[string]int   `json:"decision_matrix"`
+	HistoricalApprovalEvents       int                         `json:"historical_approval_events"`
+	CurrentApprovalEvents          int                         `json:"current_approval_events"`
+	DedupedApprovalPromptKeys      int                         `json:"deduped_approval_prompt_keys"`
+	EstimatedLivePromptKeys        int                         `json:"estimated_live_prompt_keys"`
+	ReplayDriftApprovalEvents      int                         `json:"replay_drift_approval_events"`
+	ReplayDriftPromptKeys          int                         `json:"replay_drift_prompt_keys"`
+	ReplayArtifactApprovalEvents   int                         `json:"replay_artifact_approval_events"`
+	ReplayArtifactPromptKeys       int                         `json:"replay_artifact_prompt_keys"`
+	ArtifactAdjustedLivePromptKeys int                         `json:"artifact_adjusted_live_prompt_keys"`
+	RemainingClusters              []replayEventsCluster       `json:"remaining_clusters"`
+	ReplayDriftClusters            []replayEventsCluster       `json:"replay_drift_clusters"`
+	ReplayArtifactClusters         []replayEventsCluster       `json:"replay_artifact_clusters"`
+	ClassificationErrors           []replayClassificationError `json:"classification_errors,omitempty"`
 }
 
 type replayEventsCluster struct {
-	Count                int            `json:"count"`
-	Decision             string         `json:"decision"`
-	Reason               string         `json:"reason"`
-	RuleID               string         `json:"rule_id,omitempty"`
-	PromptKeys           int            `json:"prompt_keys"`
-	HistoricalByDecision map[string]int `json:"historical_by_decision"`
-	Example              string         `json:"example"`
-	Source               string         `json:"source,omitempty"`
-	Agent                string         `json:"agent,omitempty"`
-	Workspace            string         `json:"workspace,omitempty"`
+	Count                 int            `json:"count"`
+	Decision              string         `json:"decision"`
+	Reason                string         `json:"reason"`
+	RuleID                string         `json:"rule_id,omitempty"`
+	PromptKeys            int            `json:"prompt_keys"`
+	HistoricalByDecision  map[string]int `json:"historical_by_decision"`
+	Example               string         `json:"example"`
+	Source                string         `json:"source,omitempty"`
+	Agent                 string         `json:"agent,omitempty"`
+	Workspace             string         `json:"workspace,omitempty"`
+	ParseErrorFingerprint string         `json:"parse_error_fingerprint,omitempty"`
 
 	promptKeySet map[string]bool
 }
@@ -127,8 +132,10 @@ func buildReplayEventsReport(database *db.DB, evaluator core.PolicyEvaluator, li
 	}
 	clusters := make(map[string]*replayEventsCluster)
 	driftClusters := make(map[string]*replayEventsCluster)
+	artifactClusters := make(map[string]*replayEventsCluster)
 	approvalPromptKeys := make(map[string]bool)
 	driftPromptKeys := make(map[string]bool)
+	artifactPromptKeys := make(map[string]bool)
 
 	for i := range events {
 		event := &events[i]
@@ -169,6 +176,12 @@ func buildReplayEventsReport(database *db.DB, evaluator core.PolicyEvaluator, li
 				addReplayCluster(driftClusters, event, result, oldDecision)
 				continue
 			}
+			if fingerprint, ok := replayArtifactFingerprint(event.Command, result); ok {
+				report.ReplayArtifactApprovalEvents++
+				artifactPromptKeys[result.DecisionKey] = true
+				addReplayArtifactCluster(artifactClusters, event, result, oldDecision, fingerprint)
+				continue
+			}
 		}
 		if result.Decision == core.DecisionApproval || result.Decision == core.DecisionCaution {
 			addReplayCluster(clusters, event, result, oldDecision)
@@ -177,14 +190,60 @@ func buildReplayEventsReport(database *db.DB, evaluator core.PolicyEvaluator, li
 
 	report.DedupedApprovalPromptKeys = len(approvalPromptKeys)
 	report.ReplayDriftPromptKeys = len(driftPromptKeys)
+	report.ReplayArtifactPromptKeys = len(artifactPromptKeys)
 	report.EstimatedLivePromptKeys = report.DedupedApprovalPromptKeys - report.ReplayDriftPromptKeys
+	report.ArtifactAdjustedLivePromptKeys = report.EstimatedLivePromptKeys - report.ReplayArtifactPromptKeys
 	report.RemainingClusters = sortedReplayClusters(clusters, top)
 	report.ReplayDriftClusters = sortedReplayClusters(driftClusters, top)
+	report.ReplayArtifactClusters = sortedReplayClusters(artifactClusters, top)
 	return report, nil
 }
 
 func isReplayDriftApprovalCandidate(result *core.ClassifyResult) bool {
 	return result.Decision == core.DecisionApproval && result.Reason == "file not found"
+}
+
+func replayArtifactFingerprint(command string, result *core.ClassifyResult) (string, bool) {
+	if result.Decision != core.DecisionApproval {
+		return "", false
+	}
+	if !strings.HasPrefix(result.Reason, "compound split error with critical indicators") {
+		return "", false
+	}
+	if !containsRedactionMarker(command) {
+		return "", false
+	}
+	return parseErrorFingerprint(result.Reason)
+}
+
+func containsRedactionMarker(command string) bool {
+	markers := []string{
+		"[REDACTED]",
+		"[REDACTED JWT]",
+		"[REDACTED BASE64]",
+		"[REDACTED VENDOR TOKEN]",
+		"[REDACTED PEM BLOCK]",
+	}
+	for _, marker := range markers {
+		if strings.Contains(command, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseErrorFingerprint(reason string) (string, bool) {
+	lower := strings.ToLower(reason)
+	switch {
+	case strings.Contains(lower, "encountered )"):
+		return "unexpected-rparen", true
+	case strings.Contains(lower, "without closing quote"), strings.Contains(lower, "unterminated"):
+		return "unterminated-quote", true
+	case strings.Contains(lower, "reached eof"):
+		return "eof", true
+	default:
+		return "", false
+	}
 }
 
 func addReplayCluster(clusters map[string]*replayEventsCluster, event *db.EventRecord, result *core.ClassifyResult, oldDecision string) {
@@ -206,6 +265,32 @@ func addReplayCluster(clusters map[string]*replayEventsCluster, event *db.EventR
 			Agent:                event.Agent,
 			Workspace:            event.WorkspaceRoot,
 			promptKeySet:         make(map[string]bool),
+		}
+		clusters[key] = cluster
+	}
+	cluster.Count++
+	cluster.HistoricalByDecision[oldDecision]++
+	if result.DecisionKey != "" {
+		cluster.promptKeySet[result.DecisionKey] = true
+	}
+	cluster.PromptKeys = len(cluster.promptKeySet)
+}
+
+func addReplayArtifactCluster(clusters map[string]*replayEventsCluster, event *db.EventRecord, result *core.ClassifyResult, oldDecision, fingerprint string) {
+	key := string(result.Decision) + "\x00" + fingerprint
+	cluster := clusters[key]
+	if cluster == nil {
+		cluster = &replayEventsCluster{
+			Decision:              string(result.Decision),
+			Reason:                result.Reason,
+			RuleID:                result.RuleID,
+			HistoricalByDecision:  make(map[string]int),
+			Example:               event.Command,
+			Source:                event.Source,
+			Agent:                 event.Agent,
+			Workspace:             event.WorkspaceRoot,
+			ParseErrorFingerprint: fingerprint,
+			promptKeySet:          make(map[string]bool),
 		}
 		clusters[key] = cluster
 	}
@@ -250,6 +335,8 @@ func printReplayEventsReport(report *replayEventsReport) {
 	fmt.Printf("Deduped approval prompt keys: %d\n", report.DedupedApprovalPromptKeys)
 	fmt.Printf("Replay drift approval keys: %d\n", report.ReplayDriftPromptKeys)
 	fmt.Printf("Estimated live approval prompt keys: %d\n", report.EstimatedLivePromptKeys)
+	fmt.Printf("Replay artifact approval keys: %d\n", report.ReplayArtifactPromptKeys)
+	fmt.Printf("Artifact-adjusted live approval prompt keys: %d\n", report.ArtifactAdjustedLivePromptKeys)
 	if len(report.ClassificationErrors) > 0 {
 		fmt.Printf("Classification errors: %d\n", len(report.ClassificationErrors))
 	}
@@ -293,6 +380,23 @@ func printReplayEventsReport(report *replayEventsReport) {
 			_, _ = fmt.Fprintf(w, "%d\t%d\t%s\t%s\n",
 				cluster.Count,
 				cluster.PromptKeys,
+				shorten(cluster.Reason, 80),
+				shorten(cluster.Example, 96),
+			)
+		}
+		_ = w.Flush()
+	}
+
+	if len(report.ReplayArtifactClusters) > 0 {
+		fmt.Println("\nReplay artifact approval candidates")
+		w = tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "COUNT\tKEYS\tFINGERPRINT\tREASON\tEXAMPLE")
+		for i := range report.ReplayArtifactClusters {
+			cluster := &report.ReplayArtifactClusters[i]
+			_, _ = fmt.Fprintf(w, "%d\t%d\t%s\t%s\t%s\n",
+				cluster.Count,
+				cluster.PromptKeys,
+				cluster.ParseErrorFingerprint,
 				shorten(cluster.Reason, 80),
 				shorten(cluster.Example, 96),
 			)

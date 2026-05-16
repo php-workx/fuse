@@ -140,6 +140,72 @@ func TestRunReplayEvents_SeparatesFileNotFoundReplayDrift(t *testing.T) {
 	}
 }
 
+func TestRunReplayEvents_SeparatesRedactedParseArtifacts(t *testing.T) {
+	fuseHome := t.TempDir()
+	t.Setenv("FUSE_HOME", fuseHome)
+	if err := config.EnsureDirectories(); err != nil {
+		t.Fatalf("EnsureDirectories: %v", err)
+	}
+
+	database, err := db.OpenDB(config.DBPath())
+	if err != nil {
+		t.Fatalf("OpenDB: %v", err)
+	}
+	records := []db.EventRecord{
+		{
+			Command:       "PATH=/tmp [REDACTED] )",
+			Decision:      "APPROVAL",
+			Cwd:           filepath.Join(fuseHome, "repo"),
+			WorkspaceRoot: filepath.Join(fuseHome, "repo"),
+		},
+		{
+			Command:       "PATH=/tmp )",
+			Decision:      "APPROVAL",
+			Cwd:           filepath.Join(fuseHome, "repo"),
+			WorkspaceRoot: filepath.Join(fuseHome, "repo"),
+		},
+	}
+	for i := range records {
+		if err := database.LogEvent(&records[i]); err != nil {
+			t.Fatalf("LogEvent(%d): %v", i, err)
+		}
+	}
+	_ = database.Close()
+
+	stdout, _, err := captureCLIOutput(t, func() error {
+		return runReplayEvents(&replayEventsOptions{json: true, top: 10})
+	})
+	if err != nil {
+		t.Fatalf("runReplayEvents: %v", err)
+	}
+
+	var report replayEventsReport
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, stdout)
+	}
+	if report.CurrentApprovalEvents != 2 {
+		t.Fatalf("current approval events = %d, want 2", report.CurrentApprovalEvents)
+	}
+	if report.ReplayArtifactApprovalEvents != 1 {
+		t.Fatalf("replay artifact approval events = %d, want 1", report.ReplayArtifactApprovalEvents)
+	}
+	if report.EstimatedLivePromptKeys != 2 {
+		t.Fatalf("estimated live prompt keys = %d, want 2", report.EstimatedLivePromptKeys)
+	}
+	if report.ArtifactAdjustedLivePromptKeys != 1 {
+		t.Fatalf("artifact-adjusted live prompt keys = %d, want 1", report.ArtifactAdjustedLivePromptKeys)
+	}
+	if len(report.ReplayArtifactClusters) != 1 {
+		t.Fatalf("replay artifact clusters = %d, want 1", len(report.ReplayArtifactClusters))
+	}
+	if got := report.ReplayArtifactClusters[0].ParseErrorFingerprint; got != "unexpected-rparen" {
+		t.Fatalf("parse error fingerprint = %q, want unexpected-rparen", got)
+	}
+	if len(report.RemainingClusters) != 1 {
+		t.Fatalf("remaining clusters = %d, want 1 for non-redacted live approval", len(report.RemainingClusters))
+	}
+}
+
 func TestRunReplayEvents_HumanSummary(t *testing.T) {
 	fuseHome := t.TempDir()
 	t.Setenv("FUSE_HOME", fuseHome)
