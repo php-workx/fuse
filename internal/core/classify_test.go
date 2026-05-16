@@ -1357,6 +1357,86 @@ func TestClassify_SensitiveEnvVars(t *testing.T) {
 	}
 }
 
+func TestClassify_SensitiveEnvAssignments(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+		reason   string
+	}{
+		{
+			name:     "google cloud sdk path prepend is scoped developer setup",
+			command:  `PATH="/Users/runger/google-cloud-sdk/bin:$PATH" kubectl -n inference-platform get pods`,
+			expected: core.DecisionCaution,
+			reason:   "scoped developer environment assignment",
+		},
+		{
+			name:     "mktemp home test isolation is scoped developer setup",
+			command:  `HOME="$(mktemp -d)" go test ./internal/core -run TestFoo`,
+			expected: core.DecisionCaution,
+			reason:   "scoped developer environment assignment",
+		},
+		{
+			name:     "temporary home help command is scoped developer setup",
+			command:  "HOME=/tmp colgrep --help",
+			expected: core.DecisionCaution,
+			reason:   "scoped developer environment assignment",
+		},
+		{
+			name:     "tmp path injection remains approval",
+			command:  "PATH=/tmp:$PATH git status",
+			expected: core.DecisionApproval,
+			reason:   "dangerous environment assignment",
+		},
+		{
+			name:     "ld preload remains approval",
+			command:  "LD_PRELOAD=/evil git status",
+			expected: core.DecisionApproval,
+			reason:   "dangerous environment assignment",
+		},
+		{
+			name:     "node options require remains approval",
+			command:  "NODE_OPTIONS=--require=./hook.js npm test",
+			expected: core.DecisionApproval,
+			reason:   "dangerous environment assignment",
+		},
+		{
+			name:     "dangerous env does not downgrade blocked command",
+			command:  "PATH=/evil rm -rf /",
+			expected: core.DecisionBlocked,
+		},
+		{
+			name:     "env command google cloud sdk path prepend is scoped developer setup",
+			command:  `env PATH="/Users/runger/google-cloud-sdk/bin:$PATH" kubectl get pods`,
+			expected: core.DecisionCaution,
+			reason:   "scoped developer environment assignment",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/Users/runger/workspaces/fuse",
+				Source:     "test",
+				SessionID:  "test-session",
+			}
+			result, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("got %s, want %s (reason: %s)", result.Decision, tt.expected, result.Reason)
+			}
+			if tt.reason != "" && result.Reason != tt.reason {
+				t.Fatalf("reason = %q, want %q", result.Reason, tt.reason)
+			}
+		})
+	}
+}
+
 func TestClassify_InterpreterBackedDangerousScriptUsesInspectionResult(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 

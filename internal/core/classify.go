@@ -630,14 +630,170 @@ func applyEnvVarEscalations(sub *SubCommandResult, subCmd string, classified Cla
 	// Security-sensitive env var assignment detected during normalization.
 	// Applied after the classification loop so it doesn't short-circuit
 	// BLOCKED detection (e.g., LD_PRELOAD=/evil rm -rf / should be BLOCKED, not APPROVAL).
-	if classified.SensitiveEnvAssignment {
-		combined := MaxDecision(sub.Decision, DecisionApproval)
+	if assessment, ok := assessSensitiveEnvAssignment(subCmd, classified.SensitiveEnvAssignment); ok {
+		combined := MaxDecision(sub.Decision, assessment.decision)
 		if combined != sub.Decision {
 			sub.Decision = combined
-			sub.Reason = "security-sensitive environment variable assignment (via env or bare prefix)"
+			sub.Reason = assessment.reason
 			sub.RuleID = ""
 		}
 	}
+}
+
+type envAssignmentAssessment struct {
+	decision Decision
+	reason   string
+}
+
+type envAssignment struct {
+	name  string
+	value string
+}
+
+func assessSensitiveEnvAssignment(cmd string, sensitiveDetected bool) (envAssignmentAssessment, bool) {
+	assignments := leadingEnvAssignments(cmd)
+	if !sensitiveDetected && len(assignments) == 0 {
+		return envAssignmentAssessment{}, false
+	}
+
+	best := envAssignmentAssessment{}
+	for _, assignment := range assignments {
+		assessment, ok := assessSingleSensitiveEnvAssignment(assignment)
+		if !ok {
+			continue
+		}
+		if best.decision == "" || MaxDecision(best.decision, assessment.decision) != best.decision {
+			best = assessment
+		}
+	}
+	if best.decision == "" {
+		return envAssignmentAssessment{}, false
+	}
+	return best, true
+}
+
+func leadingEnvAssignments(cmd string) []envAssignment {
+	tokens, _ := tokenizeQuoteAware(cmd)
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	var assignments []envAssignment
+	i := 0
+	if commandTokenMatches(tokens[0], "env") {
+		i = 1
+		for i < len(tokens) {
+			tok := tokens[i]
+			if tok == "--" {
+				break
+			}
+			if skip, ok := envFlagSkipCount[tok]; ok {
+				i += skip
+				continue
+			}
+			if strings.HasPrefix(tok, "-") && len(tok) > 1 {
+				i++
+				continue
+			}
+			if assignment, ok := parseEnvAssignment(tok); ok {
+				assignments = append(assignments, assignment)
+				i++
+				continue
+			}
+			break
+		}
+		return assignments
+	}
+
+	for i < len(tokens) {
+		assignment, ok := parseEnvAssignment(tokens[i])
+		if !ok {
+			break
+		}
+		assignments = append(assignments, assignment)
+		i++
+	}
+	return assignments
+}
+
+func parseEnvAssignment(token string) (envAssignment, bool) {
+	if !isEnvAssignment(token) {
+		return envAssignment{}, false
+	}
+	idx := strings.Index(token, "=")
+	if idx <= 0 {
+		return envAssignment{}, false
+	}
+	return envAssignment{
+		name:  token[:idx],
+		value: strings.Trim(token[idx+1:], `"'`),
+	}, true
+}
+
+func assessSingleSensitiveEnvAssignment(assignment envAssignment) (envAssignmentAssessment, bool) {
+	name := assignment.name
+	switch {
+	case name == "PATH":
+		if isScopedDeveloperPATH(assignment.value) {
+			return envAssignmentAssessment{decision: DecisionCaution, reason: "scoped developer environment assignment"}, true
+		}
+		return envAssignmentAssessment{decision: DecisionApproval, reason: "dangerous environment assignment"}, true
+	case name == "HOME":
+		if isScopedTemporaryHOME(assignment.value) {
+			return envAssignmentAssessment{decision: DecisionCaution, reason: "scoped developer environment assignment"}, true
+		}
+		return envAssignmentAssessment{decision: DecisionApproval, reason: "dangerous environment assignment"}, true
+	case name == "LD_PRELOAD", name == "LD_LIBRARY_PATH", name == "NODE_OPTIONS", name == "GIT_EXEC_PATH":
+		return envAssignmentAssessment{decision: DecisionApproval, reason: "dangerous environment assignment"}, true
+	case strings.HasPrefix(name, "DYLD_"):
+		return envAssignmentAssessment{decision: DecisionApproval, reason: "dangerous environment assignment"}, true
+	default:
+		return envAssignmentAssessment{}, false
+	}
+}
+
+func isScopedDeveloperPATH(value string) bool {
+	if !strings.Contains(value, "$PATH") && !strings.Contains(value, "${PATH}") {
+		return false
+	}
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[1] != "$PATH" && parts[1] != "${PATH}" {
+		return false
+	}
+	prepend := filepath.Clean(parts[0])
+	if prepend != parts[0] {
+		return false
+	}
+	return isGoogleCloudSDKBinPath(prepend)
+}
+
+func isGoogleCloudSDKBinPath(path string) bool {
+	if strings.HasPrefix(path, "/Users/") {
+		rest := strings.TrimPrefix(path, "/Users/")
+		return strings.Count(rest, "/") == 2 && strings.HasSuffix(rest, "/google-cloud-sdk/bin")
+	}
+	if strings.HasPrefix(path, "/home/") {
+		rest := strings.TrimPrefix(path, "/home/")
+		return strings.Count(rest, "/") == 2 && strings.HasSuffix(rest, "/google-cloud-sdk/bin")
+	}
+	return false
+}
+
+func isScopedTemporaryHOME(value string) bool {
+	switch value {
+	case "$(mktemp -d)", "/tmp":
+		return true
+	}
+	clean := filepath.Clean(value)
+	if clean != value {
+		return false
+	}
+	return strings.HasPrefix(clean, "/tmp/") ||
+		strings.HasPrefix(clean, "/var/folders/") ||
+		strings.HasPrefix(clean, "/private/tmp/")
 }
 
 // detectFailClosedApproval marks APPROVAL results as fail-closed when the
@@ -844,14 +1000,6 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string, fi
 	// Step 7-8: Detect and inspect referenced files.
 	if fileInspection == nil {
 		fileInspection = inspectReferencedFile(cmd, cwd)
-	}
-
-	// Check for security-sensitive env var assignments at start of command.
-	if hasSensitiveEnvPrefix(cmd) {
-		return commandClassificationResult{
-			decision: DecisionApproval,
-			reason:   "security-sensitive environment variable assignment",
-		}
 	}
 
 	// Evaluate policy rules (hardcoded, user, builtins).
@@ -1323,53 +1471,6 @@ func resolvePath(path, cwd string) string {
 		return path
 	}
 	return filepath.Join(cwd, path)
-}
-
-// hasSensitiveEnvPrefix checks if the command starts with a security-sensitive
-// environment variable assignment (§5.3).
-func hasSensitiveEnvPrefix(cmd string) bool {
-	fields := strings.Fields(cmd)
-	for _, f := range fields {
-		// Stop at the first non-assignment token.
-		if !strings.Contains(f, "=") || !isEnvAssignmentToken(f) {
-			break
-		}
-		for _, prefix := range sensitiveEnvPrefixes {
-			if strings.HasPrefix(f, prefix) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// isEnvAssignmentToken checks if a token looks like VAR=value.
-func isEnvAssignmentToken(t string) bool {
-	idx := strings.Index(t, "=")
-	if idx <= 0 {
-		return false
-	}
-	name := t[:idx]
-	for i, ch := range name {
-		if i == 0 {
-			if !isLetter(ch) && ch != '_' {
-				return false
-			}
-		} else {
-			if !isLetter(ch) && !isDigit(ch) && ch != '_' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func isLetter(r rune) bool {
-	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
-}
-
-func isDigit(r rune) bool {
-	return r >= '0' && r <= '9'
 }
 
 // inlineBodiesResult holds the full result from inline body classification.
