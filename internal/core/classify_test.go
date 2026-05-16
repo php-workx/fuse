@@ -1015,6 +1015,83 @@ func TestClassify_IndirectExecutionInnerCommandWins(t *testing.T) {
 	}
 }
 
+func TestClassify_ContainerFlagVariants(t *testing.T) {
+	t.Parallel()
+
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+		ruleID   string
+	}{
+		{
+			name:     "cap add equals form",
+			command:  "docker run --cap-add=SYS_ADMIN alpine",
+			expected: core.DecisionCaution,
+			ruleID:   "builtin:privesc:cap-add",
+		},
+		{
+			name:     "pid host split form",
+			command:  "docker run --pid host alpine",
+			expected: core.DecisionCaution,
+			ruleID:   "builtin:container:host-pid",
+		},
+		{
+			name:     "network host split form",
+			command:  "docker run --network host alpine",
+			expected: core.DecisionCaution,
+			ruleID:   "builtin:container:host-net",
+		},
+		{
+			name:     "volume equals docker socket",
+			command:  "docker run --volume=/var/run/docker.sock:/var/run/docker.sock alpine",
+			expected: core.DecisionBlocked,
+			ruleID:   "builtin:container:mount-sock",
+		},
+		{
+			name:     "mount source docker socket",
+			command:  "docker run --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock alpine",
+			expected: core.DecisionBlocked,
+			ruleID:   "builtin:container:mount-sock",
+		},
+		{
+			name:     "mount source host root",
+			command:  "docker run --mount type=bind,source=/,target=/host alpine",
+			expected: core.DecisionBlocked,
+			ruleID:   "builtin:container:mount-root",
+		},
+		{
+			name:     "podman dangerous capability",
+			command:  "podman run --cap-add=SYS_PTRACE alpine",
+			expected: core.DecisionCaution,
+			ruleID:   "builtin:privesc:cap-add",
+		},
+		{
+			name:     "benign container run remains safe",
+			command:  "docker run alpine echo ok",
+			expected: core.DecisionSafe,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := core.ShellRequest{RawCommand: tt.command, Cwd: "/tmp", Source: "test", SessionID: "test"}
+			got, err := core.Classify(req, evaluator)
+			if err != nil {
+				t.Fatalf("Classify: %v", err)
+			}
+			if got.Decision != tt.expected {
+				t.Fatalf("Decision = %q, want %q (reason=%q rule=%q)", got.Decision, tt.expected, got.Reason, got.RuleID)
+			}
+			if tt.ruleID != "" && got.RuleID != tt.ruleID {
+				t.Fatalf("RuleID = %q, want %q (reason=%q)", got.RuleID, tt.ruleID, got.Reason)
+			}
+		})
+	}
+}
+
 func TestClassify_SensitiveEnvVars(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
