@@ -108,6 +108,22 @@ var (
 	reInlineShellConfig   = regexp.MustCompile(`(>|>>)\s*.*\.(bashrc|zshrc|profile|bash_profile)\b`)
 )
 
+var criticalIncompleteAnalysisPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\brm\s+.*-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r`),
+	regexp.MustCompile(`\b(?:terraform|tofu)\s+(?:apply|destroy|plan\s+-destroy|state\s+rm|workspace\s+delete)\b`),
+	regexp.MustCompile(`\bpulumi\s+(?:up|destroy|stack\s+rm|state\s+delete)\b`),
+	regexp.MustCompile(`\bcdk\s+(?:deploy|destroy)\b`),
+	regexp.MustCompile(`\bkubectl\s+(?:delete|replace\s+--force|drain)\b`),
+	regexp.MustCompile(`\b(?:aws|gcloud|az)\b.*\b(?:delete|destroy|remove|purge|terminate)\b`),
+	regexp.MustCompile(`\b(?:curl|wget)\b.*\|\s*(?:ba)?sh\b`),
+	regexp.MustCompile(`/dev/tcp/|\b(?:nc|ncat|netcat)\b.*\s-e\s+`),
+	regexp.MustCompile(`(?i)\b(?:AWS_SECRET_ACCESS_KEY|GITHUB_TOKEN|GH_TOKEN|DATABASE_URL|DB_PASSWORD|API_KEY|SECRET_KEY|PRIVATE_KEY)\b`),
+	regexp.MustCompile(`(?i)(?:^|\s)(?:PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_[A-Z0-9_]*|NODE_OPTIONS|GIT_EXEC_PATH|HOME)=`),
+	regexp.MustCompile(`(?:^|\s)(?:~?/)?\.?(?:aws/credentials|ssh/id_rsa|env)\b|\.ssh/authorized_keys\b`),
+	regexp.MustCompile(`(?:~|/Users/[^/\s]+|/home/[^/\s]+)/\.fuse/|(?:~|/Users/[^/\s]+|/home/[^/\s]+)/\.claude/`),
+	regexp.MustCompile(`\b(?:fuse|epos|tk)\s+(?:disable|uninstall|close|reopen|edit|new|claim|release)\b`),
+}
+
 // inlineScriptPatterns maps compiled regexes to whether they trigger APPROVAL (true) or CAUTION (false).
 var inlineScriptPatterns = []struct {
 	re       *regexp.Regexp
@@ -229,10 +245,14 @@ func classifyCompoundSplitError(result *ClassifyResult, displayNorm string, eval
 			}
 		}
 	}
-	// Fail-closed: treat as APPROVAL.
-	result.Decision = DecisionApproval
-	result.Reason = fmt.Sprintf("compound split error (fail-closed): %v", splitErr)
-	result.FailClosed = true
+	if hasCriticalIncompleteAnalysisIndicator(displayNorm, evaluator) {
+		result.Decision = DecisionApproval
+		result.Reason = fmt.Sprintf("compound split error with critical indicators (approval required): %v", splitErr)
+		result.FailClosed = true
+	} else {
+		result.Decision = DecisionCaution
+		result.Reason = fmt.Sprintf("compound split error without critical indicators (logged only): %v", splitErr)
+	}
 	result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 	return result, nil
 }
@@ -661,11 +681,33 @@ func applyInlineClassification(sub *SubCommandResult, subCmd string, evaluator P
 		}
 	}
 	if !inlineResult.complete && DecisionSeverity(sub.Decision) < DecisionSeverity(DecisionApproval) {
-		sub.Decision = DecisionApproval
-		sub.Reason = "inline script extraction incomplete (fail-closed)"
+		if hasCriticalIncompleteAnalysisIndicator(subCmd+"\n"+inlineResult.body, evaluator) {
+			sub.Decision = DecisionApproval
+			sub.Reason = "inline script extraction incomplete with critical indicators (approval required)"
+			sub.FailClosed = true
+		} else {
+			sub.Decision = DecisionCaution
+			sub.Reason = "inline script extraction incomplete without critical indicators (logged only)"
+		}
 		sub.RuleID = ""
-		sub.FailClosed = true
 	}
+}
+
+func hasCriticalIncompleteAnalysisIndicator(text string, evaluator PolicyEvaluator) bool {
+	if evaluator != nil {
+		if d, _ := evaluator.EvaluateHardcoded(text); d != "" {
+			return true
+		}
+		if match := evaluator.EvaluateBuiltins(text); match != nil && DecisionSeverity(match.Decision) >= DecisionSeverity(DecisionApproval) {
+			return true
+		}
+	}
+	for _, re := range criticalIncompleteAnalysisPatterns {
+		if re.MatchString(text) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyURLInspection scans the command and inline body for URL-based threats.

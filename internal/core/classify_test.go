@@ -407,6 +407,7 @@ func TestClassify_AuditReadOnlyDeveloperInspectionCommands(t *testing.T) {
 		{name: "sqlite read", command: `sqlite3 app.db "SELECT 1"`, expected: core.DecisionSafe},
 		{name: "sqlite write remains unsafe", command: `sqlite3 app.db "DELETE FROM events"`, expected: core.DecisionCaution},
 		{name: "gh api read", command: `gh api repos/php-workx/fuse/pulls/1/comments --paginate`, expected: core.DecisionSafe},
+		{name: "gh auth status", command: `gh auth status`, expected: core.DecisionSafe},
 		{name: "gh api mutating method remains unsafe", command: `gh api -X POST repos/php-workx/fuse/issues/1/comments -f body=test`, expected: core.DecisionCaution},
 		{name: "tk show", command: `tk show fus-112i`, expected: core.DecisionSafe},
 		{name: "tk create remains unsafe", command: `tk create "new ticket" -d "desc"`, expected: core.DecisionCaution},
@@ -414,6 +415,9 @@ func TestClassify_AuditReadOnlyDeveloperInspectionCommands(t *testing.T) {
 		{name: "gofumpt write remains unsafe", command: `gofumpt -w internal/core/classify.go`, expected: core.DecisionCaution},
 		{name: "go build", command: `go build ./...`, expected: core.DecisionSafe},
 		{name: "just check", command: `just check`, expected: core.DecisionSafe},
+		{name: "just lint", command: `just lint`, expected: core.DecisionSafe},
+		{name: "just summary", command: `just --summary`, expected: core.DecisionSafe},
+		{name: "just test remains unsafe", command: `just test`, expected: core.DecisionCaution},
 	}
 
 	for _, tt := range tests {
@@ -686,6 +690,18 @@ func TestClassify_ReadOnlyInspectionCommandsAreSafe(t *testing.T) {
 			wantReasonContain: "just recipe is not allowlisted as read-only",
 		},
 		{
+			name:       "just lint is read-only developer workflow",
+			command:    `just lint`,
+			expected:   core.DecisionSafe,
+			wantReason: core.ConditionallySafeReason,
+		},
+		{
+			name:       "gh auth status is read-only",
+			command:    `gh auth status`,
+			expected:   core.DecisionSafe,
+			wantReason: core.ConditionallySafeReason,
+		},
+		{
 			name:       "timeout wrapped tk show is read-only",
 			command:    `timeout 30 tk show fus-1234`,
 			expected:   core.DecisionSafe,
@@ -783,9 +799,9 @@ func TestClassify_InlineScript(t *testing.T) {
 		expected core.Decision
 	}{
 		{
-			name:     "heredoc pattern (incomplete — fail-closed)",
+			name:     "heredoc pattern incomplete low-risk logged",
 			command:  "cat <<EOF",
-			expected: core.DecisionApproval, // unclosed here-document causes parse error → fail-closed
+			expected: core.DecisionCaution,
 		},
 		{
 			name:     "eval command",
@@ -864,6 +880,78 @@ func TestClassify_InlineScript(t *testing.T) {
 			if result.Decision != tt.expected {
 				t.Errorf("command %q: got %s, want %s (reason: %s)",
 					tt.command, result.Decision, tt.expected, result.Reason)
+			}
+		})
+	}
+}
+
+func TestClassify_IncompleteAnalysisIsRiskSensitive(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name           string
+		command        string
+		expected       core.Decision
+		reasonContains string
+		failClosed     bool
+	}{
+		{
+			name: "markdown heredoc write is log only",
+			command: `cat > /tmp/review.md <<'EOF'
+# Review Note
+
+This is prose with punctuation (not shell).
+EOF`,
+			expected:       core.DecisionCaution,
+			reasonContains: "without critical indicators",
+			failClosed:     false,
+		},
+		{
+			name: "markdown heredoc mentioning iac destruction requires approval",
+			command: `cat > /tmp/review.md <<'EOF'
+# Review Note
+
+The command terraform destroy prod (with malformed prose should be reviewed.
+EOF`,
+			expected:       core.DecisionApproval,
+			reasonContains: "critical indicators",
+			failClosed:     true,
+		},
+		{
+			name:           "compound parse error low risk is log only",
+			command:        `rtk for f in docs/*.md; do echo "$f"; done`,
+			expected:       core.DecisionCaution,
+			reasonContains: "without critical indicators",
+			failClosed:     false,
+		},
+		{
+			name:           "compound parse error with cloud delete requires approval",
+			command:        `rtk for f in stacks; do aws cloudformation delete-stack --stack-name prod; done`,
+			expected:       core.DecisionApproval,
+			reasonContains: "critical indicators",
+			failClosed:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := core.Classify(core.ShellRequest{
+				RawCommand: tt.command,
+				Cwd:        "/tmp",
+				Source:     "test",
+				SessionID:  "test-session",
+			}, evaluator)
+			if err != nil {
+				t.Fatalf("classify error: %v", err)
+			}
+			if result.Decision != tt.expected {
+				t.Fatalf("decision = %s, want %s (reason: %s)", result.Decision, tt.expected, result.Reason)
+			}
+			if !strings.Contains(result.Reason, tt.reasonContains) {
+				t.Fatalf("reason = %q, want substring %q", result.Reason, tt.reasonContains)
+			}
+			if result.FailClosed != tt.failClosed {
+				t.Fatalf("FailClosed = %v, want %v (reason: %s)", result.FailClosed, tt.failClosed, result.Reason)
 			}
 		})
 	}
@@ -1398,11 +1486,11 @@ func TestClassify_PythonHeredocBodiesDriveDecision(t *testing.T) {
 			minSeverity: core.DecisionCaution,
 		},
 		{
-			name: "malformed heredoc remains fail closed",
+			name: "malformed heredoc without critical indicators logs only",
 			command: "python - <<'PY'\n" +
 				"print('unterminated')\n",
-			minSeverity:   core.DecisionApproval,
-			wantFailClose: true,
+			minSeverity: core.DecisionCaution,
+			maxSeverity: core.DecisionCaution,
 		},
 	}
 

@@ -978,6 +978,9 @@ func isGhSafe(fields []string) bool {
 	if isHelpOrVersion(fields[1:]) {
 		return true
 	}
+	if fields[1] == "auth" {
+		return len(fields) >= 3 && fields[2] == "status"
+	}
 	if fields[1] == "api" {
 		return isGhAPISafe(fields[2:])
 	}
@@ -1067,7 +1070,24 @@ func isGofumptSafe(fields []string) bool {
 }
 
 func isJustSafe(fields []string) bool {
-	return len(fields) >= 2 && commandTokenMatches(fields[0], "just") && fields[1] == "check"
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "just") {
+		return false
+	}
+	safeRecipes := map[string]bool{
+		"--summary":     true,
+		"actionlint":    true,
+		"build-check":   true,
+		"check":         true,
+		"dev":           true,
+		"format":        true,
+		"format-check":  true,
+		"install-hooks": true,
+		"lint":          true,
+		"lint-check":    true,
+		"pre-commit":    true,
+		"pre-push":      true,
+	}
+	return safeRecipes[fields[1]]
 }
 
 // unconditionalSafeGoSubs lists `go` subcommands whose entire invocation is
