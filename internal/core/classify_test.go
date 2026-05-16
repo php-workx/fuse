@@ -650,6 +650,30 @@ func TestClassify_ReadOnlyInspectionCommandsAreSafe(t *testing.T) {
 			wantReasonContain: "tk command is not read-only",
 		},
 		{
+			name:       "epos ready is read-only",
+			command:    `epos ready --json`,
+			expected:   core.DecisionSafe,
+			wantReason: core.ConditionallySafeReason,
+		},
+		{
+			name:       "epos show is read-only",
+			command:    `epos show epo-test --json`,
+			expected:   core.DecisionSafe,
+			wantReason: core.ConditionallySafeReason,
+		},
+		{
+			name:              "epos new mutates ticket state",
+			command:           `epos new "new ticket" --type task`,
+			expected:          core.DecisionCaution,
+			wantReasonContain: "epos command is not read-only",
+		},
+		{
+			name:              "epos claim mutates ticket state",
+			command:           `epos claim epo-test -o agent-codex`,
+			expected:          core.DecisionCaution,
+			wantReasonContain: "epos command is not read-only",
+		},
+		{
 			name:       "go tool linter version is read-only",
 			command:    `go tool -modfile=tools.mod golangci-lint version`,
 			expected:   core.DecisionSafe,

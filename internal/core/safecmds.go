@@ -208,6 +208,7 @@ var conditionalSafeCheckers = map[string]func([]string) bool{
 	"codex":     isCodexSafe,
 	"gh":        isGhSafe,
 	"tk":        isTkSafe,
+	"epos":      isEposSafe,
 	"gofumpt":   isGofumptSafe,
 	"just":      isJustSafe,
 }
@@ -237,6 +238,10 @@ func KnownUnsafeInspectionVariant(basename, fullCmd string) (string, bool) {
 	case "tk":
 		if len(fields) > 0 && !isTkSafe(fields) {
 			return "tk command is not read-only", true
+		}
+	case "epos":
+		if len(fields) > 0 && !isEposSafe(fields) {
+			return "epos command is not read-only", true
 		}
 	case "gofumpt":
 		if len(fields) > 0 && !isGofumptSafe(fields) {
@@ -1031,6 +1036,20 @@ func isTkSafe(fields []string) bool {
 	safeSubs := map[string]bool{
 		"show": true, "ready": true, "list": true, "ls": true,
 		"blocked": true, "closed": true, "next": true,
+	}
+	return safeSubs[fields[1]]
+}
+
+func isEposSafe(fields []string) bool {
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "epos") {
+		return false
+	}
+	if isHelpOrVersion(fields[1:]) {
+		return true
+	}
+	safeSubs := map[string]bool{
+		"ready": true, "blocked": true, "show": true, "export": true,
+		"lint": true, "validate": true, "help": true, "completion": true,
 	}
 	return safeSubs[fields[1]]
 }
