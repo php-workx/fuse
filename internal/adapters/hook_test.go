@@ -480,8 +480,9 @@ func TestRunHook_ApprovalLogsProfileAndStructuralDecision(t *testing.T) {
 	writeProfileConfigForBehaviorTest(t, profileConfigContents(config.ProfileStrict, "53s"))
 
 	projectDir := t.TempDir()
+	approvalCommand := "NODE_OPTIONS=--require=./hook.js /bin/pwd"
 	req := core.ShellRequest{
-		RawCommand: "HOME=/tmp /bin/pwd",
+		RawCommand: approvalCommand,
 		Cwd:        projectDir,
 		Source:     "hook",
 		SessionID:  "approval-log",
@@ -509,7 +510,7 @@ func TestRunHook_ApprovalLogsProfileAndStructuralDecision(t *testing.T) {
 		t.Fatalf("CreateApproval: %v", err)
 	}
 
-	input := `{"tool_name":"Bash","tool_input":{"command":"HOME=/tmp /bin/pwd"},"session_id":"approval-log","cwd":"` + filepath.ToSlash(projectDir) + `"}`
+	input := `{"tool_name":"Bash","tool_input":{"command":"` + approvalCommand + `"},"session_id":"approval-log","cwd":"` + filepath.ToSlash(projectDir) + `"}`
 	stderr := &bytes.Buffer{}
 	exitCode := RunHook(strings.NewReader(input), stderr)
 	if exitCode != 0 {
@@ -527,7 +528,7 @@ func TestRunHook_ApprovalLogsProfileAndStructuralDecision(t *testing.T) {
 	var event db.EventRecord
 	found := false
 	for _, candidate := range events {
-		if strings.Contains(candidate.Command, "HOME=/tmp /bin/pwd") {
+		if strings.Contains(candidate.Command, approvalCommand) {
 			event = candidate
 			found = true
 			break

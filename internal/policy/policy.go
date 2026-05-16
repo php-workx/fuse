@@ -21,6 +21,7 @@ type PolicyConfig struct {
 	DisabledBuiltins []string          `yaml:"disabled_builtins"`
 	DisabledTags     []string          `yaml:"disabled_tags"`
 	TagOverrides     map[string]string `yaml:"tag_overrides"`
+	SafeJustRecipes  []string          `yaml:"safe_just_recipes"`
 }
 
 // PolicyRule represents a single user-defined rule in policy.yaml.
@@ -116,6 +117,18 @@ func DisabledTagSet(policy *PolicyConfig) map[string]bool {
 	m := make(map[string]bool, len(policy.DisabledTags))
 	for _, tag := range policy.DisabledTags {
 		m[tag] = true
+	}
+	return m
+}
+
+// SafeJustRecipeSet returns the exact recipe names policy marks safe.
+func SafeJustRecipeSet(policy *PolicyConfig) map[string]bool {
+	if policy == nil || len(policy.SafeJustRecipes) == 0 {
+		return nil
+	}
+	m := make(map[string]bool, len(policy.SafeJustRecipes))
+	for _, recipe := range policy.SafeJustRecipes {
+		m[recipe] = true
 	}
 	return m
 }

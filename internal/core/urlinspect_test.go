@@ -9,17 +9,49 @@ func TestInspectURLs_MetadataEndpoint(t *testing.T) {
 	}
 }
 
-func TestInspectURLs_Localhost(t *testing.T) {
-	d, _ := InspectCommandURLs("curl http://localhost:8080/admin")
-	if d != DecisionBlocked {
-		t.Errorf("got %s, want BLOCKED", d)
+func TestInspectURLs_CanonicalLocalhostReadOnlyDoesNotBlock(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "curl default GET localhost", command: "curl http://localhost:8080/admin"},
+		{name: "curl GET 127", command: "curl -X GET http://127.0.0.1:9090/"},
+		{name: "curl HEAD ipv6", command: "curl -I http://[::1]:8080/"},
+		{name: "httpie GET localhost", command: "http GET http://localhost:8080/health"},
+		{name: "httpie HEAD 127", command: "http HEAD http://127.0.0.1:9090/health"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d, _ := InspectCommandURLs(tt.command)
+			if d == DecisionBlocked {
+				t.Errorf("got BLOCKED, want non-BLOCKED")
+			}
+		})
 	}
 }
 
-func TestInspectURLs_IPv6Loopback(t *testing.T) {
-	d, _ := InspectCommandURLs("curl http://[::1]:8080/")
-	if d != DecisionBlocked {
-		t.Errorf("got %s, want BLOCKED", d)
+func TestInspectURLs_CanonicalLocalhostMutatingMethodsCaution(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+	}{
+		{name: "curl POST localhost", command: "curl -X POST http://localhost:8080/users"},
+		{name: "curl PUT 127", command: "curl -X PUT http://127.0.0.1:9090/config"},
+		{name: "curl compact DELETE 127", command: "curl -XDELETE http://127.0.0.1:9090/users/1"},
+		{name: "curl DELETE ipv6", command: "curl -X DELETE http://[::1]:8080/users/1"},
+		{name: "curl request equals DELETE ipv6", command: "curl --request=DELETE http://[::1]:8080/users/1"},
+		{name: "httpie POST localhost", command: "http POST http://localhost:8080/users name=test"},
+		{name: "httpie DELETE 127", command: "http DELETE http://127.0.0.1:9090/users/1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d, _ := InspectCommandURLs(tt.command)
+			if d != DecisionCaution {
+				t.Errorf("got %s, want CAUTION", d)
+			}
+		})
 	}
 }
 
@@ -157,8 +189,8 @@ func TestInspectURLs_MCPArguments(t *testing.T) {
 
 func TestInspectURLs_127Loopback(t *testing.T) {
 	d, _ := InspectCommandURLs("curl http://127.0.0.1:9090/")
-	if d != DecisionBlocked {
-		t.Errorf("got %s, want BLOCKED for 127.0.0.1 (loopback range)", d)
+	if d == DecisionBlocked {
+		t.Errorf("got BLOCKED, want non-BLOCKED for canonical 127.0.0.1")
 	}
 }
 

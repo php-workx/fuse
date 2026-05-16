@@ -145,8 +145,9 @@ var insecureCertLongFlags = []string{"--insecure", "--no-check-certificate", "--
 // --- L7 progressive enforcement ---
 
 // reDestructiveHTTPMethod detects HTTP methods that modify/delete resources.
-// Matches: -X DELETE, -X PUT, -X PATCH, --request DELETE, etc.
-var reDestructiveHTTPMethod = regexp.MustCompile(`(?i)(^|\s)(-X|--request)\s+(DELETE|PUT|PATCH)\b`)
+// Matches: -X POST, -XPOST, --request DELETE, --request=DELETE,
+// and HTTPie-style "http POST URL".
+var reDestructiveHTTPMethod = regexp.MustCompile(`(?i)(^|\s)((-X\s*|--request(\s+|=))(POST|DELETE|PUT|PATCH)|(POST|DELETE|PUT|PATCH))\b`)
 
 // reDataUploadFlags detects flags that send data payloads (exfiltration risk).
 var reDataUploadFlags = []string{
@@ -251,6 +252,13 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 		return DecisionBlocked, "blocked URL scheme: " + scheme
 	}
 
+	if isCanonicalDeveloperLoopbackHost(host) {
+		if host == "localhost" && (networkContext || networkCommandBasenames[extractCmdBasename(cmd)]) {
+			return DecisionCaution, "non-allowlisted hostname in network command: " + host
+		}
+		return "", ""
+	}
+
 	// Non-canonical numeric host: decode and check against blocked ranges (SEC-002).
 	if isNonCanonicalNumericHost(host) {
 		return classifyNonCanonicalHost(host)
@@ -293,6 +301,15 @@ func classifyExpandedURLHost(rawURL string) (Decision, string) {
 		}
 	}
 	return "", ""
+}
+
+func isCanonicalDeveloperLoopbackHost(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }
 
 func extendExpandedURLSpan(cmd string, start, end int) string {
@@ -477,7 +494,23 @@ func isNonCanonicalNumericHost(host string) bool {
 	// AND actually decodes to a valid IP. This avoids false positives on hex-looking
 	// hostnames like "dead.beef" or "cafe.com".
 	if reNonCanonicalDotted.MatchString(host) && strings.Contains(host, ".") {
-		return decodeNonCanonicalIP(host) != nil
+		return hasNonCanonicalIPv4Syntax(host) && decodeNonCanonicalIP(host) != nil
+	}
+	return false
+}
+
+func hasNonCanonicalIPv4Syntax(host string) bool {
+	parts := strings.Split(host, ".")
+	if len(parts) != 4 {
+		return true
+	}
+	for _, part := range parts {
+		if strings.HasPrefix(part, "0x") || strings.HasPrefix(part, "0X") {
+			return true
+		}
+		if len(part) > 1 && part[0] == '0' {
+			return true
+		}
 	}
 	return false
 }

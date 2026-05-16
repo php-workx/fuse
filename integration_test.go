@@ -662,22 +662,82 @@ func TestIntegration_DecisionKeyDeterminism(t *testing.T) {
 	skipIfShort(t)
 
 	// Same inputs should produce same decision key.
-	key1 := core.ComputeDecisionKey("hook", "ls -la", "")
-	key2 := core.ComputeDecisionKey("hook", "ls -la", "")
+	key1 := core.ComputeDecisionKey("ls -la", "")
+	key2 := core.ComputeDecisionKey("ls -la", "")
 	if key1 != key2 {
 		t.Errorf("decision keys should be deterministic: %q vs %q", key1, key2)
 	}
 
 	// Different inputs should produce different keys.
-	key3 := core.ComputeDecisionKey("hook", "rm -rf /", "")
+	key3 := core.ComputeDecisionKey("rm -rf /", "")
 	if key1 == key3 {
 		t.Errorf("different commands should produce different decision keys")
 	}
 
 	// File hash should change the key.
-	key4 := core.ComputeDecisionKey("hook", "ls -la", "abc123hash")
+	key4 := core.ComputeDecisionKey("ls -la", "abc123hash")
 	if key1 == key4 {
 		t.Errorf("different file hashes should produce different decision keys")
+	}
+}
+
+// fus-vu5r: end-to-end check that a TUI-sourced classification produces the
+// same decision key as a hook-sourced classification for the same command,
+// so an approval granted in one is honoured by the other.
+func TestIntegration_TUIApprovalSatisfiesHook_SharedDecisionKey(t *testing.T) {
+	skipIfShort(t)
+
+	cmd := "git add docs/spec.md"
+
+	tuiResult, err := core.Classify(core.ShellRequest{
+		RawCommand: cmd,
+		Source:     "tui",
+		SessionID:  "sess-x",
+	}, nil)
+	if err != nil {
+		t.Fatalf("classify tui: %v", err)
+	}
+	hookResult, err := core.Classify(core.ShellRequest{
+		RawCommand: cmd,
+		Source:     "hook",
+		SessionID:  "sess-x",
+	}, nil)
+	if err != nil {
+		t.Fatalf("classify hook: %v", err)
+	}
+	if tuiResult.DecisionKey == "" {
+		t.Fatal("expected non-empty decision key")
+	}
+	if tuiResult.DecisionKey != hookResult.DecisionKey {
+		t.Fatalf("decision key differs across sources: tui=%q hook=%q",
+			tuiResult.DecisionKey, hookResult.DecisionKey)
+	}
+
+	// Now drive the full approval flow: seed an approval at the shared key
+	// (as the TUI would after the user taps approve) and confirm a hook
+	// request consumes it without a second prompt.
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	database, dberr := db.OpenDB(dbPath)
+	if dberr != nil {
+		t.Fatalf("OpenDB: %v", dberr)
+	}
+	t.Cleanup(func() { _ = database.Close() })
+
+	mgr, mgrErr := approve.NewManager(database, []byte("01234567890123456789012345678901"))
+	if mgrErr != nil {
+		t.Fatalf("NewManager: %v", mgrErr)
+	}
+
+	if cerr := mgr.CreateApproval(tuiResult.DecisionKey, string(core.DecisionApproval), "once", "sess-x"); cerr != nil {
+		t.Fatalf("CreateApproval (TUI): %v", cerr)
+	}
+
+	got, gerr := mgr.ConsumeApproval(hookResult.DecisionKey, "sess-x")
+	if gerr != nil {
+		t.Fatalf("ConsumeApproval (hook): %v", gerr)
+	}
+	if got != core.DecisionApproval {
+		t.Fatalf("hook did not consume TUI-granted approval: got %q", got)
 	}
 }
 

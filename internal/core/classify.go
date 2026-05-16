@@ -10,8 +10,10 @@ import (
 	"github.com/php-workx/fuse/internal/inspect"
 )
 
-// maxInputSize is the maximum allowed raw command length (64 KB).
-const maxInputSize = 64 * 1024
+// maxInputSize is the maximum allowed raw command length (10 KB). Tightened
+// from 64 KB so the ~150 builtin regexes have a bounded worst-case input;
+// realistic commands are well below 10 KB (see commands.yaml fixture corpus).
+const maxInputSize = 10 * 1024
 
 // Reason strings emitted by the fallback layers. Exported so tests and callers
 // can distinguish an explicit safe-rule match (UnconditionallySafeReason /
@@ -78,6 +80,10 @@ type PolicyEvaluator interface {
 	// if a rule matched, or nil if no match. DryRun indicates the match
 	// should be logged but not enforced (per-tag override or global dryrun).
 	EvaluateBuiltins(classNorm string) *BuiltinMatch
+
+	// IsSafeJustRecipe reports whether policy explicitly marks the exact just
+	// recipe token as safe.
+	IsSafeJustRecipe(recipe string) bool
 }
 
 // Compiled regexes for inline script detection (§5.4).
@@ -105,6 +111,22 @@ var (
 	reInlineExportPATH    = regexp.MustCompile(`\bexport\s+PATH=`)
 	reInlineShellConfig   = regexp.MustCompile(`(>|>>)\s*.*\.(bashrc|zshrc|profile|bash_profile)\b`)
 )
+
+var criticalIncompleteAnalysisPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\brm\s+.*-[^\s]*r[^\s]*f|-[^\s]*f[^\s]*r`),
+	regexp.MustCompile(`\b(?:terraform|tofu)\s+(?:apply|destroy|plan\s+-destroy|state\s+rm|workspace\s+delete)\b`),
+	regexp.MustCompile(`\bpulumi\s+(?:up|destroy|stack\s+rm|state\s+delete)\b`),
+	regexp.MustCompile(`\bcdk\s+(?:deploy|destroy)\b`),
+	regexp.MustCompile(`\bkubectl\s+(?:delete|replace\s+--force|drain)\b`),
+	regexp.MustCompile(`\b(?:aws|gcloud|az)\b.*\b(?:delete|destroy|remove|purge|terminate)\b`),
+	regexp.MustCompile(`\b(?:curl|wget)\b.*\|\s*(?:ba)?sh\b`),
+	regexp.MustCompile(`/dev/tcp/|\b(?:nc|ncat|netcat)\b.*\s-e\s+`),
+	regexp.MustCompile(`(?i)\b(?:AWS_SECRET_ACCESS_KEY|GITHUB_TOKEN|GH_TOKEN|DATABASE_URL|DB_PASSWORD|API_KEY|SECRET_KEY|PRIVATE_KEY)\b`),
+	regexp.MustCompile(`(?i)(?:^|\s)(?:PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_[A-Z0-9_]*|NODE_OPTIONS|GIT_EXEC_PATH|HOME)=`),
+	regexp.MustCompile(`(?:^|\s)(?:~?/)?\.?(?:aws/credentials|ssh/id_rsa|env)\b|\.ssh/authorized_keys\b`),
+	regexp.MustCompile(`(?:~|/Users/[^/\s]+|/home/[^/\s]+)/\.fuse/|(?:~|/Users/[^/\s]+|/home/[^/\s]+)/\.claude/`),
+	regexp.MustCompile(`\b(?:fuse|epos|tk)\s+(?:disable|uninstall|close|reopen|edit|new|claim|release)\b`),
+}
 
 // inlineScriptPatterns maps compiled regexes to whether they trigger APPROVAL (true) or CAUTION (false).
 var inlineScriptPatterns = []struct {
@@ -174,7 +196,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 		result.Decision = DecisionApproval
 		result.Reason = fmt.Sprintf("command exceeds maximum size of %d bytes", maxInputSize)
 		result.FailClosed = true
-		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
+		result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 		return result, nil
 	}
 
@@ -184,14 +206,14 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 	if IsProvableMktempCleanup(displayNorm) {
 		result.Decision = DecisionCaution
 		result.Reason = "provable mktemp cleanup"
-		result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, "")
+		result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 		return result, nil
 	}
 
 	// Step 3: Compound command splitting.
 	subCmds, err := SplitCompoundCommand(displayNorm)
 	if err != nil {
-		return classifyCompoundSplitError(result, displayNorm, req.Source, evaluator, err)
+		return classifyCompoundSplitError(result, displayNorm, evaluator, err)
 	}
 	effectiveCwd, suppressCwdEscalation := simpleLeadingAbsoluteCD(subCmds, req.Cwd)
 
@@ -203,14 +225,14 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 
 	// Step 12: Compute decision key.
 	combinedHash := strings.Join(fileHashes, ":")
-	result.DecisionKey = ComputeDecisionKey(req.Source, displayNorm, combinedHash)
+	result.DecisionKey = ComputeDecisionKey(displayNorm, combinedHash)
 
 	return result, nil
 }
 
 // classifyCompoundSplitError handles the case where compound splitting fails.
 // Checks hardcoded rules before falling back to fail-closed APPROVAL.
-func classifyCompoundSplitError(result *ClassifyResult, displayNorm, source string, evaluator PolicyEvaluator, splitErr error) (*ClassifyResult, error) {
+func classifyCompoundSplitError(result *ClassifyResult, displayNorm string, evaluator PolicyEvaluator, splitErr error) (*ClassifyResult, error) {
 	if evaluator != nil {
 		classified := ClassificationNormalize(displayNorm)
 		candidates := []string{displayNorm, classified.Outer}
@@ -222,16 +244,20 @@ func classifyCompoundSplitError(result *ClassifyResult, displayNorm, source stri
 			if d, reason := evaluator.EvaluateHardcoded(candidate); d != "" {
 				result.Decision = d
 				result.Reason = reason
-				result.DecisionKey = ComputeDecisionKey(source, displayNorm, "")
+				result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 				return result, nil
 			}
 		}
 	}
-	// Fail-closed: treat as APPROVAL.
-	result.Decision = DecisionApproval
-	result.Reason = fmt.Sprintf("compound split error (fail-closed): %v", splitErr)
-	result.FailClosed = true
-	result.DecisionKey = ComputeDecisionKey(source, displayNorm, "")
+	if hasCriticalIncompleteAnalysisIndicator(displayNorm, evaluator) {
+		result.Decision = DecisionApproval
+		result.Reason = fmt.Sprintf("compound split error with critical indicators (approval required): %v", splitErr)
+		result.FailClosed = true
+	} else {
+		result.Decision = DecisionCaution
+		result.Reason = fmt.Sprintf("compound split error without critical indicators (logged only): %v", splitErr)
+	}
+	result.DecisionKey = ComputeDecisionKey(displayNorm, "")
 	return result, nil
 }
 
@@ -604,14 +630,170 @@ func applyEnvVarEscalations(sub *SubCommandResult, subCmd string, classified Cla
 	// Security-sensitive env var assignment detected during normalization.
 	// Applied after the classification loop so it doesn't short-circuit
 	// BLOCKED detection (e.g., LD_PRELOAD=/evil rm -rf / should be BLOCKED, not APPROVAL).
-	if classified.SensitiveEnvAssignment {
-		combined := MaxDecision(sub.Decision, DecisionApproval)
+	if assessment, ok := assessSensitiveEnvAssignment(subCmd, classified.SensitiveEnvAssignment); ok {
+		combined := MaxDecision(sub.Decision, assessment.decision)
 		if combined != sub.Decision {
 			sub.Decision = combined
-			sub.Reason = "security-sensitive environment variable assignment (via env or bare prefix)"
+			sub.Reason = assessment.reason
 			sub.RuleID = ""
 		}
 	}
+}
+
+type envAssignmentAssessment struct {
+	decision Decision
+	reason   string
+}
+
+type envAssignment struct {
+	name  string
+	value string
+}
+
+func assessSensitiveEnvAssignment(cmd string, sensitiveDetected bool) (envAssignmentAssessment, bool) {
+	assignments := leadingEnvAssignments(cmd)
+	if !sensitiveDetected && len(assignments) == 0 {
+		return envAssignmentAssessment{}, false
+	}
+
+	best := envAssignmentAssessment{}
+	for _, assignment := range assignments {
+		assessment, ok := assessSingleSensitiveEnvAssignment(assignment)
+		if !ok {
+			continue
+		}
+		if best.decision == "" || MaxDecision(best.decision, assessment.decision) != best.decision {
+			best = assessment
+		}
+	}
+	if best.decision == "" {
+		return envAssignmentAssessment{}, false
+	}
+	return best, true
+}
+
+func leadingEnvAssignments(cmd string) []envAssignment {
+	tokens, _ := tokenizeQuoteAware(cmd)
+	if len(tokens) == 0 {
+		return nil
+	}
+
+	var assignments []envAssignment
+	i := 0
+	if commandTokenMatches(tokens[0], "env") {
+		i = 1
+		for i < len(tokens) {
+			tok := tokens[i]
+			if tok == "--" {
+				break
+			}
+			if skip, ok := envFlagSkipCount[tok]; ok {
+				i += skip
+				continue
+			}
+			if strings.HasPrefix(tok, "-") && len(tok) > 1 {
+				i++
+				continue
+			}
+			if assignment, ok := parseEnvAssignment(tok); ok {
+				assignments = append(assignments, assignment)
+				i++
+				continue
+			}
+			break
+		}
+		return assignments
+	}
+
+	for i < len(tokens) {
+		assignment, ok := parseEnvAssignment(tokens[i])
+		if !ok {
+			break
+		}
+		assignments = append(assignments, assignment)
+		i++
+	}
+	return assignments
+}
+
+func parseEnvAssignment(token string) (envAssignment, bool) {
+	if !isEnvAssignment(token) {
+		return envAssignment{}, false
+	}
+	idx := strings.Index(token, "=")
+	if idx <= 0 {
+		return envAssignment{}, false
+	}
+	return envAssignment{
+		name:  token[:idx],
+		value: strings.Trim(token[idx+1:], `"'`),
+	}, true
+}
+
+func assessSingleSensitiveEnvAssignment(assignment envAssignment) (envAssignmentAssessment, bool) {
+	name := assignment.name
+	switch {
+	case name == "PATH":
+		if isScopedDeveloperPATH(assignment.value) {
+			return envAssignmentAssessment{decision: DecisionCaution, reason: "scoped developer environment assignment"}, true
+		}
+		return envAssignmentAssessment{decision: DecisionApproval, reason: "dangerous environment assignment"}, true
+	case name == "HOME":
+		if isScopedTemporaryHOME(assignment.value) {
+			return envAssignmentAssessment{decision: DecisionCaution, reason: "scoped developer environment assignment"}, true
+		}
+		return envAssignmentAssessment{decision: DecisionApproval, reason: "dangerous environment assignment"}, true
+	case name == "LD_PRELOAD", name == "LD_LIBRARY_PATH", name == "NODE_OPTIONS", name == "GIT_EXEC_PATH":
+		return envAssignmentAssessment{decision: DecisionApproval, reason: "dangerous environment assignment"}, true
+	case strings.HasPrefix(name, "DYLD_"):
+		return envAssignmentAssessment{decision: DecisionApproval, reason: "dangerous environment assignment"}, true
+	default:
+		return envAssignmentAssessment{}, false
+	}
+}
+
+func isScopedDeveloperPATH(value string) bool {
+	if !strings.Contains(value, "$PATH") && !strings.Contains(value, "${PATH}") {
+		return false
+	}
+	parts := strings.Split(value, ":")
+	if len(parts) != 2 {
+		return false
+	}
+	if parts[1] != "$PATH" && parts[1] != "${PATH}" {
+		return false
+	}
+	prepend := filepath.Clean(parts[0])
+	if prepend != parts[0] {
+		return false
+	}
+	return isGoogleCloudSDKBinPath(prepend)
+}
+
+func isGoogleCloudSDKBinPath(path string) bool {
+	if strings.HasPrefix(path, "/Users/") {
+		rest := strings.TrimPrefix(path, "/Users/")
+		return strings.Count(rest, "/") == 2 && strings.HasSuffix(rest, "/google-cloud-sdk/bin")
+	}
+	if strings.HasPrefix(path, "/home/") {
+		rest := strings.TrimPrefix(path, "/home/")
+		return strings.Count(rest, "/") == 2 && strings.HasSuffix(rest, "/google-cloud-sdk/bin")
+	}
+	return false
+}
+
+func isScopedTemporaryHOME(value string) bool {
+	switch value {
+	case "$(mktemp -d)", "/tmp":
+		return true
+	}
+	clean := filepath.Clean(value)
+	if clean != value {
+		return false
+	}
+	return strings.HasPrefix(clean, "/tmp/") ||
+		strings.HasPrefix(clean, "/var/folders/") ||
+		strings.HasPrefix(clean, "/private/tmp/")
 }
 
 // detectFailClosedApproval marks APPROVAL results as fail-closed when the
@@ -659,11 +841,33 @@ func applyInlineClassification(sub *SubCommandResult, subCmd string, evaluator P
 		}
 	}
 	if !inlineResult.complete && DecisionSeverity(sub.Decision) < DecisionSeverity(DecisionApproval) {
-		sub.Decision = DecisionApproval
-		sub.Reason = "inline script extraction incomplete (fail-closed)"
+		if hasCriticalIncompleteAnalysisIndicator(subCmd+"\n"+inlineResult.body, evaluator) {
+			sub.Decision = DecisionApproval
+			sub.Reason = "inline script extraction incomplete with critical indicators (approval required)"
+			sub.FailClosed = true
+		} else {
+			sub.Decision = DecisionCaution
+			sub.Reason = "inline script extraction incomplete without critical indicators (logged only)"
+		}
 		sub.RuleID = ""
-		sub.FailClosed = true
 	}
+}
+
+func hasCriticalIncompleteAnalysisIndicator(text string, evaluator PolicyEvaluator) bool {
+	if evaluator != nil {
+		if d, _ := evaluator.EvaluateHardcoded(text); d != "" {
+			return true
+		}
+		if match := evaluator.EvaluateBuiltins(text); match != nil && DecisionSeverity(match.Decision) >= DecisionSeverity(DecisionApproval) {
+			return true
+		}
+	}
+	for _, re := range criticalIncompleteAnalysisPatterns {
+		if re.MatchString(text) {
+			return true
+		}
+	}
+	return false
 }
 
 // applyURLInspection scans the command and inline body for URL-based threats.
@@ -798,14 +1002,6 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string, fi
 		fileInspection = inspectReferencedFile(cmd, cwd)
 	}
 
-	// Check for security-sensitive env var assignments at start of command.
-	if hasSensitiveEnvPrefix(cmd) {
-		return commandClassificationResult{
-			decision: DecisionApproval,
-			reason:   "security-sensitive environment variable assignment",
-		}
-	}
-
 	// Evaluate policy rules (hardcoded, user, builtins).
 	if evaluator != nil {
 		pr := evaluatePolicyRules(cmd, sanitized, evaluator, fileInspection, dryRunMatches)
@@ -823,7 +1019,7 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string, fi
 	}
 
 	// Layer 4-6 and inline fallbacks.
-	return classifyFallbackLayers(cmd, basename, fileInspection, inlineDecision, inlineReason, dryRunMatches)
+	return classifyFallbackLayers(cmd, basename, evaluator, fileInspection, inlineDecision, inlineReason, dryRunMatches)
 }
 
 func resolveCommandPath(cmd, cwd string) (string, bool) {
@@ -932,6 +1128,7 @@ func evaluatePolicyRules(
 // and produces the fallback CAUTION decision.
 func classifyFallbackLayers(
 	cmd, basename string,
+	evaluator PolicyEvaluator,
 	fileInspection *FileInspection,
 	inlineDecision Decision, inlineReason string,
 	dryRunMatches []BuiltinMatch,
@@ -939,6 +1136,10 @@ func classifyFallbackLayers(
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
 		return commandClassificationResult{decision: DecisionSafe, reason: UnconditionallySafeReason, dryRunMatches: dryRunMatches}
+	}
+
+	if isConfiguredJustSafe(strings.Fields(cmd), evaluator) {
+		return commandClassificationResult{decision: DecisionSafe, reason: ConditionallySafeReason, dryRunMatches: dryRunMatches}
 	}
 
 	// Layer 5: Conditionally safe commands.
@@ -1270,53 +1471,6 @@ func resolvePath(path, cwd string) string {
 		return path
 	}
 	return filepath.Join(cwd, path)
-}
-
-// hasSensitiveEnvPrefix checks if the command starts with a security-sensitive
-// environment variable assignment (§5.3).
-func hasSensitiveEnvPrefix(cmd string) bool {
-	fields := strings.Fields(cmd)
-	for _, f := range fields {
-		// Stop at the first non-assignment token.
-		if !strings.Contains(f, "=") || !isEnvAssignmentToken(f) {
-			break
-		}
-		for _, prefix := range sensitiveEnvPrefixes {
-			if strings.HasPrefix(f, prefix) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// isEnvAssignmentToken checks if a token looks like VAR=value.
-func isEnvAssignmentToken(t string) bool {
-	idx := strings.Index(t, "=")
-	if idx <= 0 {
-		return false
-	}
-	name := t[:idx]
-	for i, ch := range name {
-		if i == 0 {
-			if !isLetter(ch) && ch != '_' {
-				return false
-			}
-		} else {
-			if !isLetter(ch) && !isDigit(ch) && ch != '_' {
-				return false
-			}
-		}
-	}
-	return true
-}
-
-func isLetter(r rune) bool {
-	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
-}
-
-func isDigit(r rune) bool {
-	return r >= '0' && r <= '9'
 }
 
 // inlineBodiesResult holds the full result from inline body classification.

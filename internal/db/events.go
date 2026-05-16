@@ -265,6 +265,40 @@ func (d *DB) ListEvents(filter *EventFilter) ([]EventRecord, error) {
 	return events, nil
 }
 
+// ListEventsForReplay returns historical events oldest-first for classifier replay.
+// A non-positive limit means all events. Replay callers must never execute commands.
+func (d *DB) ListEventsForReplay(limit int) ([]EventRecord, error) {
+	var qb strings.Builder
+	qb.WriteString(`SELECT id, timestamp, session_id, command, decision, structural_decision, profile, rule_id, reason, duration_ms, metadata,
+		source, agent, cwd, workspace_root, file_inspected, approval_id, user_response, execution_exit_code,
+		judge_decision, judge_confidence, judge_reasoning, judge_applied, judge_provider, judge_latency_ms, judge_error
+		FROM events ORDER BY id ASC`)
+	var args []any
+	if limit > 0 {
+		qb.WriteString(" LIMIT ?")
+		args = append(args, limit)
+	}
+
+	rows, err := d.db.Query(qb.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list replay events: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var events []EventRecord
+	for rows.Next() {
+		event, err := scanEventRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate replay events: %w", err)
+	}
+	return events, nil
+}
+
 // scanEventRow scans a single row from an events query into an EventRecord.
 func scanEventRow(rows *sql.Rows) (EventRecord, error) {
 	var event EventRecord

@@ -26,6 +26,28 @@ func TestHardcoded_AllCompile(t *testing.T) {
 	}
 }
 
+func TestLoadPolicy_SafeJustRecipes(t *testing.T) {
+	cfg, err := loadPolicyFromBytes([]byte(`
+version: "1"
+safe_just_recipes:
+  - lint-all
+  - generate-docs
+`))
+	if err != nil {
+		t.Fatalf("loadPolicyFromBytes returned error: %v", err)
+	}
+
+	want := []string{"lint-all", "generate-docs"}
+	if len(cfg.SafeJustRecipes) != len(want) {
+		t.Fatalf("SafeJustRecipes length = %d, want %d", len(cfg.SafeJustRecipes), len(want))
+	}
+	for i := range want {
+		if cfg.SafeJustRecipes[i] != want[i] {
+			t.Fatalf("SafeJustRecipes[%d] = %q, want %q", i, cfg.SafeJustRecipes[i], want[i])
+		}
+	}
+}
+
 // TestHardcoded_MatchExamples tests that hardcoded rules match known-dangerous
 // commands and do NOT match benign ones.
 func TestHardcoded_MatchExamples(t *testing.T) {
@@ -867,6 +889,39 @@ func TestDisabledBuiltinSet_Empty(t *testing.T) {
 	m := DisabledBuiltinSet(&PolicyConfig{})
 	if m != nil {
 		t.Errorf("expected nil for empty disabled_builtins, got %v", m)
+	}
+}
+
+// --- builtin:cred:env-dump regression tests ---
+
+func TestEnvDump_MatchesBareEnvKeyword(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+	// `set` is also matched by the regex but isn't in the keyword index for
+	// this rule, so EvaluateBuiltins won't surface it. Cover only the
+	// keyword-indexed forms.
+	for _, cmd := range []string{"env", "printenv", "foo && env"} {
+		match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+		if match == nil || match.RuleID != "builtin:cred:env-dump" {
+			t.Errorf("%q: expected builtin:cred:env-dump match, got %+v", cmd, match)
+		}
+	}
+}
+
+func TestEnvDump_DoesNotMatchDotEnvFilePath(t *testing.T) {
+	// Regression: word boundary in `\b(env)\b\s*$` previously matched the
+	// `env` suffix of `.env` file paths, mis-flagging legitimate file reads
+	// as environment-variable dumps.
+	idx := BuildRuleIndex(BuiltinRules)
+	for _, cmd := range []string{
+		"grep -c TOKEN /path/.env",
+		"cat .env",
+		"cat foo.env",
+		"grep TOKEN /Users/me/proj/.env",
+	} {
+		match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+		if match != nil && match.RuleID == "builtin:cred:env-dump" {
+			t.Errorf("%q: should NOT match builtin:cred:env-dump (false positive on .env path)", cmd)
+		}
 	}
 }
 

@@ -91,8 +91,7 @@ var unconditionalSafePrefixes = []string{
 	// Development tools (read-only)
 	"cargo check", "cargo test", "cargo clippy", "cargo fmt",
 	"go vet", "go test", "go fmt", "go help", "go build",
-	"npm test", "npm run lint", "npm run test", "npx jest",
-	"yarn test", "pnpm test", "bun test",
+	"npx jest", "bun test",
 	"pytest", "python -m pytest", "python -m unittest",
 	"tsc --noEmit", "tsc --version",
 	"make check", "make test", "make lint",
@@ -142,6 +141,10 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 	}
 	basename := fields[0]
 
+	if isPackageManagerReadOnlyScript(fields) {
+		return true
+	}
+
 	// Check single-word safe set (includes Windows cmdlets and CMD builtins).
 	if IsUnconditionalSafe(basename) {
 		return true
@@ -165,6 +168,100 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 	}
 
 	return false
+}
+
+var packageManagerReadOnlyScripts = map[string]bool{
+	"test":      true,
+	"lint":      true,
+	"check":     true,
+	"typecheck": true,
+	"validate":  true,
+	"verify":    true,
+}
+
+var packageManagerLocalBuildScripts = map[string]bool{
+	"build":   true,
+	"compile": true,
+}
+
+var packageManagerDangerousScripts = map[string]bool{
+	"deploy":  true,
+	"release": true,
+	"publish": true,
+	"destroy": true,
+	"delete":  true,
+	"remove":  true,
+	"migrate": true,
+	"apply":   true,
+	"push":    true,
+	"upload":  true,
+	"sync":    true,
+}
+
+func packageManagerScript(fields []string) (string, int, bool) {
+	if len(fields) < 2 {
+		return "", 0, false
+	}
+
+	manager := fields[0]
+	if manager != "npm" && manager != "yarn" && manager != "pnpm" {
+		return "", 0, false
+	}
+
+	scriptIndex := 1
+	if fields[1] == "run" {
+		scriptIndex = 2
+	} else if manager == "npm" && fields[1] != "test" {
+		return "", 0, false
+	}
+	if len(fields) <= scriptIndex {
+		return "", 0, false
+	}
+	return strings.ToLower(fields[scriptIndex]), scriptIndex, true
+}
+
+func isPackageManagerReadOnlyScript(fields []string) bool {
+	script, scriptIndex, ok := packageManagerScript(fields)
+	if !ok || !packageManagerReadOnlyScripts[script] {
+		return false
+	}
+
+	return !hasPackageManagerMutatingFlag(fields[scriptIndex+1:])
+}
+
+func hasPackageManagerMutatingFlag(args []string) bool {
+	for _, arg := range args {
+		lowerArg := strings.ToLower(arg)
+		switch lowerArg {
+		case "-f", "--force", "-u", "--update", "--updatesnapshot", "--update-snapshot", "-w", "--write", "--fix":
+			return true
+		}
+		if strings.HasPrefix(lowerArg, "--fix=") ||
+			strings.HasPrefix(lowerArg, "--write=") ||
+			strings.HasPrefix(lowerArg, "--update=") ||
+			strings.HasPrefix(lowerArg, "--updatesnapshot=") ||
+			strings.HasPrefix(lowerArg, "--update-snapshot=") {
+			return true
+		}
+	}
+	return false
+}
+
+func packageManagerCautionReason(fields []string) string {
+	script, _, ok := packageManagerScript(fields)
+	if !ok {
+		return "package manager command is not allowlisted as read-only"
+	}
+	if packageManagerDangerousScripts[script] {
+		return "dangerous package-manager workflow"
+	}
+	if packageManagerLocalBuildScripts[script] {
+		return "package manager local build workflow"
+	}
+	if packageManagerReadOnlyScripts[script] {
+		return "package manager validation workflow has mutating flags"
+	}
+	return "package manager command is not allowlisted as read-only"
 }
 
 // IsConditionallySafe returns true if the command identified by basename is
@@ -208,6 +305,7 @@ var conditionalSafeCheckers = map[string]func([]string) bool{
 	"codex":     isCodexSafe,
 	"gh":        isGhSafe,
 	"tk":        isTkSafe,
+	"epos":      isEposSafe,
 	"gofumpt":   isGofumptSafe,
 	"just":      isJustSafe,
 }
@@ -238,6 +336,10 @@ func KnownUnsafeInspectionVariant(basename, fullCmd string) (string, bool) {
 		if len(fields) > 0 && !isTkSafe(fields) {
 			return "tk command is not read-only", true
 		}
+	case "epos":
+		if len(fields) > 0 && !isEposSafe(fields) {
+			return "epos command is not read-only", true
+		}
 	case "gofumpt":
 		if len(fields) > 0 && !isGofumptSafe(fields) {
 			return "gofumpt command may write files", true
@@ -253,6 +355,10 @@ func KnownUnsafeInspectionVariant(basename, fullCmd string) (string, bool) {
 	case "fuse":
 		if len(fields) > 0 && !isFuseSafe(fields) {
 			return "fuse command is not allowlisted as read-only", true
+		}
+	case "npm", "yarn", "pnpm":
+		if len(fields) > 0 && !isPackageManagerReadOnlyScript(fields) {
+			return packageManagerCautionReason(fields), true
 		}
 	}
 	return "", false
@@ -973,6 +1079,9 @@ func isGhSafe(fields []string) bool {
 	if isHelpOrVersion(fields[1:]) {
 		return true
 	}
+	if fields[1] == "auth" {
+		return len(fields) >= 3 && fields[2] == "status"
+	}
 	if fields[1] == "api" {
 		return isGhAPISafe(fields[2:])
 	}
@@ -1035,6 +1144,20 @@ func isTkSafe(fields []string) bool {
 	return safeSubs[fields[1]]
 }
 
+func isEposSafe(fields []string) bool {
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "epos") {
+		return false
+	}
+	if isHelpOrVersion(fields[1:]) {
+		return true
+	}
+	safeSubs := map[string]bool{
+		"ready": true, "blocked": true, "show": true, "export": true,
+		"lint": true, "validate": true, "help": true, "completion": true,
+	}
+	return safeSubs[fields[1]]
+}
+
 func isGofumptSafe(fields []string) bool {
 	if len(fields) == 0 || !commandTokenMatches(fields[0], "gofumpt") {
 		return false
@@ -1048,7 +1171,31 @@ func isGofumptSafe(fields []string) bool {
 }
 
 func isJustSafe(fields []string) bool {
-	return len(fields) >= 2 && commandTokenMatches(fields[0], "just") && fields[1] == "check"
+	if len(fields) < 2 || !commandTokenMatches(fields[0], "just") {
+		return false
+	}
+	safeRecipes := map[string]bool{
+		"--summary":     true,
+		"actionlint":    true,
+		"build-check":   true,
+		"check":         true,
+		"dev":           true,
+		"format":        true,
+		"format-check":  true,
+		"install-hooks": true,
+		"lint":          true,
+		"lint-check":    true,
+		"pre-commit":    true,
+		"pre-push":      true,
+	}
+	return safeRecipes[fields[1]]
+}
+
+func isConfiguredJustSafe(fields []string, evaluator PolicyEvaluator) bool {
+	if evaluator == nil || len(fields) < 2 || !commandTokenMatches(fields[0], "just") {
+		return false
+	}
+	return evaluator.IsSafeJustRecipe(fields[1])
 }
 
 // unconditionalSafeGoSubs lists `go` subcommands whose entire invocation is

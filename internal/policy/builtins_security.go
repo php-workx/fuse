@@ -8,8 +8,18 @@ import (
 )
 
 var (
-	reNetcatScanMode = regexp.MustCompile(`(^|\s)-[a-zA-Z]*z[a-zA-Z]*(\s|$)`)
-	reNetcatExecMode = regexp.MustCompile(`\b(nc|ncat|netcat)\s+.*-e\s+`)
+	reNetcatScanMode     = regexp.MustCompile(`(^|\s)-[a-zA-Z]*z[a-zA-Z]*(\s|$)`)
+	reNetcatExecMode     = regexp.MustCompile(`\b(nc|ncat|netcat)\s+.*-e\s+`)
+	reContainerRun       = `(?i)\b(?:docker|podman)\s+run\b.*`
+	reContainerMountSock = regexp.MustCompile(
+		reContainerRun + `(?:(?:-v|--volume)(?:=|\s+)\S*/var/run/docker\.sock|` +
+			`--mount(?:=|\s+)\S*(?:src|source)=/var/run/docker\.sock)`,
+	)
+	reContainerMountRoot = regexp.MustCompile(
+		reContainerRun + `(?:(?:-v|--volume)(?:=|\s+)/:/|` +
+			`--mount(?:=|\s+)\S*(?:src|source)=/(?:,|\s|$))`,
+	)
+	reContainerCapAddFlag = regexp.MustCompile(`(?i)\b(?:docker|podman)\s+run\b.*--cap-add(?:=|\s+)(ALL|SYS_ADMIN|SYS_PTRACE)\b`)
 )
 
 func init() {
@@ -114,8 +124,11 @@ func init() {
 		// §6.3.15 Credential access & secret exposure
 		// ---------------------------------------------------------------
 		{
-			ID:      "builtin:cred:env-dump",
-			Pattern: regexp.MustCompile(`\b(env|printenv|set)\b\s*$`),
+			ID: "builtin:cred:env-dump",
+			// Require start-of-line or whitespace before the keyword so that
+			// file paths ending in `.env` (e.g. `grep TOKEN /path/.env`) are
+			// not mistaken for a bare `env` invocation.
+			Pattern: regexp.MustCompile(`(?:^|\s)(env|printenv|set)\s*$`),
 			Action:  core.DecisionCaution,
 			Reason:  "Dumps all environment variables (may contain secrets)",
 		},
@@ -357,31 +370,31 @@ func init() {
 		// ---------------------------------------------------------------
 		{
 			ID:      "builtin:container:privileged",
-			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*--privileged\b`),
+			Pattern: regexp.MustCompile(`(?i)\b(?:docker|podman)\s+run\b.*--privileged\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Runs privileged container (host access)",
 		},
 		{
 			ID:      "builtin:container:host-pid",
-			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*--pid=host\b`),
+			Pattern: regexp.MustCompile(`(?i)\b(?:docker|podman)\s+run\b.*--pid(?:=|\s+)host\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Container with host PID namespace",
 		},
 		{
 			ID:      "builtin:container:host-net",
-			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*--network=host\b`),
+			Pattern: regexp.MustCompile(`(?i)\b(?:docker|podman)\s+run\b.*--(?:network|net)(?:=|\s+)host\b`),
 			Action:  core.DecisionCaution,
 			Reason:  "Container with host network",
 		},
 		{
 			ID:      "builtin:container:mount-sock",
-			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*-v\s+/var/run/docker\.sock`),
+			Pattern: reContainerMountSock,
 			Action:  core.DecisionBlocked,
 			Reason:  "Mounts Docker socket (container escape)",
 		},
 		{
 			ID:      "builtin:container:mount-root",
-			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*-v\s+/:/`),
+			Pattern: reContainerMountRoot,
 			Action:  core.DecisionBlocked,
 			Reason:  "Mounts host root filesystem",
 		},
@@ -405,7 +418,7 @@ func init() {
 		},
 		{
 			ID:      "builtin:privesc:cap-add",
-			Pattern: regexp.MustCompile(`\bdocker\s+run\s+.*--cap-add\s+(ALL|SYS_ADMIN|SYS_PTRACE)`),
+			Pattern: reContainerCapAddFlag,
 			Action:  core.DecisionCaution,
 			Reason:  "Adds dangerous Linux capabilities",
 		},
