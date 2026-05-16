@@ -171,28 +171,58 @@ func IsUnconditionalSafeCmd(fullCmd string) bool {
 }
 
 var packageManagerReadOnlyScripts = map[string]bool{
-	"test":  true,
-	"lint":  true,
-	"check": true,
+	"test":      true,
+	"lint":      true,
+	"check":     true,
+	"typecheck": true,
+	"validate":  true,
+	"verify":    true,
 }
 
-func isPackageManagerReadOnlyScript(fields []string) bool {
+var packageManagerLocalBuildScripts = map[string]bool{
+	"build":   true,
+	"compile": true,
+}
+
+var packageManagerDangerousScripts = map[string]bool{
+	"deploy":  true,
+	"release": true,
+	"publish": true,
+	"destroy": true,
+	"delete":  true,
+	"remove":  true,
+	"migrate": true,
+	"apply":   true,
+	"push":    true,
+	"upload":  true,
+	"sync":    true,
+}
+
+func packageManagerScript(fields []string) (string, int, bool) {
 	if len(fields) < 2 {
-		return false
+		return "", 0, false
 	}
 
 	manager := fields[0]
 	if manager != "npm" && manager != "yarn" && manager != "pnpm" {
-		return false
+		return "", 0, false
 	}
 
 	scriptIndex := 1
 	if fields[1] == "run" {
 		scriptIndex = 2
 	} else if manager == "npm" && fields[1] != "test" {
-		return false
+		return "", 0, false
 	}
-	if len(fields) <= scriptIndex || !packageManagerReadOnlyScripts[fields[scriptIndex]] {
+	if len(fields) <= scriptIndex {
+		return "", 0, false
+	}
+	return strings.ToLower(fields[scriptIndex]), scriptIndex, true
+}
+
+func isPackageManagerReadOnlyScript(fields []string) bool {
+	script, scriptIndex, ok := packageManagerScript(fields)
+	if !ok || !packageManagerReadOnlyScripts[script] {
 		return false
 	}
 
@@ -215,6 +245,23 @@ func hasPackageManagerMutatingFlag(args []string) bool {
 		}
 	}
 	return false
+}
+
+func packageManagerCautionReason(fields []string) string {
+	script, _, ok := packageManagerScript(fields)
+	if !ok {
+		return "package manager command is not allowlisted as read-only"
+	}
+	if packageManagerDangerousScripts[script] {
+		return "dangerous package-manager workflow"
+	}
+	if packageManagerLocalBuildScripts[script] {
+		return "package manager local build workflow"
+	}
+	if packageManagerReadOnlyScripts[script] {
+		return "package manager validation workflow has mutating flags"
+	}
+	return "package manager command is not allowlisted as read-only"
 }
 
 // IsConditionallySafe returns true if the command identified by basename is
@@ -311,7 +358,7 @@ func KnownUnsafeInspectionVariant(basename, fullCmd string) (string, bool) {
 		}
 	case "npm", "yarn", "pnpm":
 		if len(fields) > 0 && !isPackageManagerReadOnlyScript(fields) {
-			return "package manager command is not allowlisted as read-only", true
+			return packageManagerCautionReason(fields), true
 		}
 	}
 	return "", false

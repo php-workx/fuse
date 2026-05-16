@@ -1437,6 +1437,72 @@ func TestClassify_SensitiveEnvAssignments(t *testing.T) {
 	}
 }
 
+func TestClassify_PackageManagerWorkflowSemantics(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	tests := []struct {
+		name     string
+		command  string
+		expected core.Decision
+		reason   string
+	}{
+		{
+			name:     "pnpm typecheck is safe validation",
+			command:  "pnpm typecheck",
+			expected: core.DecisionSafe,
+			reason:   core.UnconditionallySafeReason,
+		},
+		{
+			name:     "yarn typecheck is safe validation",
+			command:  "yarn typecheck",
+			expected: core.DecisionSafe,
+			reason:   core.UnconditionallySafeReason,
+		},
+		{
+			name:     "npm validate run script is safe validation",
+			command:  "npm run validate",
+			expected: core.DecisionSafe,
+			reason:   core.UnconditionallySafeReason,
+		},
+		{
+			name:     "mutating validation flag stays caution",
+			command:  "pnpm typecheck --write",
+			expected: core.DecisionCaution,
+			reason:   "package manager validation workflow has mutating flags",
+		},
+		{
+			name:     "build stays caution",
+			command:  "yarn build",
+			expected: core.DecisionCaution,
+			reason:   "package manager local build workflow",
+		},
+		{
+			name:     "deploy stays caution",
+			command:  "npm run deploy",
+			expected: core.DecisionCaution,
+			reason:   "dangerous package-manager workflow",
+		},
+		{
+			name:     "publish stays caution",
+			command:  "pnpm publish",
+			expected: core.DecisionCaution,
+			reason:   "dangerous package-manager workflow",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := classifyOne(t, evaluator, tt.command)
+			if result.Decision != tt.expected {
+				t.Fatalf("got %s, want %s (reason: %s)", result.Decision, tt.expected, result.Reason)
+			}
+			if result.Reason != tt.reason {
+				t.Fatalf("reason = %q, want %q", result.Reason, tt.reason)
+			}
+		})
+	}
+}
+
 func TestClassify_InterpreterBackedDangerousScriptUsesInspectionResult(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
