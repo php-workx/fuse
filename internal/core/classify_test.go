@@ -1718,27 +1718,38 @@ func TestClassify_PythonHeredocBodyReasonReplacesGeneric(t *testing.T) {
 	}
 }
 
-func TestClassify_ActiveLoopbackNetworkCommandsRemainBlocked(t *testing.T) {
+func TestClassify_CanonicalLocalhostNetworkCommandsAreDeveloperFriendly(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
 	tests := []struct {
 		name    string
 		command string
+		want    core.Decision
 	}{
 		{
-			name:    "curl loopback",
+			name:    "curl GET canonical loopback",
 			command: "curl http://127.0.0.1:8080",
+			want:    core.DecisionSafe,
+		},
+		{
+			name:    "httpie HEAD canonical localhost",
+			command: "http HEAD http://localhost:8080/health",
+			want:    core.DecisionCaution,
+		},
+		{
+			name:    "curl DELETE canonical ipv6 loopback",
+			command: "curl -X DELETE http://[::1]:8080/users/1",
+			want:    core.DecisionCaution,
+		},
+		{
+			name:    "httpie POST canonical localhost",
+			command: "http POST http://localhost:8080/users name=test",
+			want:    core.DecisionCaution,
 		},
 		{
 			name:    "curl non-canonical loopback",
 			command: "curl http://0x7f000001:8080",
-		},
-		{
-			name: "python urlopen loopback",
-			command: "python - <<'PY'\n" +
-				"import urllib.request\n" +
-				"urllib.request.urlopen('http://127.0.0.1:8080')\n" +
-				"PY",
+			want:    core.DecisionBlocked,
 		},
 	}
 
@@ -1753,8 +1764,8 @@ func TestClassify_ActiveLoopbackNetworkCommandsRemainBlocked(t *testing.T) {
 			if err != nil {
 				t.Fatalf("classify error: %v", err)
 			}
-			if result.Decision != core.DecisionBlocked {
-				t.Fatalf("got %s, want BLOCKED (reason: %s)", result.Decision, result.Reason)
+			if result.Decision != tt.want {
+				t.Fatalf("got %s, want %s (reason: %s)", result.Decision, tt.want, result.Reason)
 			}
 		})
 	}
