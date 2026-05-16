@@ -30,7 +30,11 @@ type replayEventsReport struct {
 	HistoricalApprovalEvents  int                         `json:"historical_approval_events"`
 	CurrentApprovalEvents     int                         `json:"current_approval_events"`
 	DedupedApprovalPromptKeys int                         `json:"deduped_approval_prompt_keys"`
+	EstimatedLivePromptKeys   int                         `json:"estimated_live_prompt_keys"`
+	ReplayDriftApprovalEvents int                         `json:"replay_drift_approval_events"`
+	ReplayDriftPromptKeys     int                         `json:"replay_drift_prompt_keys"`
 	RemainingClusters         []replayEventsCluster       `json:"remaining_clusters"`
+	ReplayDriftClusters       []replayEventsCluster       `json:"replay_drift_clusters"`
 	ClassificationErrors      []replayClassificationError `json:"classification_errors,omitempty"`
 }
 
@@ -122,7 +126,9 @@ func buildReplayEventsReport(database *db.DB, evaluator core.PolicyEvaluator, li
 		DecisionMatrix:       make(map[string]map[string]int),
 	}
 	clusters := make(map[string]*replayEventsCluster)
+	driftClusters := make(map[string]*replayEventsCluster)
 	approvalPromptKeys := make(map[string]bool)
+	driftPromptKeys := make(map[string]bool)
 
 	for i := range events {
 		event := &events[i]
@@ -157,6 +163,12 @@ func buildReplayEventsReport(database *db.DB, evaluator core.PolicyEvaluator, li
 		if result.Decision == core.DecisionApproval {
 			report.CurrentApprovalEvents++
 			approvalPromptKeys[result.DecisionKey] = true
+			if isReplayDriftApprovalCandidate(result) {
+				report.ReplayDriftApprovalEvents++
+				driftPromptKeys[result.DecisionKey] = true
+				addReplayCluster(driftClusters, event, result, oldDecision)
+				continue
+			}
 		}
 		if result.Decision == core.DecisionApproval || result.Decision == core.DecisionCaution {
 			addReplayCluster(clusters, event, result, oldDecision)
@@ -164,8 +176,15 @@ func buildReplayEventsReport(database *db.DB, evaluator core.PolicyEvaluator, li
 	}
 
 	report.DedupedApprovalPromptKeys = len(approvalPromptKeys)
+	report.ReplayDriftPromptKeys = len(driftPromptKeys)
+	report.EstimatedLivePromptKeys = report.DedupedApprovalPromptKeys - report.ReplayDriftPromptKeys
 	report.RemainingClusters = sortedReplayClusters(clusters, top)
+	report.ReplayDriftClusters = sortedReplayClusters(driftClusters, top)
 	return report, nil
+}
+
+func isReplayDriftApprovalCandidate(result *core.ClassifyResult) bool {
+	return result.Decision == core.DecisionApproval && result.Reason == "file not found"
 }
 
 func addReplayCluster(clusters map[string]*replayEventsCluster, event *db.EventRecord, result *core.ClassifyResult, oldDecision string) {
@@ -229,6 +248,8 @@ func printReplayEventsReport(report *replayEventsReport) {
 	fmt.Printf("Historical APPROVAL events: %d\n", report.HistoricalApprovalEvents)
 	fmt.Printf("Current APPROVAL events: %d\n", report.CurrentApprovalEvents)
 	fmt.Printf("Deduped approval prompt keys: %d\n", report.DedupedApprovalPromptKeys)
+	fmt.Printf("Replay drift approval keys: %d\n", report.ReplayDriftPromptKeys)
+	fmt.Printf("Estimated live approval prompt keys: %d\n", report.EstimatedLivePromptKeys)
 	if len(report.ClassificationErrors) > 0 {
 		fmt.Printf("Classification errors: %d\n", len(report.ClassificationErrors))
 	}
@@ -262,6 +283,22 @@ func printReplayEventsReport(report *replayEventsReport) {
 		)
 	}
 	_ = w.Flush()
+
+	if len(report.ReplayDriftClusters) > 0 {
+		fmt.Println("\nReplay drift approval candidates")
+		w = tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "COUNT\tKEYS\tREASON\tEXAMPLE")
+		for i := range report.ReplayDriftClusters {
+			cluster := &report.ReplayDriftClusters[i]
+			_, _ = fmt.Fprintf(w, "%d\t%d\t%s\t%s\n",
+				cluster.Count,
+				cluster.PromptKeys,
+				shorten(cluster.Reason, 80),
+				shorten(cluster.Example, 96),
+			)
+		}
+		_ = w.Flush()
+	}
 }
 
 func normalizeReplayDecision(decision string) string {

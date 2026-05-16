@@ -114,6 +114,9 @@ After implementing the first replay command, the local 100,000-event DB replay p
 | Historical `APPROVAL` events | 2,436 |
 | Current classifier `APPROVAL` events | 1,107 |
 | Deduped current approval prompt keys | 1,026 |
+| Replay-drift approval events (`file not found`) | 123 |
+| Replay-drift approval prompt keys | 102 |
+| Estimated live approval prompt keys | 924 |
 | Historical `CAUTION` events | 10,455 |
 | Current classifier `CAUTION` events | 12,388 |
 
