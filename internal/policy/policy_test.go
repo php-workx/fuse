@@ -26,6 +26,28 @@ func TestHardcoded_AllCompile(t *testing.T) {
 	}
 }
 
+func TestLoadPolicy_SafeJustRecipes(t *testing.T) {
+	cfg, err := loadPolicyFromBytes([]byte(`
+version: "1"
+safe_just_recipes:
+  - lint-all
+  - generate-docs
+`))
+	if err != nil {
+		t.Fatalf("loadPolicyFromBytes returned error: %v", err)
+	}
+
+	want := []string{"lint-all", "generate-docs"}
+	if len(cfg.SafeJustRecipes) != len(want) {
+		t.Fatalf("SafeJustRecipes length = %d, want %d", len(cfg.SafeJustRecipes), len(want))
+	}
+	for i := range want {
+		if cfg.SafeJustRecipes[i] != want[i] {
+			t.Fatalf("SafeJustRecipes[%d] = %q, want %q", i, cfg.SafeJustRecipes[i], want[i])
+		}
+	}
+}
+
 // TestHardcoded_MatchExamples tests that hardcoded rules match known-dangerous
 // commands and do NOT match benign ones.
 func TestHardcoded_MatchExamples(t *testing.T) {

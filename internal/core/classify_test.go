@@ -855,6 +855,49 @@ func TestClassify_EmptyCommand(t *testing.T) {
 	}
 }
 
+func TestClassify_ConfiguredSafeJustRecipe(t *testing.T) {
+	evaluator := policy.NewEvaluator(&policy.PolicyConfig{
+		SafeJustRecipes: []string{"generate-docs"},
+	})
+
+	result := classifyOne(t, evaluator, "just generate-docs")
+	if result.Decision != core.DecisionSafe {
+		t.Fatalf("expected SAFE for configured just recipe, got %s (reason: %s)", result.Decision, result.Reason)
+	}
+}
+
+func TestClassify_UnknownJustRecipeRemainsCaution(t *testing.T) {
+	result := classifyOne(t, policy.NewEvaluator(nil), "just generate-docs")
+	if result.Decision != core.DecisionCaution {
+		t.Fatalf("expected CAUTION for unknown just recipe, got %s (reason: %s)", result.Decision, result.Reason)
+	}
+}
+
+func TestClassify_ConfiguredJustRecipesAreExactOnly(t *testing.T) {
+	evaluator := policy.NewEvaluator(&policy.PolicyConfig{
+		SafeJustRecipes: []string{"deploy*", "release-", "destroy"},
+	})
+
+	tests := []struct {
+		name    string
+		command string
+		want    core.Decision
+	}{
+		{"pattern-like deploy does not match deploy", "just deploy", core.DecisionCaution},
+		{"prefix-like release does not match release-prod", "just release-prod", core.DecisionCaution},
+		{"exact dangerous recipe can be explicit", "just destroy", core.DecisionSafe},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := classifyOne(t, evaluator, tt.command)
+			if result.Decision != tt.want {
+				t.Fatalf("expected %s for %q, got %s (reason: %s)", tt.want, tt.command, result.Decision, result.Reason)
+			}
+		})
+	}
+}
+
 func TestClassify_InlineScript(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 

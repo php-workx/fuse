@@ -1144,6 +1144,13 @@ func isJustSafe(fields []string) bool {
 	return safeRecipes[fields[1]]
 }
 
+func isConfiguredJustSafe(fields []string, evaluator PolicyEvaluator) bool {
+	if evaluator == nil || len(fields) < 2 || !commandTokenMatches(fields[0], "just") {
+		return false
+	}
+	return evaluator.IsSafeJustRecipe(fields[1])
+}
+
 // unconditionalSafeGoSubs lists `go` subcommands whose entire invocation is
 // read-only regardless of arguments. Covers version/help reporters and the
 // standard lint/format/test workflow commands already allow-listed as safe

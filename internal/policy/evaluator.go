@@ -9,6 +9,7 @@ type Evaluator struct {
 	disabledIDs  map[string]bool
 	disabledTags map[string]bool
 	tagOverrides map[string]TagOverrideMode
+	safeJust     map[string]bool
 	ruleIndex    *RuleIndex
 }
 
@@ -22,6 +23,7 @@ func NewEvaluator(cfg *PolicyConfig) *Evaluator {
 		disabledIDs:  DisabledBuiltinSet(cfg),
 		disabledTags: DisabledTagSet(cfg),
 		tagOverrides: overrides,
+		safeJust:     SafeJustRecipeSet(cfg),
 		ruleIndex:    BuildRuleIndex(BuiltinRules),
 	}
 }
@@ -40,4 +42,12 @@ func (e *Evaluator) EvaluateUserRules(classNorm string) (core.Decision, string) 
 // and per-tag enforcement mode. Returns a BuiltinMatch or nil.
 func (e *Evaluator) EvaluateBuiltins(classNorm string) *core.BuiltinMatch {
 	return EvaluateBuiltins(classNorm, e.disabledIDs, e.disabledTags, e.tagOverrides, e.ruleIndex)
+}
+
+// IsSafeJustRecipe checks project policy's exact just recipe allowlist.
+func (e *Evaluator) IsSafeJustRecipe(recipe string) bool {
+	if e == nil || len(e.safeJust) == 0 {
+		return false
+	}
+	return e.safeJust[recipe]
 }

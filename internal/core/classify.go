@@ -80,6 +80,10 @@ type PolicyEvaluator interface {
 	// if a rule matched, or nil if no match. DryRun indicates the match
 	// should be logged but not enforced (per-tag override or global dryrun).
 	EvaluateBuiltins(classNorm string) *BuiltinMatch
+
+	// IsSafeJustRecipe reports whether policy explicitly marks the exact just
+	// recipe token as safe.
+	IsSafeJustRecipe(recipe string) bool
 }
 
 // Compiled regexes for inline script detection (§5.4).
@@ -867,7 +871,7 @@ func classifySingleCommand(cmd string, evaluator PolicyEvaluator, cwd string, fi
 	}
 
 	// Layer 4-6 and inline fallbacks.
-	return classifyFallbackLayers(cmd, basename, fileInspection, inlineDecision, inlineReason, dryRunMatches)
+	return classifyFallbackLayers(cmd, basename, evaluator, fileInspection, inlineDecision, inlineReason, dryRunMatches)
 }
 
 func resolveCommandPath(cmd, cwd string) (string, bool) {
@@ -976,6 +980,7 @@ func evaluatePolicyRules(
 // and produces the fallback CAUTION decision.
 func classifyFallbackLayers(
 	cmd, basename string,
+	evaluator PolicyEvaluator,
 	fileInspection *FileInspection,
 	inlineDecision Decision, inlineReason string,
 	dryRunMatches []BuiltinMatch,
@@ -983,6 +988,10 @@ func classifyFallbackLayers(
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
 		return commandClassificationResult{decision: DecisionSafe, reason: UnconditionallySafeReason, dryRunMatches: dryRunMatches}
+	}
+
+	if isConfiguredJustSafe(strings.Fields(cmd), evaluator) {
+		return commandClassificationResult{decision: DecisionSafe, reason: ConditionallySafeReason, dryRunMatches: dryRunMatches}
 	}
 
 	// Layer 5: Conditionally safe commands.
