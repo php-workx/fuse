@@ -49,6 +49,43 @@ func TestLogEvent_PersistsObservabilityFields(t *testing.T) {
 	}
 }
 
+func TestListEventsForReplay_OrderAndLimitContracts(t *testing.T) {
+	d := openTestDB(t)
+
+	for _, command := range []string{"oldest", "middle", "newest"} {
+		if err := d.LogEvent(&EventRecord{Command: command, Decision: "SAFE"}); err != nil {
+			t.Fatalf("LogEvent(%s): %v", command, err)
+		}
+	}
+
+	tests := []struct {
+		name  string
+		limit int
+		want  []string
+	}{
+		{name: "zero returns all", limit: 0, want: []string{"oldest", "middle", "newest"}},
+		{name: "negative returns all", limit: -1, want: []string{"oldest", "middle", "newest"}},
+		{name: "positive limit returns oldest first", limit: 2, want: []string{"oldest", "middle"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events, err := d.ListEventsForReplay(tt.limit)
+			if err != nil {
+				t.Fatalf("ListEventsForReplay(%d): %v", tt.limit, err)
+			}
+			if len(events) != len(tt.want) {
+				t.Fatalf("len(events) = %d, want %d", len(events), len(tt.want))
+			}
+			for i, want := range tt.want {
+				if events[i].Command != want {
+					t.Fatalf("events[%d].Command = %q, want %q", i, events[i].Command, want)
+				}
+			}
+		})
+	}
+}
+
 func TestSummarizeEvents_AggregatesByDecisionAgentSourceAndWorkspace(t *testing.T) {
 	d := openTestDB(t)
 

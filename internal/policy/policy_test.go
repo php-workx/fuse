@@ -945,6 +945,22 @@ func TestContainerMountSockMatchesPodmanSockets(t *testing.T) {
 	}
 }
 
+func TestContainerMountSockDoesNotMatchDestinationOnlySocket(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+	tests := []string{
+		"docker run -v /tmp:/var/run/docker.sock alpine",
+		"podman run --volume=/tmp:/run/podman/podman.sock alpine",
+	}
+	for _, cmd := range tests {
+		t.Run(cmd, func(t *testing.T) {
+			match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+			if match != nil && match.RuleID == "builtin:container:mount-sock" {
+				t.Fatalf("destination-only socket path should not match mount-sock, got %+v", match)
+			}
+		})
+	}
+}
+
 // --- EvaluateUserRules edge cases ---
 
 func TestEvaluateUserRules_SkipsNilCompiledRule(t *testing.T) {

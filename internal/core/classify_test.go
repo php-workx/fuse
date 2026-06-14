@@ -408,6 +408,7 @@ func TestClassify_AuditReadOnlyDeveloperInspectionCommands(t *testing.T) {
 		{name: "sqlite write remains unsafe", command: `sqlite3 app.db "DELETE FROM events"`, expected: core.DecisionCaution},
 		{name: "gh api read", command: `gh api repos/php-workx/fuse/pulls/1/comments --paginate`, expected: core.DecisionSafe},
 		{name: "gh auth status", command: `gh auth status`, expected: core.DecisionSafe},
+		{name: "gh auth status show token remains unsafe", command: `gh auth status --show-token`, expected: core.DecisionCaution},
 		{name: "gh api mutating method remains unsafe", command: `gh api -X POST repos/php-workx/fuse/issues/1/comments -f body=test`, expected: core.DecisionCaution},
 		{name: "tk show", command: `tk show fus-112i`, expected: core.DecisionSafe},
 		{name: "tk create remains unsafe", command: `tk create "new ticket" -d "desc"`, expected: core.DecisionCaution},
@@ -1489,6 +1490,21 @@ rules:
 	}
 }
 
+func TestClassify_CompoundSplitErrorBareEnvDocsIsLowRisk(t *testing.T) {
+	result, err := core.Classify(core.ShellRequest{
+		RawCommand: "custom-tool update env docs )",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}, policy.NewEvaluator(nil))
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if result.Decision != core.DecisionCaution {
+		t.Fatalf("decision = %s, want CAUTION for bare env prose (reason: %s)", result.Decision, result.Reason)
+	}
+}
+
 func TestClassify_PackageManagerWorkflowSemantics(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
@@ -1609,6 +1625,26 @@ func TestClassify_InlineBodyIsPopulated(t *testing.T) {
 	}
 	if result.InlineBody == "" {
 		t.Error("expected InlineBody to be populated for heredoc command")
+	}
+}
+
+func TestClassify_InlineScopedEnvAssignmentUsesAssessment(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+	req := core.ShellRequest{
+		RawCommand: "bash <<EOF\nHOME=\"$(mktemp -d)\" go test ./...\nEOF",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}
+	result, err := core.Classify(req, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionCaution {
+		t.Fatalf("decision = %s, want CAUTION (reason: %s)", result.Decision, result.Reason)
+	}
+	if !strings.Contains(result.Reason, "scoped developer environment assignment") {
+		t.Fatalf("reason = %q, want scoped developer environment assignment", result.Reason)
 	}
 }
 

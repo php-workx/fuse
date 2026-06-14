@@ -145,9 +145,9 @@ var insecureCertLongFlags = []string{"--insecure", "--no-check-certificate", "--
 // --- L7 progressive enforcement ---
 
 // reDestructiveHTTPMethod detects HTTP methods that modify/delete resources.
-// Matches: -X POST, -XPOST, --request DELETE, --request=DELETE,
-// and HTTPie-style "http POST URL".
-var reDestructiveHTTPMethod = regexp.MustCompile(`(?i)(^|\s)((-X\s*|--request(\s+|=))(POST|DELETE|PUT|PATCH)|(POST|DELETE|PUT|PATCH))\b`)
+// Matches: -X POST, -XPOST, --request DELETE, --request=DELETE.
+// HTTPie-style positional methods are detected by hasHTTPieDestructiveMethod.
+var reDestructiveHTTPMethod = regexp.MustCompile(`(?i)(^|\s)(-X\s*|--request(\s+|=))(POST|DELETE|PUT|PATCH)\b`)
 
 // reDataUploadFlags detects flags that send data payloads (exfiltration risk).
 var reDataUploadFlags = []string{
@@ -209,7 +209,7 @@ func inspectNetworkCommandFlags(cmd string, escalate func(Decision, string)) {
 	if hasInsecureCertFlag(cmd) {
 		escalate(DecisionCaution, "insecure TLS flag detected")
 	}
-	if reDestructiveHTTPMethod.MatchString(cmd) {
+	if reDestructiveHTTPMethod.MatchString(cmd) || hasHTTPieDestructiveMethod(cmd) {
 		escalate(DecisionCaution, "destructive HTTP method detected")
 	}
 	if hasDataUploadFlag(cmd) {
@@ -220,6 +220,30 @@ func inspectNetworkCommandFlags(cmd string, escalate func(Decision, string)) {
 	}
 	if hasRedirectFlags(cmd) {
 		escalate(DecisionCaution, "HTTP redirect following enabled")
+	}
+}
+
+func hasHTTPieDestructiveMethod(cmd string) bool {
+	fields, _ := tokenizeQuoteAware(cmd)
+	if len(fields) < 2 {
+		return false
+	}
+	base := extractCmdBasename(fields[0])
+	if base != "http" && base != "httpie" && base != "xh" && base != "curlie" {
+		return false
+	}
+	i := 1
+	for i < len(fields) && strings.HasPrefix(fields[i], "-") {
+		i++
+	}
+	if i >= len(fields) {
+		return false
+	}
+	switch strings.ToUpper(fields[i]) {
+	case "POST", "DELETE", "PUT", "PATCH":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -123,7 +123,7 @@ var criticalIncompleteAnalysisPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`/dev/tcp/|\b(?:nc|ncat|netcat)\b.*\s-e\s+`),
 	regexp.MustCompile(`(?i)\b(?:AWS_SECRET_ACCESS_KEY|GITHUB_TOKEN|GH_TOKEN|DATABASE_URL|DB_PASSWORD|API_KEY|SECRET_KEY|PRIVATE_KEY)\b`),
 	regexp.MustCompile(`(?i)(?:^|\s)(?:PATH|LD_PRELOAD|LD_LIBRARY_PATH|DYLD_[A-Z0-9_]*|NODE_OPTIONS|GIT_EXEC_PATH|HOME)=`),
-	regexp.MustCompile(`(?:^|\s)(?:~?/)?\.?(?:aws/credentials|ssh/id_rsa|env)\b|\.ssh/authorized_keys\b`),
+	regexp.MustCompile(`(?:^|\s)(?:~?/)?(?:\.env|aws/credentials|ssh/id_rsa)\b|\.ssh/authorized_keys\b`),
 	regexp.MustCompile(`(?:~|/Users/[^/\s]+|/home/[^/\s]+)/\.fuse/|(?:~|/Users/[^/\s]+|/home/[^/\s]+)/\.claude/`),
 	regexp.MustCompile(`\b(?:fuse|epos|tk)\s+(?:disable|uninstall|close|reopen|edit|new|claim|release)\b`),
 }
@@ -1724,7 +1724,12 @@ func applyExtractedEscalations(result *extractedSubCommandResult, subCmd string,
 		}
 	}
 	if classified.SensitiveEnvAssignment {
-		if combined := MaxDecision(result.decision, DecisionApproval); combined != result.decision {
+		if assessment, ok := assessSensitiveEnvAssignment(subCmd, classified.SensitiveEnvAssignment); ok {
+			if combined := MaxDecision(result.decision, assessment.decision); combined != result.decision {
+				result.decision = combined
+				result.reason = assessment.reason
+			}
+		} else if combined := MaxDecision(result.decision, DecisionApproval); combined != result.decision {
 			result.decision = combined
 			result.reason = "security-sensitive environment variable assignment in inline body"
 		}

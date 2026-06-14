@@ -13,8 +13,8 @@ var (
 	reContainerRun       = `(?i)\b(?:docker|podman)\s+run\b.*`
 	reContainerSockPath  = `(?:/var/run/docker\.sock|/run/podman/podman\.sock|/run/user/[^/\s]+/podman/podman\.sock)`
 	reContainerMountSock = regexp.MustCompile(
-		reContainerRun + `(?:(?:-v|--volume)(?:=|\s+)\S*` + reContainerSockPath + `|` +
-			`--mount(?:=|\s+)\S*(?:src|source)=` + reContainerSockPath + `)`,
+		reContainerRun + `(?:(?:-v|--volume)(?:=|\s+)` + reContainerSockPath + `(?::\S*|\s|$)|` +
+			`--mount(?:=|\s+)\S*(?:src|source)=` + reContainerSockPath + `(?:,|\s|$))`,
 	)
 	reContainerMountRoot = regexp.MustCompile(
 		reContainerRun + `(?:(?:-v|--volume)(?:=|\s+)/:/|` +

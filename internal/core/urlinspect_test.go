@@ -273,6 +273,20 @@ func TestInspectURLs_DestructiveHTTPMethod_PUT(t *testing.T) {
 	}
 }
 
+func TestInspectURLs_DestructiveHTTPMethod_HTTPiePositional(t *testing.T) {
+	d, r := InspectCommandURLs("http POST https://api.example.com/users name=test")
+	if d != DecisionCaution || r != "destructive HTTP method detected" {
+		t.Errorf("got %s/%q, want CAUTION/destructive HTTP method detected", d, r)
+	}
+}
+
+func TestInspectURLs_DestructiveHTTPMethod_DoesNotMatchURLPathText(t *testing.T) {
+	_, r := InspectCommandURLs("curl https://api.example.com/docs/POST")
+	if r == "destructive HTTP method detected" {
+		t.Errorf("URL path text should not be flagged as destructive method")
+	}
+}
+
 func TestInspectURLs_SafeHTTPMethod_GET(t *testing.T) {
 	_, r := InspectCommandURLs("curl -X GET https://api.example.com/status")
 	// GET is not destructive and should not trigger the destructive-method caution.

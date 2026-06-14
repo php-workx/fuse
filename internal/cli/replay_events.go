@@ -78,7 +78,7 @@ func init() {
 	testReplayEventsCmd.Flags().StringVar(&replayEventsOpts.dbPath, "db", "", "Path to events database (default: configured Fuse database path)")
 	testReplayEventsCmd.Flags().IntVar(&replayEventsOpts.limit, "limit", 0, "Maximum number of events to replay (0 = all)")
 	testReplayEventsCmd.Flags().BoolVar(&replayEventsOpts.json, "json", false, "Emit JSON")
-	testReplayEventsCmd.Flags().IntVar(&replayEventsOpts.top, "top", 20, "Number of remaining approval/caution clusters to show (0 = all)")
+	testReplayEventsCmd.Flags().IntVar(&replayEventsOpts.top, "top", 20, "Number of clusters to show per cluster type (0 = all)")
 	testCmd.AddCommand(testReplayEventsCmd)
 }
 

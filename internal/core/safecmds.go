@@ -1080,7 +1080,7 @@ func isGhSafe(fields []string) bool {
 		return true
 	}
 	if fields[1] == "auth" {
-		return len(fields) >= 3 && fields[2] == "status"
+		return len(fields) == 3 && fields[2] == "status"
 	}
 	if fields[1] == "api" {
 		return isGhAPISafe(fields[2:])
