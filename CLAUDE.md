@@ -9,10 +9,7 @@ Fuse is a local firewall for AI agent commands. It classifies shell commands and
 - **Language:** Go 1.25
 - **Build:** `just` (not Make) — see `justfile` for all targets
 - **Platforms:** macOS (darwin/arm64, amd64), Linux (linux/amd64, arm64), Windows (windows/amd64, arm64).
-    Windows builds and classifies commands, but the classification pipeline uses a Bash syntax parser.
-    PowerShell and CMD commands may not classify accurately until Phase 2 (shell strategy).
-    Approval prompts and direct execution are stubbed — APPROVAL commands are blocked, not prompted.
-    See specs/windows-support-plan.md for the full roadmap.
+    Windows is fully supported: PowerShell and CMD shell strategy, Console API approval prompts (CONIN$/CONOUT$), Job Object process management, and Windows-native security rules (PowerShell/CMD attack patterns, LOLBins, registry, persistence) are all merged. PowerShell/Batch script inspection is line-oriented (here-strings, splatting, `^` line-continuations are not reconstructed before matching). See `specs/done/windows-support-plan.md`.
 - **Dependencies:** Minimal. Pure-Go SQLite (`modernc.org/sqlite`), shell parser (`mvdan.cc/sh`), Cobra CLI, YAML. No RPC/cloud SDKs.
 
 ## Project Layout

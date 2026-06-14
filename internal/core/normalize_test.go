@@ -822,6 +822,20 @@ func TestExtractHeredocBody_Empty(t *testing.T) {
 	}
 }
 
+func TestExtractHeredocBody_CatSubstitutionSkipped(t *testing.T) {
+	// $(cat <<EOF ... EOF) — string literal idiom (e.g. git commit -m).
+	// Body must NOT be collected: parsing markdown punctuation as bash
+	// causes spurious fail-closed APPROVAL on git commits.
+	cmd := "git commit -m \"$(cat <<'EOF'\n- bullet with `backticks` and (parens)\nLD_PRELOAD=foo bar text\nEOF\n)\""
+	body, complete := extractHeredocBody(cmd)
+	if !complete {
+		t.Error("expected complete=true")
+	}
+	if body != "" {
+		t.Errorf("got body=%q, want empty (cat-substitution body is a string literal)", body)
+	}
+}
+
 func TestExtractHeredocBody_CatPipedToBash(t *testing.T) {
 	// cat <<EOF | bash — NOT string quoting, body should be extracted for analysis
 	body, complete := extractHeredocBody("cat <<EOF | bash\nrm -rf /\nEOF")

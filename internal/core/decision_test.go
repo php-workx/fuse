@@ -73,6 +73,46 @@ func TestWithDecision_PreservesOtherFields(t *testing.T) {
 	}
 }
 
+// fus-vu5r: ComputeDecisionKey must be deterministic and source-independent.
+// The signature dropped the source field so an approval granted from any
+// adapter satisfies the same command from any other adapter.
+
+func TestComputeDecisionKey_DeterministicForSameInput(t *testing.T) {
+	k1 := ComputeDecisionKey("git status", "")
+	k2 := ComputeDecisionKey("git status", "")
+	if k1 != k2 {
+		t.Errorf("non-deterministic key: %q vs %q", k1, k2)
+	}
+	if k1 == "" {
+		t.Error("expected non-empty key")
+	}
+}
+
+func TestComputeDecisionKey_DiffersByCommand(t *testing.T) {
+	k1 := ComputeDecisionKey("git status", "")
+	k2 := ComputeDecisionKey("git push", "")
+	if k1 == k2 {
+		t.Errorf("different commands produced same key: %q", k1)
+	}
+}
+
+func TestComputeDecisionKey_DiffersByFileHash(t *testing.T) {
+	k1 := ComputeDecisionKey("bash script.sh", "")
+	k2 := ComputeDecisionKey("bash script.sh", "abc123")
+	if k1 == k2 {
+		t.Errorf("different file hashes produced same key: %q", k1)
+	}
+}
+
+// Length-prefixed framing prevents ("a","bc") from colliding with ("ab","c").
+func TestComputeDecisionKey_LengthPrefixingPreventsCollision(t *testing.T) {
+	k1 := ComputeDecisionKey("a", "bc")
+	k2 := ComputeDecisionKey("ab", "c")
+	if k1 == k2 {
+		t.Errorf("length-prefix invariant broken: %q == %q", k1, k2)
+	}
+}
+
 func TestWithDecision_DeepCopiesSlices(t *testing.T) {
 	original := &ClassifyResult{
 		Decision: DecisionApproval,

@@ -525,6 +525,10 @@ func (e *windowsIEXDryRunEvaluator) EvaluateBuiltins(classNorm string) *core.Bui
 	}
 }
 
+func (e *windowsIEXDryRunEvaluator) IsSafeJustRecipe(recipe string) bool {
+	return false
+}
+
 type firstCallOnlyDryRunEvaluator struct {
 	calls int
 }
@@ -548,4 +552,8 @@ func (e *firstCallOnlyDryRunEvaluator) EvaluateBuiltins(classNorm string) *core.
 		}
 	}
 	return nil
+}
+
+func (e *firstCallOnlyDryRunEvaluator) IsSafeJustRecipe(recipe string) bool {
+	return false
 }

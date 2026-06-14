@@ -145,8 +145,9 @@ var insecureCertLongFlags = []string{"--insecure", "--no-check-certificate", "--
 // --- L7 progressive enforcement ---
 
 // reDestructiveHTTPMethod detects HTTP methods that modify/delete resources.
-// Matches: -X DELETE, -X PUT, -X PATCH, --request DELETE, etc.
-var reDestructiveHTTPMethod = regexp.MustCompile(`(?i)(^|\s)(-X|--request)\s+(DELETE|PUT|PATCH)\b`)
+// Matches: -X POST, -XPOST, --request DELETE, --request=DELETE.
+// HTTPie-style positional methods are detected by hasHTTPieDestructiveMethod.
+var reDestructiveHTTPMethod = regexp.MustCompile(`(?i)(^|\s)(-X\s*|--request(\s+|=))(POST|DELETE|PUT|PATCH)\b`)
 
 // reDataUploadFlags detects flags that send data payloads (exfiltration risk).
 var reDataUploadFlags = []string{
@@ -208,7 +209,7 @@ func inspectNetworkCommandFlags(cmd string, escalate func(Decision, string)) {
 	if hasInsecureCertFlag(cmd) {
 		escalate(DecisionCaution, "insecure TLS flag detected")
 	}
-	if reDestructiveHTTPMethod.MatchString(cmd) {
+	if reDestructiveHTTPMethod.MatchString(cmd) || hasHTTPieDestructiveMethod(cmd) {
 		escalate(DecisionCaution, "destructive HTTP method detected")
 	}
 	if hasDataUploadFlag(cmd) {
@@ -219,6 +220,30 @@ func inspectNetworkCommandFlags(cmd string, escalate func(Decision, string)) {
 	}
 	if hasRedirectFlags(cmd) {
 		escalate(DecisionCaution, "HTTP redirect following enabled")
+	}
+}
+
+func hasHTTPieDestructiveMethod(cmd string) bool {
+	fields, _ := tokenizeQuoteAware(cmd)
+	if len(fields) < 2 {
+		return false
+	}
+	base := extractCmdBasename(fields[0])
+	if base != "http" && base != "httpie" && base != "xh" && base != "curlie" {
+		return false
+	}
+	i := 1
+	for i < len(fields) && strings.HasPrefix(fields[i], "-") {
+		i++
+	}
+	if i >= len(fields) {
+		return false
+	}
+	switch strings.ToUpper(fields[i]) {
+	case "POST", "DELETE", "PUT", "PATCH":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -249,6 +274,13 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 	scheme := strings.ToLower(parsed.Scheme)
 	if BlockedSchemes[scheme] {
 		return DecisionBlocked, "blocked URL scheme: " + scheme
+	}
+
+	if isCanonicalDeveloperLoopbackHost(host) {
+		if networkContext || networkCommandBasenames[extractCmdBasename(cmd)] {
+			return DecisionCaution, "non-allowlisted hostname in network command: " + host
+		}
+		return "", ""
 	}
 
 	// Non-canonical numeric host: decode and check against blocked ranges (SEC-002).
@@ -293,6 +325,15 @@ func classifyExpandedURLHost(rawURL string) (Decision, string) {
 		}
 	}
 	return "", ""
+}
+
+func isCanonicalDeveloperLoopbackHost(host string) bool {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
 }
 
 func extendExpandedURLSpan(cmd string, start, end int) string {
@@ -477,7 +518,23 @@ func isNonCanonicalNumericHost(host string) bool {
 	// AND actually decodes to a valid IP. This avoids false positives on hex-looking
 	// hostnames like "dead.beef" or "cafe.com".
 	if reNonCanonicalDotted.MatchString(host) && strings.Contains(host, ".") {
-		return decodeNonCanonicalIP(host) != nil
+		return hasNonCanonicalIPv4Syntax(host) && decodeNonCanonicalIP(host) != nil
+	}
+	return false
+}
+
+func hasNonCanonicalIPv4Syntax(host string) bool {
+	parts := strings.Split(host, ".")
+	if len(parts) != 4 {
+		return true
+	}
+	for _, part := range parts {
+		if strings.HasPrefix(part, "0x") || strings.HasPrefix(part, "0X") {
+			return true
+		}
+		if len(part) > 1 && part[0] == '0' {
+			return true
+		}
 	}
 	return false
 }

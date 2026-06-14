@@ -1,15 +1,16 @@
 # Agent Instructions
 
-This project uses **tk** for task and ticket tracking.
+This project uses **epos** for task and ticket tracking.
 
 ## Quick Reference
 
 ```bash
-tk ready              # Find available work
-tk show <id>          # View ticket details
-tk start <id>         # Mark work in progress
-tk close <id>         # Complete work
-tk create "Title"     # Create a new ticket
+epos ready              # Find available work
+epos blocked            # Find blocked work
+epos show <id>          # View ticket details
+epos claim <id> -o "$AGENT_ID"    # Claim work
+epos close <id> -r "Reason"       # Complete work
+epos new "Title"        # Create a new ticket
 ```
 
 ## Non-Interactive Shell Commands
@@ -36,15 +37,15 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
-## Issue Tracking with tk
+## Issue Tracking with epos
 
-**IMPORTANT**: This project uses **tk** for ALL task and ticket tracking. Do NOT use markdown TODOs, task lists, or other tracking methods.
+**IMPORTANT**: This project uses **epos** for ALL task and ticket tracking. Do NOT use markdown TODOs, task lists, direct `.tickets/` edits, or other tracking methods.
 
-### Why tk?
+### Why epos?
 
 - Dependency-aware: Track blockers and relationships between tickets
 - Plain markdown: Tickets are readable directly from `.tickets/`
-- Agent-optimized: Ready work detection, partial ID matching, and timestamped notes
+- Agent-optimized: Ready work detection, claims/leases, validation, JSON export, and partial ID matching
 - Prevents duplicate tracking systems and confusion
 
 ### Quick Start
@@ -52,61 +53,69 @@ cp -rf source dest          # NOT: cp -r source dest
 **Check for ready work:**
 
 ```bash
-tk ready
+epos ready
+epos blocked
 ```
 
 **Create new tickets:**
 
 ```bash
-tk create "Ticket title" -d "Detailed context" -t bug|feature|task|epic|chore -p 0-4
-tk create "Follow-up task" -d "What this issue is about"
+epos new "Ticket title" --type bug --priority 2 --body "Detailed context"
+epos new "Follow-up task" --body "What this issue is about"
 ```
 
-**Start and update:**
+Use one of these `--type` values: `issue`, `bug`, `feature`, `task`, `epic`, `chore`, `spike`, or `doc`.
+
+**Claim and update:**
 
 ```bash
-tk start <id>
-tk add-note <id> "Implementation note"
+export AGENT_ID="agent-<role>-<short-session-id>"
+epos claim <id> -o "$AGENT_ID"
+epos edit <id> --note "Implementation note"
+epos validate <id>
 ```
 
 **Complete work:**
 
 ```bash
-tk close <id>
+epos close <id> -r "Implemented and verified"
 ```
 
 ### Ticket Types
 
+- `issue` - General issue or defect report
 - `bug` - Something broken
 - `feature` - New functionality
 - `task` - Work item (tests, docs, refactoring)
 - `epic` - Large feature with subtasks
 - `chore` - Maintenance (dependencies, tooling)
+- `spike` - Research or investigation
+- `doc` - Documentation work
 
 ### Priorities
 
-- `0` - Critical (security, data loss, broken builds)
-- `1` - High (major features, important bugs)
-- `2` - Medium (default, nice-to-have)
-- `3` - Low (polish, optimization)
-- `4` - Backlog (future ideas)
+Use numeric priorities. Higher numbers are more important. Prefer the existing project's priority scale when editing existing tickets, and set an explicit priority for newly created work.
 
 ### Workflow for AI Agents
 
-1. **Check ready work**: `tk ready` shows open tickets with dependencies resolved
-2. **Start your task**: `tk start <id>`
-3. **Work on it**: Implement, test, document
-4. **Discover new work?** Create a ticket with detailed context:
-   - `tk create "Found bug" -d "Details about what was found" -p 1`
-5. **Complete**: `tk close <id>`
+1. **Check ready work**: `epos ready --json` shows open tickets with dependencies resolved
+2. **Claim before working**: `epos claim <id> -o "$AGENT_ID"` coordinates multi-agent work
+3. **Validate ticket shape**: `epos validate <id>` before handing work to execution
+4. **Work on it**: Implement, test, document
+5. **Discover new work?** Create a ticket with structured fields and detailed context:
+   - `epos new "Found bug" --type bug --priority 2 --body "Details about what was found"`
+6. **Complete**: `epos close <id> -r "Implemented and verified"`
 
 ### Important Rules
 
-- ✅ Use `tk` for ALL task and ticket tracking
-- ✅ Read live ticket state with `tk show`, `tk ready`, and `tk ls`
-- ✅ Add notes with `tk add-note` when useful context should survive sessions
-- ✅ Check `tk ready` before asking "what should I work on?"
+- ✅ Use `epos` for ALL task and ticket tracking
+- ✅ Read live ticket state with `epos show`, `epos ready`, `epos blocked`, and `epos export`
+- ✅ Mutate tickets only through `epos new`, `epos edit`, `epos close`, `epos reopen`, `epos claim`, and `epos release`
+- ✅ Add notes with `epos edit <id> --note "..."` when useful context should survive sessions
+- ✅ Check `epos ready` before asking "what should I work on?"
+- ✅ Run `epos lint` or `epos validate <id>` before handing tickets to another agent or execution harness
 - ❌ Do NOT create markdown TODO lists
+- ❌ Do NOT edit `.tickets/` files directly
 - ❌ Do NOT use external issue trackers
 - ❌ Do NOT duplicate tracking systems
 

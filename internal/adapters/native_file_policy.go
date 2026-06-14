@@ -103,7 +103,7 @@ func classifyNativeFilePaths(toolName string, paths []string, cwd string) *core.
 	result := &core.ClassifyResult{
 		Decision:    core.DecisionSafe,
 		Reason:      "native file tool path is safe",
-		DecisionKey: core.ComputeDecisionKey("claude-file", formatNativeFileCommand(toolName, paths), ""),
+		DecisionKey: core.ComputeDecisionKey(formatNativeFileCommand(toolName, paths), ""),
 	}
 
 	for _, path := range paths {

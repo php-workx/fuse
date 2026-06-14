@@ -68,6 +68,21 @@ func DisplayNormalize(raw string) string {
 	// 7. Collapse internal runs of whitespace to single space
 	s = reInternalWS.ReplaceAllString(s, " ")
 
+	// 8. Anti-evasion: expand ANSI-C $'...' literals so $'\x72\x6d' becomes
+	//    "rm". Runs before percent/path decoding because the decoded bytes
+	//    can themselves be percent or path tokens.
+	s = expandAnsiCQuoting(s)
+
+	// 9. Anti-evasion: percent-decode the path portion of URL-shaped tokens
+	//    so https://%65vil.com/x becomes https://evil.com/x. Query strings
+	//    and non-URL tokens are untouched.
+	s = decodeURLPercents(s)
+
+	// 10. Anti-evasion: collapse `..` segments inside absolute-path tokens so
+	//     /foo/../etc/passwd becomes /etc/passwd. Bounded iteration prevents
+	//     adversarial blow-up.
+	s = collapsePaths(s)
+
 	return s
 }
 
@@ -960,7 +975,15 @@ type heredocCollector struct {
 }
 
 // visit is the syntax.Walk callback for heredoc extraction.
+// Skips heredocs inside $(cat <<EOF ... EOF) substitutions: cat does not
+// execute the body, so the heredoc is a multi-line string literal, not shell
+// code. Parsing such bodies as bash mis-fires on markdown punctuation like
+// backticks, parens, or env-like assignments in commit messages. Pipe forms
+// like `cat <<EOF | bash` are still walked because the body IS executed.
 func (c *heredocCollector) visit(node syntax.Node) bool {
+	if cs, ok := node.(*syntax.CmdSubst); ok {
+		return !isCmdSubstCat(cs)
+	}
 	stmt, ok := node.(*syntax.Stmt)
 	if !ok {
 		return true

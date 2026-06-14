@@ -312,6 +312,7 @@ func TestProfileBehavior_RunHook_ApprovalCommand(t *testing.T) {
 	logFile := setFakeJudgePathForBehaviorTest(t)
 
 	projectDir := t.TempDir()
+	approvalCommand := "NODE_OPTIONS=--require=./hook.js /bin/pwd"
 
 	cases := []struct {
 		name             string
@@ -332,7 +333,7 @@ func TestProfileBehavior_RunHook_ApprovalCommand(t *testing.T) {
 			writeProfileConfigForBehaviorTest(t, profileConfigContents(tc.profile, tc.timeout))
 
 			stderr := &bytes.Buffer{}
-			input := `{"tool_name":"Bash","tool_input":{"command":"HOME=/tmp /bin/pwd"},"session_id":"profile-behavior","cwd":"` + projectDir + `"}`
+			input := `{"tool_name":"Bash","tool_input":{"command":"` + approvalCommand + `"},"session_id":"profile-behavior","cwd":"` + projectDir + `"}`
 			exitCode := RunHook(strings.NewReader(input), stderr)
 			if exitCode != tc.wantExitCode {
 				t.Fatalf("RunHook exit code = %d, want %d", exitCode, tc.wantExitCode)
@@ -379,13 +380,14 @@ func TestProfileBehavior_ExecuteCommand_ApprovalCommand(t *testing.T) {
 			writeProfileConfigForBehaviorTest(t, profileConfigContents(tc.profile, tc.timeout))
 
 			cwd := t.TempDir()
+			approvalCommand := "NODE_OPTIONS=--require=./hook.js /bin/pwd"
 
 			var approvalCh <-chan approvalGrantResult
 			if tc.wantApprovalGranted {
-				approvalCh = startPendingApprovalGrant(t, "run", "", "HOME=/tmp /bin/pwd")
+				approvalCh = startPendingApprovalGrant(t, "run", "", approvalCommand)
 			}
 
-			exitCode, err := ExecuteCommand("HOME=/tmp /bin/pwd", cwd, time.Minute)
+			exitCode, err := ExecuteCommand(approvalCommand, cwd, time.Minute)
 			if err != nil {
 				t.Fatalf("ExecuteCommand: %v", err)
 			}
@@ -435,15 +437,16 @@ func TestProfileBehavior_ExecuteCodexShellCommand_ApprovalCommand(t *testing.T) 
 			writeProfileConfigForBehaviorTest(t, profileConfigContents(tc.profile, tc.timeout))
 
 			cwd := t.TempDir()
+			approvalCommand := "NODE_OPTIONS=--require=./hook.js /bin/pwd"
 
 			var approvalCh <-chan approvalGrantResult
 			if tc.wantApprovalGranted {
-				approvalCh = startPendingApprovalGrant(t, "codex-shell", "profile-behavior", "HOME=/tmp /bin/pwd")
+				approvalCh = startPendingApprovalGrant(t, "codex-shell", "profile-behavior", approvalCommand)
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			stdout, stderr, exitCode, err := executeCodexShellCommand(ctx, "HOME=/tmp /bin/pwd", cwd, "profile-behavior", time.Minute)
+			stdout, stderr, exitCode, err := executeCodexShellCommand(ctx, approvalCommand, cwd, "profile-behavior", time.Minute)
 			if err != nil {
 				t.Fatalf("executeCodexShellCommand: %v", err)
 			}

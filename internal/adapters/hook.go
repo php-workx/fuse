@@ -610,7 +610,7 @@ func openDBAndSecret() (*db.DB, []byte, error) {
 }
 
 func computeMCPDecisionKey(toolName string, args map[string]interface{}) string {
-	return core.ComputeDecisionKey("mcp", formatMCPCommand(toolName, args), "")
+	return core.ComputeDecisionKey(formatMCPCommand(toolName, args), "")
 }
 
 func formatMCPCommand(toolName string, args map[string]interface{}) string {

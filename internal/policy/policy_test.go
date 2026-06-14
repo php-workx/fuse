@@ -26,6 +26,28 @@ func TestHardcoded_AllCompile(t *testing.T) {
 	}
 }
 
+func TestLoadPolicy_SafeJustRecipes(t *testing.T) {
+	cfg, err := loadPolicyFromBytes([]byte(`
+version: "1"
+safe_just_recipes:
+  - lint-all
+  - generate-docs
+`))
+	if err != nil {
+		t.Fatalf("loadPolicyFromBytes returned error: %v", err)
+	}
+
+	want := []string{"lint-all", "generate-docs"}
+	if len(cfg.SafeJustRecipes) != len(want) {
+		t.Fatalf("SafeJustRecipes length = %d, want %d", len(cfg.SafeJustRecipes), len(want))
+	}
+	for i := range want {
+		if cfg.SafeJustRecipes[i] != want[i] {
+			t.Fatalf("SafeJustRecipes[%d] = %q, want %q", i, cfg.SafeJustRecipes[i], want[i])
+		}
+	}
+}
+
 // TestHardcoded_MatchExamples tests that hardcoded rules match known-dangerous
 // commands and do NOT match benign ones.
 func TestHardcoded_MatchExamples(t *testing.T) {
@@ -677,6 +699,41 @@ tag_overrides:
 	}
 }
 
+func TestEvaluator_DelegatesPolicyAndSafeJustRecipes(t *testing.T) {
+	cfg := &PolicyConfig{
+		Rules: []PolicyRule{
+			{
+				Pattern:  `^custom deploy$`,
+				Action:   "approval",
+				Reason:   "custom deployment requires approval",
+				compiled: regexp.MustCompile(`^custom deploy$`),
+			},
+		},
+		SafeJustRecipes: []string{"lint-local"},
+	}
+	evaluator := NewEvaluator(cfg)
+
+	if !evaluator.IsSafeJustRecipe("lint-local") {
+		t.Fatal("expected configured just recipe to be safe")
+	}
+	if evaluator.IsSafeJustRecipe("lint-local-extra") {
+		t.Fatal("safe just recipes must match exactly")
+	}
+	if (*Evaluator)(nil).IsSafeJustRecipe("lint-local") {
+		t.Fatal("nil evaluator should not allow safe just recipes")
+	}
+
+	if d, reason := evaluator.EvaluateUserRules("custom deploy"); d != core.DecisionApproval || reason != "custom deployment requires approval" {
+		t.Fatalf("EvaluateUserRules = %s/%q, want APPROVAL/custom deployment requires approval", d, reason)
+	}
+	if d, _ := evaluator.EvaluateHardcoded("rm -rf /"); d != core.DecisionBlocked {
+		t.Fatalf("EvaluateHardcoded = %s, want BLOCKED", d)
+	}
+	if match := evaluator.EvaluateBuiltins("env"); match == nil || match.RuleID != "builtin:cred:env-dump" {
+		t.Fatalf("EvaluateBuiltins(env) = %+v, want env-dump match", match)
+	}
+}
+
 // --- LKG lifecycle ---
 
 func TestLoadPolicyWithLKG_SavesAndLoadsLKG(t *testing.T) {
@@ -867,6 +924,75 @@ func TestDisabledBuiltinSet_Empty(t *testing.T) {
 	m := DisabledBuiltinSet(&PolicyConfig{})
 	if m != nil {
 		t.Errorf("expected nil for empty disabled_builtins, got %v", m)
+	}
+}
+
+// --- builtin:cred:env-dump regression tests ---
+
+func TestEnvDump_MatchesBareEnvKeyword(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+	// `set` is also matched by the regex but isn't in the keyword index for
+	// this rule, so EvaluateBuiltins won't surface it. Cover only the
+	// keyword-indexed forms.
+	for _, cmd := range []string{"env", "printenv", "foo && env", "foo&&env", "foo||printenv", "foo;env"} {
+		match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+		if match == nil || match.RuleID != "builtin:cred:env-dump" {
+			t.Errorf("%q: expected builtin:cred:env-dump match, got %+v", cmd, match)
+		}
+	}
+}
+
+func TestEnvDump_DoesNotMatchDotEnvFilePath(t *testing.T) {
+	// Regression: word boundary in `\b(env)\b\s*$` previously matched the
+	// `env` suffix of `.env` file paths, mis-flagging legitimate file reads
+	// as environment-variable dumps.
+	idx := BuildRuleIndex(BuiltinRules)
+	for _, cmd := range []string{
+		"grep -c TOKEN /path/.env",
+		"cat .env",
+		"cat foo.env",
+		"grep TOKEN /Users/me/proj/.env",
+	} {
+		match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+		if match != nil && match.RuleID == "builtin:cred:env-dump" {
+			t.Errorf("%q: should NOT match builtin:cred:env-dump (false positive on .env path)", cmd)
+		}
+	}
+}
+
+func TestContainerMountSockMatchesPodmanSockets(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+	tests := []string{
+		"podman run -v /run/podman/podman.sock:/run/podman/podman.sock alpine",
+		"podman run --volume=/run/user/501/podman/podman.sock:/run/podman/podman.sock alpine",
+		"docker run --mount type=bind,src=/run/podman/podman.sock,target=/sock alpine",
+	}
+	for _, cmd := range tests {
+		t.Run(cmd, func(t *testing.T) {
+			match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+			if match == nil || match.RuleID != "builtin:container:mount-sock" {
+				t.Fatalf("expected builtin:container:mount-sock match, got %+v", match)
+			}
+			if match.Decision != core.DecisionBlocked {
+				t.Fatalf("decision = %s, want BLOCKED", match.Decision)
+			}
+		})
+	}
+}
+
+func TestContainerMountSockDoesNotMatchDestinationOnlySocket(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+	tests := []string{
+		"docker run -v /tmp:/var/run/docker.sock alpine",
+		"podman run --volume=/tmp:/run/podman/podman.sock alpine",
+	}
+	for _, cmd := range tests {
+		t.Run(cmd, func(t *testing.T) {
+			match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+			if match != nil && match.RuleID == "builtin:container:mount-sock" {
+				t.Fatalf("destination-only socket path should not match mount-sock, got %+v", match)
+			}
+		})
 	}
 }
 
