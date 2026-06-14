@@ -925,6 +925,26 @@ func TestEnvDump_DoesNotMatchDotEnvFilePath(t *testing.T) {
 	}
 }
 
+func TestContainerMountSockMatchesPodmanSockets(t *testing.T) {
+	idx := BuildRuleIndex(BuiltinRules)
+	tests := []string{
+		"podman run -v /run/podman/podman.sock:/run/podman/podman.sock alpine",
+		"podman run --volume=/run/user/501/podman/podman.sock:/run/podman/podman.sock alpine",
+		"docker run --mount type=bind,src=/run/podman/podman.sock,target=/sock alpine",
+	}
+	for _, cmd := range tests {
+		t.Run(cmd, func(t *testing.T) {
+			match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
+			if match == nil || match.RuleID != "builtin:container:mount-sock" {
+				t.Fatalf("expected builtin:container:mount-sock match, got %+v", match)
+			}
+			if match.Decision != core.DecisionBlocked {
+				t.Fatalf("decision = %s, want BLOCKED", match.Decision)
+			}
+		})
+	}
+}
+
 // --- EvaluateUserRules edge cases ---
 
 func TestEvaluateUserRules_SkipsNilCompiledRule(t *testing.T) {

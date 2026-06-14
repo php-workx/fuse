@@ -417,6 +417,11 @@ func TestClassify_AuditReadOnlyDeveloperInspectionCommands(t *testing.T) {
 		{name: "just check", command: `just check`, expected: core.DecisionSafe},
 		{name: "just lint", command: `just lint`, expected: core.DecisionSafe},
 		{name: "just summary", command: `just --summary`, expected: core.DecisionSafe},
+		{name: "just format remains unsafe", command: `just format`, expected: core.DecisionCaution},
+		{name: "just install-hooks remains unsafe", command: `just install-hooks`, expected: core.DecisionCaution},
+		{name: "just pre-commit remains unsafe", command: `just pre-commit`, expected: core.DecisionCaution},
+		{name: "just pre-push remains unsafe", command: `just pre-push`, expected: core.DecisionCaution},
+		{name: "just dev remains unsafe", command: `just dev`, expected: core.DecisionCaution},
 		{name: "just test remains unsafe", command: `just test`, expected: core.DecisionCaution},
 	}
 
@@ -1413,6 +1418,18 @@ func TestClassify_SensitiveEnvAssignments(t *testing.T) {
 			expected: core.DecisionCaution,
 			reason:   "scoped developer environment assignment",
 		},
+		{
+			name:     "sudo wrapper does not hide dangerous env assignment",
+			command:  "sudo LD_PRELOAD=/evil git status",
+			expected: core.DecisionApproval,
+			reason:   "dangerous environment assignment",
+		},
+		{
+			name:     "sudo env wrapper does not hide dangerous env assignment",
+			command:  "sudo env LD_PRELOAD=/evil git status",
+			expected: core.DecisionApproval,
+			reason:   "dangerous environment assignment",
+		},
 	}
 
 	for _, tt := range tests {
@@ -1434,6 +1451,41 @@ func TestClassify_SensitiveEnvAssignments(t *testing.T) {
 				t.Fatalf("reason = %q, want %q", result.Reason, tt.reason)
 			}
 		})
+	}
+}
+
+func TestClassify_CompoundSplitErrorHonorsUserRules(t *testing.T) {
+	tmpDir := t.TempDir()
+	policyPath := filepath.Join(tmpDir, "policy.yaml")
+	policyYAML := `
+version: "1"
+rules:
+  - pattern: "^custom-tool"
+    action: "approval"
+    reason: "custom tool requires approval"
+`
+	if err := os.WriteFile(policyPath, []byte(policyYAML), 0o644); err != nil {
+		t.Fatalf("writing policy: %v", err)
+	}
+	cfg, err := policy.LoadPolicy(policyPath)
+	if err != nil {
+		t.Fatalf("LoadPolicy: %v", err)
+	}
+
+	result, err := core.Classify(core.ShellRequest{
+		RawCommand: "custom-tool )",
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}, policy.NewEvaluator(cfg))
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if result.Decision != core.DecisionApproval {
+		t.Fatalf("decision = %s, want APPROVAL (reason: %s)", result.Decision, result.Reason)
+	}
+	if result.Reason != "custom tool requires approval" {
+		t.Fatalf("reason = %q, want user policy reason", result.Reason)
 	}
 }
 
@@ -1918,7 +1970,7 @@ func TestClassify_CanonicalLocalhostNetworkCommandsAreDeveloperFriendly(t *testi
 		{
 			name:    "curl GET canonical loopback",
 			command: "curl http://127.0.0.1:8080",
-			want:    core.DecisionSafe,
+			want:    core.DecisionCaution,
 		},
 		{
 			name:    "httpie HEAD canonical localhost",

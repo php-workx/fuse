@@ -75,7 +75,7 @@ var testReplayEventsCmd = &cobra.Command{
 }
 
 func init() {
-	testReplayEventsCmd.Flags().StringVar(&replayEventsOpts.dbPath, "db", "", "Path to events database (default: ~/.fuse/state/fuse.db)")
+	testReplayEventsCmd.Flags().StringVar(&replayEventsOpts.dbPath, "db", "", "Path to events database (default: configured Fuse database path)")
 	testReplayEventsCmd.Flags().IntVar(&replayEventsOpts.limit, "limit", 0, "Maximum number of events to replay (0 = all)")
 	testReplayEventsCmd.Flags().BoolVar(&replayEventsOpts.json, "json", false, "Emit JSON")
 	testReplayEventsCmd.Flags().IntVar(&replayEventsOpts.top, "top", 20, "Number of remaining approval/caution clusters to show (0 = all)")
@@ -353,23 +353,22 @@ func printReplayEventsReport(report *replayEventsReport) {
 
 	if len(report.RemainingClusters) == 0 {
 		fmt.Println("\nNo remaining APPROVAL or CAUTION clusters.")
-		return
+	} else {
+		fmt.Println("\nTop remaining APPROVAL/CAUTION clusters")
+		w = tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
+		_, _ = fmt.Fprintln(w, "COUNT\tDECISION\tKEYS\tREASON\tEXAMPLE")
+		for i := range report.RemainingClusters {
+			cluster := &report.RemainingClusters[i]
+			_, _ = fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%s\n",
+				cluster.Count,
+				cluster.Decision,
+				cluster.PromptKeys,
+				shorten(cluster.Reason, 80),
+				shorten(cluster.Example, 96),
+			)
+		}
+		_ = w.Flush()
 	}
-
-	fmt.Println("\nTop remaining APPROVAL/CAUTION clusters")
-	w = tabwriter.NewWriter(os.Stdout, 0, 8, 2, ' ', 0)
-	_, _ = fmt.Fprintln(w, "COUNT\tDECISION\tKEYS\tREASON\tEXAMPLE")
-	for i := range report.RemainingClusters {
-		cluster := &report.RemainingClusters[i]
-		_, _ = fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%s\n",
-			cluster.Count,
-			cluster.Decision,
-			cluster.PromptKeys,
-			shorten(cluster.Reason, 80),
-			shorten(cluster.Example, 96),
-		)
-	}
-	_ = w.Flush()
 
 	if len(report.ReplayDriftClusters) > 0 {
 		fmt.Println("\nReplay drift approval candidates")

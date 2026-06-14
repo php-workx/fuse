@@ -219,6 +219,12 @@ func TestRunReplayEvents_HumanSummary(t *testing.T) {
 	if err := database.LogEvent(&db.EventRecord{Command: "just lint", Decision: "CAUTION"}); err != nil {
 		t.Fatalf("LogEvent: %v", err)
 	}
+	if err := database.LogEvent(&db.EventRecord{Command: "bash /tmp/fuse-review-missing-file.sh", Decision: "APPROVAL"}); err != nil {
+		t.Fatalf("LogEvent drift: %v", err)
+	}
+	if err := database.LogEvent(&db.EventRecord{Command: "PATH=/tmp [REDACTED] )", Decision: "APPROVAL"}); err != nil {
+		t.Fatalf("LogEvent artifact: %v", err)
+	}
 	_ = database.Close()
 
 	stdout, _, err := captureCLIOutput(t, func() error {
@@ -227,7 +233,16 @@ func TestRunReplayEvents_HumanSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runReplayEvents: %v", err)
 	}
-	for _, want := range []string{"Classifier replay audit", "Events replayed: 1", "Old -> current decision matrix", "CAUTION", "SAFE"} {
+	for _, want := range []string{
+		"Classifier replay audit",
+		"Events replayed: 3",
+		"Old -> current decision matrix",
+		"CAUTION",
+		"SAFE",
+		"No remaining APPROVAL or CAUTION clusters.",
+		"Replay drift approval candidates",
+		"Replay artifact approval candidates",
+	} {
 		if !strings.Contains(stdout, want) {
 			t.Fatalf("expected output to contain %q, got:\n%s", want, stdout)
 		}

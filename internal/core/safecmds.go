@@ -1175,18 +1175,13 @@ func isJustSafe(fields []string) bool {
 		return false
 	}
 	safeRecipes := map[string]bool{
-		"--summary":     true,
-		"actionlint":    true,
-		"build-check":   true,
-		"check":         true,
-		"dev":           true,
-		"format":        true,
-		"format-check":  true,
-		"install-hooks": true,
-		"lint":          true,
-		"lint-check":    true,
-		"pre-commit":    true,
-		"pre-push":      true,
+		"--summary":    true,
+		"actionlint":   true,
+		"build-check":  true,
+		"check":        true,
+		"format-check": true,
+		"lint":         true,
+		"lint-check":   true,
 	}
 	return safeRecipes[fields[1]]
 }

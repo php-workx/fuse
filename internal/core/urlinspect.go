@@ -253,7 +253,7 @@ func inspectSingleURL(rawURL, cmd string, networkContext bool) (Decision, string
 	}
 
 	if isCanonicalDeveloperLoopbackHost(host) {
-		if host == "localhost" && (networkContext || networkCommandBasenames[extractCmdBasename(cmd)]) {
+		if networkContext || networkCommandBasenames[extractCmdBasename(cmd)] {
 			return DecisionCaution, "non-allowlisted hostname in network command: " + host
 		}
 		return "", ""

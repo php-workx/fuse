@@ -189,8 +189,8 @@ func TestInspectURLs_MCPArguments(t *testing.T) {
 
 func TestInspectURLs_127Loopback(t *testing.T) {
 	d, _ := InspectCommandURLs("curl http://127.0.0.1:9090/")
-	if d == DecisionBlocked {
-		t.Errorf("got BLOCKED, want non-BLOCKED for canonical 127.0.0.1")
+	if d != DecisionCaution {
+		t.Errorf("got %s, want CAUTION for canonical 127.0.0.1 in network command", d)
 	}
 }
 

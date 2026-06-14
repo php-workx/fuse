@@ -231,7 +231,7 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 }
 
 // classifyCompoundSplitError handles the case where compound splitting fails.
-// Checks hardcoded rules before falling back to fail-closed APPROVAL.
+// Checks explicit user rules and hardcoded rules before falling back to fail-closed APPROVAL.
 func classifyCompoundSplitError(result *ClassifyResult, displayNorm string, evaluator PolicyEvaluator, splitErr error) (*ClassifyResult, error) {
 	if evaluator != nil {
 		classified := ClassificationNormalize(displayNorm)
@@ -240,6 +240,14 @@ func classifyCompoundSplitError(result *ClassifyResult, displayNorm string, eval
 		for _, candidate := range candidates {
 			if candidate == "" {
 				continue
+			}
+			basename := extractBasename(candidate)
+			sanitized := SanitizeForClassification(candidate, KnownSafeVerbs[basename])
+			if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
+				result.Decision = d
+				result.Reason = reason
+				result.DecisionKey = ComputeDecisionKey(displayNorm, "")
+				return result, nil
 			}
 			if d, reason := evaluator.EvaluateHardcoded(candidate); d != "" {
 				result.Decision = d
@@ -652,6 +660,9 @@ type envAssignment struct {
 
 func assessSensitiveEnvAssignment(cmd string, sensitiveDetected bool) (envAssignmentAssessment, bool) {
 	assignments := leadingEnvAssignments(cmd)
+	if len(assignments) == 0 && sensitiveDetected {
+		assignments = leadingEnvAssignments(stripNonEnvWrappersForEnvAssignment(cmd))
+	}
 	if !sensitiveDetected && len(assignments) == 0 {
 		return envAssignmentAssessment{}, false
 	}
@@ -670,6 +681,49 @@ func assessSensitiveEnvAssignment(cmd string, sensitiveDetected bool) (envAssign
 		return envAssignmentAssessment{}, false
 	}
 	return best, true
+}
+
+func stripNonEnvWrappersForEnvAssignment(cmd string) string {
+	tokens, _ := tokenizeQuoteAware(cmd)
+	i := 0
+	for i < len(tokens) {
+		base := tokens[i]
+		if strings.Contains(base, "/") || strings.Contains(base, `\`) {
+			base = filepath.Base(strings.ReplaceAll(base, `\`, "/"))
+		}
+		base = strings.TrimSuffix(strings.ToLower(base), ".exe")
+		if !wrapperBinaries[base] || base == "env" {
+			break
+		}
+
+		i++
+		switch base {
+		case "sudo":
+			i = skipSudoArgs(tokens, i)
+		case "doas":
+			i = skipDoasArgs(tokens, i)
+		case "nice":
+			i = skipNiceArgs(tokens, i)
+		case "ionice":
+			i = skipIoniceArgs(tokens, i)
+		case "timeout":
+			i = skipTimeoutArgs(tokens, i)
+		case "strace", "ltrace":
+			i = skipTraceArgs(tokens, i)
+		case "taskset":
+			i = skipTasksetArgs(tokens, i)
+		case "chroot":
+			i = skipChrootArgs(tokens, i)
+		case "setsid":
+			i = skipSetsidArgs(tokens, i)
+		case "runas":
+			i = skipRunasArgs(tokens, i)
+		}
+	}
+	if i >= len(tokens) {
+		return ""
+	}
+	return strings.Join(tokens[i:], " ")
 }
 
 func leadingEnvAssignments(cmd string) []envAssignment {

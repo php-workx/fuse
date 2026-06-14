@@ -11,9 +11,10 @@ var (
 	reNetcatScanMode     = regexp.MustCompile(`(^|\s)-[a-zA-Z]*z[a-zA-Z]*(\s|$)`)
 	reNetcatExecMode     = regexp.MustCompile(`\b(nc|ncat|netcat)\s+.*-e\s+`)
 	reContainerRun       = `(?i)\b(?:docker|podman)\s+run\b.*`
+	reContainerSockPath  = `(?:/var/run/docker\.sock|/run/podman/podman\.sock|/run/user/[^/\s]+/podman/podman\.sock)`
 	reContainerMountSock = regexp.MustCompile(
-		reContainerRun + `(?:(?:-v|--volume)(?:=|\s+)\S*/var/run/docker\.sock|` +
-			`--mount(?:=|\s+)\S*(?:src|source)=/var/run/docker\.sock)`,
+		reContainerRun + `(?:(?:-v|--volume)(?:=|\s+)\S*` + reContainerSockPath + `|` +
+			`--mount(?:=|\s+)\S*(?:src|source)=` + reContainerSockPath + `)`,
 	)
 	reContainerMountRoot = regexp.MustCompile(
 		reContainerRun + `(?:(?:-v|--volume)(?:=|\s+)/:/|` +
