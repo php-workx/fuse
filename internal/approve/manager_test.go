@@ -144,7 +144,10 @@ func TestCrossSource_OnceScope_HookConsumesTUIApproval(t *testing.T) {
 	}
 
 	// Once-scope is consumed; second call returns empty.
-	got2, _ := m.ConsumeApproval(key, "sess-1")
+	got2, err := m.ConsumeApproval(key, "sess-1")
+	if err != nil {
+		t.Fatalf("second ConsumeApproval: %v", err)
+	}
 	if got2 != "" {
 		t.Fatalf("once-scope should consume after first use, got %q", got2)
 	}

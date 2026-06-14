@@ -125,10 +125,10 @@ func init() {
 		// ---------------------------------------------------------------
 		{
 			ID: "builtin:cred:env-dump",
-			// Require start-of-line or whitespace before the keyword so that
-			// file paths ending in `.env` (e.g. `grep TOKEN /path/.env`) are
-			// not mistaken for a bare `env` invocation.
-			Pattern: regexp.MustCompile(`(?:^|\s)(env|printenv|set)\s*$`),
+			// Require start-of-line, whitespace, or compact shell operators
+			// before the keyword so file paths ending in `.env` are not
+			// mistaken for a bare `env` invocation.
+			Pattern: regexp.MustCompile(`(?:^|[\s;&|])(env|printenv|set)\b\s*$`),
 			Action:  core.DecisionCaution,
 			Reason:  "Dumps all environment variables (may contain secrets)",
 		},

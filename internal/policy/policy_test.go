@@ -899,7 +899,7 @@ func TestEnvDump_MatchesBareEnvKeyword(t *testing.T) {
 	// `set` is also matched by the regex but isn't in the keyword index for
 	// this rule, so EvaluateBuiltins won't surface it. Cover only the
 	// keyword-indexed forms.
-	for _, cmd := range []string{"env", "printenv", "foo && env"} {
+	for _, cmd := range []string{"env", "printenv", "foo && env", "foo&&env", "foo||printenv", "foo;env"} {
 		match := EvaluateBuiltins(cmd, nil, nil, nil, idx)
 		if match == nil || match.RuleID != "builtin:cred:env-dump" {
 			t.Errorf("%q: expected builtin:cred:env-dump match, got %+v", cmd, match)
