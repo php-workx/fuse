@@ -699,6 +699,41 @@ tag_overrides:
 	}
 }
 
+func TestEvaluator_DelegatesPolicyAndSafeJustRecipes(t *testing.T) {
+	cfg := &PolicyConfig{
+		Rules: []PolicyRule{
+			{
+				Pattern:  `^custom deploy$`,
+				Action:   "approval",
+				Reason:   "custom deployment requires approval",
+				compiled: regexp.MustCompile(`^custom deploy$`),
+			},
+		},
+		SafeJustRecipes: []string{"lint-local"},
+	}
+	evaluator := NewEvaluator(cfg)
+
+	if !evaluator.IsSafeJustRecipe("lint-local") {
+		t.Fatal("expected configured just recipe to be safe")
+	}
+	if evaluator.IsSafeJustRecipe("lint-local-extra") {
+		t.Fatal("safe just recipes must match exactly")
+	}
+	if (*Evaluator)(nil).IsSafeJustRecipe("lint-local") {
+		t.Fatal("nil evaluator should not allow safe just recipes")
+	}
+
+	if d, reason := evaluator.EvaluateUserRules("custom deploy"); d != core.DecisionApproval || reason != "custom deployment requires approval" {
+		t.Fatalf("EvaluateUserRules = %s/%q, want APPROVAL/custom deployment requires approval", d, reason)
+	}
+	if d, _ := evaluator.EvaluateHardcoded("rm -rf /"); d != core.DecisionBlocked {
+		t.Fatalf("EvaluateHardcoded = %s, want BLOCKED", d)
+	}
+	if match := evaluator.EvaluateBuiltins("env"); match == nil || match.RuleID != "builtin:cred:env-dump" {
+		t.Fatalf("EvaluateBuiltins(env) = %+v, want env-dump match", match)
+	}
+}
+
 // --- LKG lifecycle ---
 
 func TestLoadPolicyWithLKG_SavesAndLoadsLKG(t *testing.T) {
