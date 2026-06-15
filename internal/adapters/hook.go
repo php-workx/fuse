@@ -172,21 +172,16 @@ func handleMCPTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *
 		}
 	}
 
-	// Strip the "mcp__<server>__" prefix to get the action name for classification.
-	toolAction := extractMCPAction(req.ToolName)
-	decision := core.ClassifyMCPTool(toolAction, args)
 	mcpCommand := formatMCPCommand(req.ToolName, args)
+	evaluator := loadPolicyEvaluator()
 
 	// LLM judge: get a second opinion on MCP tool classification.
-	mcpResult := &core.ClassifyResult{
-		Decision: decision,
-		Reason:   fmt.Sprintf("MCP tool %s classified as %s", req.ToolName, decision),
-	}
+	mcpResult := classifyMCPToolCall(req.ToolName, args, evaluator)
 	mcpPromptCtx := judge.PromptContext{
 		Command:         mcpCommand,
 		Cwd:             req.Cwd,
 		WorkspaceRoot:   judge.ShortenToLastN(req.Cwd, 2),
-		CurrentDecision: string(decision),
+		CurrentDecision: string(mcpResult.Decision),
 		Reason:          mcpResult.Reason,
 		ToolName:        req.ToolName,
 	}
@@ -194,7 +189,7 @@ func handleMCPTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *
 	mcpResult, mcpVerdict = judge.MaybeJudge(ctx, cfg, mcpResult, mcpPromptCtx)
 	structuralDecision := StructuralDecision(mcpResult, mcpVerdict)
 	effectiveDecision := EffectiveDecision(mcpResult, mcpVerdict, cfg)
-	decision = effectiveDecision
+	decision := effectiveDecision
 
 	// MCP tools don't use tag_overrides — dryrun always allows.
 	if dryRun {
@@ -212,19 +207,7 @@ func handleMCPTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *
 		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, structuralDecision, effectiveDecision, resolvedProfile(cfg), mcpVerdict)
 		return 0
 	case core.DecisionApproval:
-		result := &core.ClassifyResult{
-			Decision:    core.DecisionApproval,
-			Reason:      fmt.Sprintf("MCP tool %s requires approval", req.ToolName),
-			DecisionKey: computeMCPDecisionKey(req.ToolName, args),
-			SubResults: []core.SubCommandResult{
-				{
-					Command:  formatMCPCommand(req.ToolName, args),
-					Decision: core.DecisionApproval,
-					Reason:   fmt.Sprintf("MCP tool %s requires approval", req.ToolName),
-				},
-			},
-		}
-		return handleApproval(req, result, mcpVerdict, stderr, cfg, dryRun)
+		return handleApproval(req, mcpResult, mcpVerdict, stderr, cfg, dryRun)
 	default:
 		// SAFE
 		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, structuralDecision, effectiveDecision, resolvedProfile(cfg), mcpVerdict)

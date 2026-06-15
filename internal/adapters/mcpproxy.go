@@ -283,14 +283,14 @@ func interceptToolCall(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
 	name, _ := params["name"].(string)
 	arguments, _ := params["arguments"].(map[string]interface{})
 
-	decision := core.ClassifyMCPTool(name, arguments)
-	switch decision {
+	result := classifyMCPToolCall(name, arguments, loadPolicyEvaluator())
+	switch result.Decision {
 	default:
 		// Safe/Caution — pass through.
 	case core.DecisionBlocked:
-		return false, jsonRPCErrorResponse(msg["id"], -32000, fmt.Sprintf("fuse blocked MCP tool %s", name)), nil
+		return false, jsonRPCErrorResponse(msg["id"], -32000, fmt.Sprintf("fuse blocked MCP tool %s: %s", name, result.Reason)), nil
 	case core.DecisionApproval:
-		approved, err := requestMCPApproval(name, arguments)
+		approved, err := requestMCPApproval(name, arguments, result.Reason)
 		if err != nil {
 			return false, jsonRPCErrorResponse(msg["id"], -32000, err.Error()), nil
 		}
@@ -302,7 +302,7 @@ func interceptToolCall(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
 	return true, nil, nil
 }
 
-func requestMCPApproval(name string, arguments map[string]interface{}) (bool, error) {
+func requestMCPApproval(name string, arguments map[string]interface{}, reason string) (bool, error) {
 	database, secret, err := openDBAndSecret()
 	if err != nil {
 		return false, err
@@ -316,13 +316,13 @@ func requestMCPApproval(name string, arguments map[string]interface{}) (bool, er
 
 	result := &core.ClassifyResult{
 		Decision:    core.DecisionApproval,
-		Reason:      fmt.Sprintf("MCP tool %s requires approval", name),
+		Reason:      reason,
 		DecisionKey: computeMCPDecisionKey(name, arguments),
 		SubResults: []core.SubCommandResult{
 			{
 				Command:  formatMCPCommand(name, arguments),
 				Decision: core.DecisionApproval,
-				Reason:   fmt.Sprintf("MCP tool %s requires approval", name),
+				Reason:   reason,
 			},
 		},
 	}

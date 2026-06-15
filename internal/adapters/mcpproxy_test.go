@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
+	"github.com/php-workx/fuse/internal/policy"
 )
 
 func TestProxyAgentToDownstream_OversizeRequestReturnsJSONRPCError(t *testing.T) {
@@ -233,6 +235,69 @@ func TestProxyAgentToDownstream_NonSensitiveResourceForwarded(t *testing.T) {
 	}
 }
 
+func TestClassifyMCPToolCall_HonorsUserPolicyForHookToolName(t *testing.T) {
+	policyPath := filepath.Join(t.TempDir(), "policy.yaml")
+	writeTestPolicy(t, policyPath, `
+version: "1"
+rules:
+  - pattern: '^mcp__server__list_items:'
+    action: block
+    reason: custom MCP list policy
+`)
+	cfg, err := policy.LoadPolicy(policyPath)
+	if err != nil {
+		t.Fatalf("LoadPolicy: %v", err)
+	}
+
+	result := classifyMCPToolCall("mcp__server__list_items", map[string]interface{}{"query": "x"}, policy.NewEvaluator(cfg))
+
+	if result.Decision != core.DecisionBlocked {
+		t.Fatalf("Decision = %s, want BLOCKED", result.Decision)
+	}
+	if result.Reason != "custom MCP list policy" {
+		t.Fatalf("Reason = %q, want custom MCP list policy", result.Reason)
+	}
+}
+
+func TestInterceptToolCall_HonorsUserPolicy(t *testing.T) {
+	t.Setenv("FUSE_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Dir(config.PolicyPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	writeTestPolicy(t, config.PolicyPath(), `
+version: "1"
+rules:
+  - pattern: '^list_items:'
+    action: block
+    reason: proxy policy blocks list
+`)
+	msg := jsonRPCMessage{
+		"jsonrpc": "2.0",
+		"id":      float64(1),
+		"method":  "tools/call",
+		"params": map[string]interface{}{
+			"name":      "list_items",
+			"arguments": map[string]interface{}{"query": "x"},
+		},
+	}
+
+	forward, response, err := interceptToolCall(msg)
+	if err != nil {
+		t.Fatalf("interceptToolCall: %v", err)
+	}
+	if forward {
+		t.Fatal("expected user-policy-blocked MCP tool not to be forwarded")
+	}
+	errObj, _ := response["error"].(map[string]interface{})
+	if errObj == nil {
+		t.Fatalf("expected JSON-RPC error response, got %#v", response)
+	}
+	message, _ := errObj["message"].(string)
+	if !strings.Contains(message, "proxy policy blocks list") {
+		t.Fatalf("expected policy reason in error message, got %q", message)
+	}
+}
+
 func TestProxyDownstreamToAgent_ToolsListPassesThroughUnchanged(t *testing.T) {
 	var agent bytes.Buffer
 	requests := newInFlightRequests()
@@ -329,6 +394,13 @@ func TestProcessDownstreamMessage_ForwardsServerInitiatedRequest(t *testing.T) {
 
 func rawMCPFrame(payload []byte) string {
 	return fmt.Sprintf("Content-Length: %d\r\n\r\n%s", len(payload), payload)
+}
+
+func writeTestPolicy(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(contents)+"\n"), 0o644); err != nil {
+		t.Fatalf("write policy: %v", err)
+	}
 }
 
 func setDefaultLoggerForTest(dst io.Writer) func() {

@@ -23,6 +23,7 @@ const (
 	UnconditionallySafeReason    = "unconditionally safe command"
 	ConditionallySafeReason      = "conditionally safe command"
 	UnknownCommandFallbackReason = "unknown command (no matching rule)"
+	NonASCIIExecutableReason     = "non-ASCII executable name requires approval"
 )
 
 // ClassifyResult holds the full result of command classification.
@@ -494,12 +495,6 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 	sub := SubCommandResult{Command: subCmd}
 	var rawPolicyMatch *policyResult
 
-	if IsFuseTestClassify(subCmd) {
-		sub.Decision = DecisionSafe
-		sub.Reason = "fuse test classify payload is inert"
-		return sub
-	}
-
 	// Pre-normalization rule checks: tokenization can treat backslashes as escape
 	// characters, which mangles Windows paths like C:\Windows into C:Windows.
 	// Check raw command text before normalization strips those separators.
@@ -517,6 +512,12 @@ func classifySubCommand(subCmd string, evaluator PolicyEvaluator, cwd string) Su
 				rawPolicyMatch = &pr
 			}
 		}
+	}
+
+	if IsFuseTestClassify(subCmd) {
+		sub.Decision = DecisionSafe
+		sub.Reason = "fuse test classify payload is inert"
+		return sub
 	}
 
 	// Step 4a: Classification normalize.
@@ -1187,6 +1188,10 @@ func classifyFallbackLayers(
 	inlineDecision Decision, inlineReason string,
 	dryRunMatches []BuiltinMatch,
 ) commandClassificationResult {
+	if hasNonASCII(basename) {
+		return commandClassificationResult{decision: DecisionApproval, reason: NonASCIIExecutableReason, dryRunMatches: dryRunMatches}
+	}
+
 	// Layer 4: Unconditional safe commands.
 	if IsUnconditionalSafe(basename) || IsUnconditionalSafeCmd(cmd) {
 		return commandClassificationResult{decision: DecisionSafe, reason: UnconditionallySafeReason, dryRunMatches: dryRunMatches}
@@ -1227,6 +1232,15 @@ func classifyFallbackLayers(
 
 	// Fallback: SAFE for unknown commands (preserves the default-safe contract).
 	return commandClassificationResult{decision: DecisionSafe, reason: UnknownCommandFallbackReason, dryRunMatches: dryRunMatches}
+}
+
+func hasNonASCII(s string) bool {
+	for _, r := range s {
+		if r > 127 {
+			return true
+		}
+	}
+	return false
 }
 
 func inspectionIsFailClosed(fileInspection *FileInspection) bool {

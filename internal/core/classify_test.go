@@ -337,6 +337,23 @@ func TestClassify_AuditFuseTestClassifyTreatsPayloadAsInert(t *testing.T) {
 	}
 }
 
+func TestClassify_AuditFuseTestClassifyDoesNotHideDangerousRedirect(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	result, err := core.Classify(core.ShellRequest{
+		RawCommand: `fuse test classify -- ls > /dev/sda`,
+		Cwd:        "/tmp",
+		Source:     "test",
+		SessionID:  "test-session",
+	}, evaluator)
+	if err != nil {
+		t.Fatalf("classify error: %v", err)
+	}
+	if result.Decision != core.DecisionBlocked {
+		t.Fatalf("got %s, want BLOCKED for dangerous redirect outside inert payload (reason: %s, rule: %s)", result.Decision, result.Reason, result.RuleID)
+	}
+}
+
 func TestClassify_AuditSimpleLeadingCDInheritsInnerDecision(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
@@ -2162,6 +2179,23 @@ func TestClassify_AntiEvasion_AnsiCRmEvasion(t *testing.T) {
 	}
 }
 
+func TestClassify_AntiEvasion_NFKCExecutableNormalizesBeforeRules(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	canonical := classifyOne(t, evaluator, "rm -rf /")
+	evasion := classifyOne(t, evaluator, "\uff52\uff4d -rf /")
+
+	if canonical.Decision != evasion.Decision {
+		t.Fatalf("decision mismatch: canonical=%s evasion=%s", canonical.Decision, evasion.Decision)
+	}
+	if canonical.Decision != core.DecisionBlocked {
+		t.Fatalf("expected normalized rm -rf / to be BLOCKED, got %s", canonical.Decision)
+	}
+	if canonical.RuleID != evasion.RuleID {
+		t.Errorf("rule ID mismatch: canonical=%q evasion=%q", canonical.RuleID, evasion.RuleID)
+	}
+}
+
 func TestClassify_AntiEvasion_PathTraversalNormalises(t *testing.T) {
 	evaluator := policy.NewEvaluator(nil)
 
@@ -2189,6 +2223,31 @@ func TestClassify_AntiEvasion_PercentEncodedDomainCurl(t *testing.T) {
 	if canonical.Decision != evasion.Decision {
 		t.Fatalf("decision mismatch: canonical=%s evasion=%s (canonical reason=%q evasion reason=%q)",
 			canonical.Decision, evasion.Decision, canonical.Reason, evasion.Reason)
+	}
+}
+
+func TestClassify_AntiEvasion_NonASCIIExecutableRequiresApproval(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	// Cyrillic small er (U+0440) visually resembles ASCII "p", so this looks
+	// like "pm" in many fonts but is a distinct executable name.
+	result := classifyOne(t, evaluator, "\u0440m -rf /")
+
+	if result.Decision != core.DecisionApproval {
+		t.Fatalf("expected APPROVAL for non-ASCII executable name, got %s (reason: %s)", result.Decision, result.Reason)
+	}
+	if !strings.Contains(result.Reason, "non-ASCII executable name") {
+		t.Fatalf("reason = %q, want non-ASCII executable name", result.Reason)
+	}
+}
+
+func TestClassify_AntiEvasion_NonASCIIArgumentDataStaysSafe(t *testing.T) {
+	evaluator := policy.NewEvaluator(nil)
+
+	result := classifyOne(t, evaluator, "echo café")
+
+	if result.Decision != core.DecisionSafe {
+		t.Fatalf("expected SAFE for non-ASCII argument data to safe command, got %s (reason: %s)", result.Decision, result.Reason)
 	}
 }
 
