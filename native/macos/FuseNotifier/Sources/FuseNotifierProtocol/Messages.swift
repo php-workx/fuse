@@ -92,8 +92,16 @@ public enum HelperEvent: Codable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         switch try c.decode(String.self, forKey: .type) {
+        case "ready":
+            self = .ready(requestID: try c.decode(UInt64.self, forKey: .requestID), helperVersion: try c.decode(String.self, forKey: .helperVersion), protocolMin: try c.decode(Int.self, forKey: .protocolMin), protocolMax: try c.decode(Int.self, forKey: .protocolMax), authorization: try c.decode(String.self, forKey: .authorization), alertSetting: try c.decode(String.self, forKey: .alertSetting), soundSetting: try c.decode(String.self, forKey: .soundSetting))
+        case "result":
+            self = .result(requestID: try c.decode(UInt64.self, forKey: .requestID), operation: try c.decode(String.self, forKey: .operation), id: try c.decode(String.self, forKey: .id), status: try c.decode(String.self, forKey: .status))
         case "posted": self = .posted(requestID: try c.decode(UInt64.self, forKey: .requestID), id: try c.decode(String.self, forKey: .id))
         case "activated": self = .activated(id: try c.decode(String.self, forKey: .id))
+        case "reconciled": self = .reconciled(requestID: try c.decode(UInt64.self, forKey: .requestID), deliveredCurrentIDs: try c.decode([String].self, forKey: .deliveredCurrentIDs))
+        case "focus_result": self = .focusResult(requestID: try c.decode(UInt64.self, forKey: .requestID), mode: try c.decode(String.self, forKey: .mode), detail: try c.decode(String.self, forKey: .detail))
+        case "settings_changed": self = .settingsChanged(authorization: try c.decode(String.self, forKey: .authorization), alertSetting: try c.decode(String.self, forKey: .alertSetting), soundSetting: try c.decode(String.self, forKey: .soundSetting))
+        case "error": self = .error(requestID: try c.decode(UInt64.self, forKey: .requestID), operation: try c.decode(String.self, forKey: .operation), id: try c.decode(String.self, forKey: .id), code: try c.decode(String.self, forKey: .code), message: try c.decode(String.self, forKey: .message))
         case "shutdown_complete": self = .shutdownComplete
         default: throw ProtocolError.malformedLine
         }

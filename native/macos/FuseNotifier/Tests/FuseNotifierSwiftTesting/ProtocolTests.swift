@@ -5,12 +5,29 @@ import Testing
 
 @Test func protocolRejectsInvalidUTF8() {
     do {
-        try JSONLineCodec.decodeCommand(Data([0x7B, 0xFF, 0x7D]))
+        _ = try JSONLineCodec.decodeCommand(Data([0x7B, 0xFF, 0x7D]))
         Issue.record("Expected invalid UTF-8 rejection")
     } catch let error as ProtocolError {
         #expect(error == .invalidUTF8)
     } catch {
         Issue.record("Unexpected error: \(error)")
+    }
+}
+
+@Test func helperEventsRoundTrip() throws {
+    let events: [HelperEvent] = [
+        .ready(requestID: 1, helperVersion: "test", protocolMin: 1, protocolMax: 1, authorization: "authorized", alertSetting: "enabled", soundSetting: "enabled"),
+        .result(requestID: 2, operation: "post", id: "id", status: "accepted"),
+        .posted(requestID: 2, id: "id"),
+        .activated(id: "id"),
+        .reconciled(requestID: 3, deliveredCurrentIDs: ["id"]),
+        .focusResult(requestID: 4, mode: "exact", detail: "focused"),
+        .settingsChanged(authorization: "denied", alertSetting: "disabled", soundSetting: "disabled"),
+        .error(requestID: 5, operation: "post", id: "id", code: "failed", message: ""),
+        .shutdownComplete,
+    ]
+    for event in events {
+        #expect(try JSONDecoder().decode(HelperEvent.self, from: JSONEncoder().encode(event)) == event)
     }
 }
 #endif

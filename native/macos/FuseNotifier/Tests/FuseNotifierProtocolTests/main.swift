@@ -34,4 +34,19 @@ do {
     let ready = try JSONLineCodec.encode(.ready(requestID: 1, helperVersion: "test", protocolMin: 1, protocolMax: 1, authorization: "authorized", alertSetting: "enabled", soundSetting: "enabled"))
     let readyObject = try JSONSerialization.jsonObject(with: ready) as? [String: Any]
     expect(readyObject?["protocol_min"] as? Int == 1 && readyObject?["protocol_max"] as? Int == 1, "Ready did not advertise protocol bounds")
+    let events: [HelperEvent] = [
+        .ready(requestID: 1, helperVersion: "test", protocolMin: 1, protocolMax: 1, authorization: "authorized", alertSetting: "enabled", soundSetting: "enabled"),
+        .result(requestID: 2, operation: "post", id: "id", status: "accepted"),
+        .posted(requestID: 2, id: "id"),
+        .activated(id: "id"),
+        .reconciled(requestID: 3, deliveredCurrentIDs: ["id"]),
+        .focusResult(requestID: 4, mode: "exact", detail: "focused"),
+        .settingsChanged(authorization: "denied", alertSetting: "disabled", soundSetting: "disabled"),
+        .error(requestID: 5, operation: "post", id: "id", code: "failed", message: ""),
+        .shutdownComplete,
+    ]
+    for event in events {
+        let roundTripped = try JSONDecoder().decode(HelperEvent.self, from: JSONEncoder().encode(event))
+        expect(roundTripped == event, "Event decoder did not round-trip \(event)")
+    }
 } catch { fatalError("Protocol behavior test failed: \(error)") }
