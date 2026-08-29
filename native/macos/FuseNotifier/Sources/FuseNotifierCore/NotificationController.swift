@@ -51,6 +51,9 @@ public final class NotificationController: @unchecked Sendable {
     private var authorizationInFlight = false
     private var soundEnabled = false
     private var soundSettingEnabled = false
+    private var inFlightPostIDs = Set<String>()
+    private var shutdownCleanupFinished = false
+    private var shutdownCompleted = false
     private var isClosing = false
 
     public init(center: any NotificationCenterClient, sink: any EventSink, terminate: @escaping @Sendable () -> Void) { self.center = center; self.sink = sink; self.terminate = terminate }
@@ -95,6 +98,7 @@ public final class NotificationController: @unchecked Sendable {
         lock.unlock()
         if closing { emit(.error(requestID: requestID, operation: "post", id: notice.id, code: "shutting_down", message: "")); return }
         if duplicate { emit(.error(requestID: requestID, operation: "post", id: notice.id, code: "duplicate_id", message: "")); return }
+        emit(.result(requestID: requestID, operation: "post", id: notice.id, status: "accepted"))
         evaluate(id: notice.id)
     }
 
@@ -103,9 +107,20 @@ public final class NotificationController: @unchecked Sendable {
     }
 
     private func apply(settings: NotificationSettings, to id: String) {
-        lock.lock(); soundSettingEnabled = settings.sound == .enabled; updateSoundEnabledLocked(); let desiredNotice = desired[id]; let closing = isClosing
-        if settings.authorization == .notDetermined && !authorizationInFlight && desiredNotice != nil && !closing { authorizationInFlight = true; lock.unlock(); center.requestAuthorization { [weak self] _, _ in self?.authorizationResolved() }; return }
+        lock.lock()
+        soundSettingEnabled = settings.sound == .enabled
+        updateSoundEnabledLocked()
+        let desiredNotice = desired[id]
+        let closing = isClosing
+        let shouldRequestAuthorization = settings.authorization == .notDetermined && !authorizationInFlight && desiredNotice != nil && !closing
+        let waitingForAuthorization = settings.authorization == .notDetermined && authorizationInFlight && desiredNotice != nil && !closing
+        if shouldRequestAuthorization { authorizationInFlight = true }
         lock.unlock()
+        if shouldRequestAuthorization {
+            center.requestAuthorization { [weak self] _, _ in self?.authorizationResolved() }
+            return
+        }
+        if waitingForAuthorization { return }
         guard !closing, let desiredNotice else { return }
         guard settings.authorization == .authorized, settings.alerts == .enabled else {
             lock.lock(); desired.removeValue(forKey: id); updateSoundEnabledLocked(); lock.unlock()
@@ -113,6 +128,7 @@ public final class NotificationController: @unchecked Sendable {
             return
         }
         let request = NotificationRequest(id: id, title: Self.genericTitle, body: Self.genericBody, threadIdentifier: "fuse.approvals", playsSound: desiredNotice.notice.sound && settings.sound == .enabled)
+        lock.lock(); inFlightPostIDs.insert(id); lock.unlock()
         center.post(request) { [weak self] error in self?.postCompleted(id: id, requestID: desiredNotice.requestID, error: error) }
     }
 
@@ -123,10 +139,24 @@ public final class NotificationController: @unchecked Sendable {
     }
 
     private func postCompleted(id: String, requestID: UInt64, error: Error?) {
-        lock.lock(); let active = !isClosing && desired[id] != nil; lock.unlock()
-        guard active else { if error == nil { center.removeNotifications(ids: [id]) {} }; return }
-        if error == nil { emit(.result(requestID: requestID, operation: "post", id: id, status: "accepted")); emit(.posted(requestID: requestID, id: id)) }
-        else { lock.lock(); desired.removeValue(forKey: id); updateSoundEnabledLocked(); lock.unlock(); emit(.error(requestID: requestID, operation: "post", id: id, code: "notification_post_failed", message: "")) }
+        lock.lock()
+        inFlightPostIDs.remove(id)
+        let active = !isClosing && desired[id] != nil
+        lock.unlock()
+        guard active else {
+            if error == nil {
+                center.removeNotifications(ids: [id]) { [weak self] in self?.finishShutdownIfReady() }
+            } else {
+                finishShutdownIfReady()
+            }
+            return
+        }
+        if error == nil {
+            emit(.posted(requestID: requestID, id: id))
+        } else {
+            lock.lock(); desired.removeValue(forKey: id); updateSoundEnabledLocked(); lock.unlock()
+            emit(.error(requestID: requestID, operation: "post", id: id, code: "notification_post_failed", message: ""))
+        }
     }
 
     private func remove(requestID: UInt64, id: String) {
@@ -147,7 +177,7 @@ public final class NotificationController: @unchecked Sendable {
         }
     }
 
-    private func emitReady(requestID: UInt64, settings: NotificationSettings) { emit(.ready(requestID: requestID, helperVersion: "0.0.0-stage3", authorization: authorizationName(settings.authorization), alertSetting: settingName(settings.alerts), soundSetting: settingName(settings.sound))) }
+    private func emitReady(requestID: UInt64, settings: NotificationSettings) { emit(.ready(requestID: requestID, helperVersion: "0.0.0-stage3", protocolMin: 1, protocolMax: 1, authorization: authorizationName(settings.authorization), alertSetting: settingName(settings.alerts), soundSetting: settingName(settings.sound))) }
     private func accept(_ requestID: UInt64) -> Bool { lock.lock(); defer { lock.unlock() }; guard !isClosing, requestID > highestRequestID else { return false }; highestRequestID = requestID; return true }
     private func commandID(_ command: HelperCommand) -> String { switch command { case let .post(_, notice): notice.id; case let .remove(_, id): id; default: "" } }
     private func authorizationName(_ value: NotificationAuthorization) -> String { switch value { case .notDetermined: "not_determined"; case .denied: "denied"; case .authorized: "authorized" } }
@@ -163,9 +193,21 @@ public final class NotificationController: @unchecked Sendable {
         desired.removeAll()
         updateSoundEnabledLocked()
         lock.unlock()
-        center.removeNotifications(ids: ids) { [sink, terminate] in
-            do { try sink.send(.shutdownComplete) } catch {}
-            terminate()
+        center.removeNotifications(ids: ids) { [weak self] in
+            guard let self else { return }
+            self.lock.lock()
+            self.shutdownCleanupFinished = true
+            self.lock.unlock()
+            self.finishShutdownIfReady()
         }
+    }
+
+    private func finishShutdownIfReady() {
+        lock.lock()
+        guard isClosing, shutdownCleanupFinished, inFlightPostIDs.isEmpty, !shutdownCompleted else { lock.unlock(); return }
+        shutdownCompleted = true
+        lock.unlock()
+        do { try sink.send(.shutdownComplete) } catch {}
+        terminate()
     }
 }

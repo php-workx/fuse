@@ -9,14 +9,15 @@ enum FakeError: Error { case failed }
 final class BoolBox: @unchecked Sendable { var value = false }
 final class PresentationBox: @unchecked Sendable { var value: PresentationOptions? }
 final class FakeNotificationCenter: NotificationCenterClient, @unchecked Sendable {
-    var settings: NotificationSettings; var authorizationRequests = 0; var posted: [NotificationRequest] = []; var removed: [String] = []; var deliveredIDs: [String] = []; var postError: Error?; private var authorizationCompletion: ((Bool, Error?) -> Void)?
+    var settings: NotificationSettings; var authorizationRequests = 0; var posted: [NotificationRequest] = []; var removed: [String] = []; var deliveredIDs: [String] = []; var postError: Error?; var defersPosts = false; private var postCompletions: [(@Sendable (Error?) -> Void)] = []; private var authorizationCompletion: ((Bool, Error?) -> Void)?
     init(settings: NotificationSettings) { self.settings = settings }
     func getSettings(completion: @escaping @Sendable (NotificationSettings) -> Void) { completion(settings) }
     func requestAuthorization(completion: @escaping @Sendable (Bool, Error?) -> Void) { authorizationRequests += 1; authorizationCompletion = completion }
-    func post(_ request: NotificationRequest, completion: @escaping @Sendable (Error?) -> Void) { posted.append(request); completion(postError) }
+    func post(_ request: NotificationRequest, completion: @escaping @Sendable (Error?) -> Void) { posted.append(request); if defersPosts { postCompletions.append(completion) } else { completion(postError) } }
     func removeNotifications(ids: [String], completion: @escaping @Sendable () -> Void) { removed.append(contentsOf: ids); completion() }
     func deliveredNotificationIDs(completion: @escaping @Sendable ([String]) -> Void) { completion(deliveredIDs) }
     func resolveAuthorization(granted: Bool) { authorizationCompletion?(granted, nil) }
+    func completePosts() { let completions = postCompletions; postCompletions.removeAll(); for completion in completions { completion(postError) } }
 }
 final class RecordingSink: EventSink, @unchecked Sendable {
     var events: [HelperEvent] = []; let observe: (HelperEvent) -> Void; let shouldThrow: Bool
@@ -34,6 +35,13 @@ deferredCenter.settings = .authorized(alerts: .enabled, sound: .enabled)
 deferredCenter.resolveAuthorization(granted: true)
 expect(deferredCenter.posted.isEmpty && deferredCenter.removed == ["approval-1"], "Remove during permission prompt posted a stale notification")
 
+let queuedCenter = FakeNotificationCenter(settings: .notDetermined)
+let queued = NotificationController(center: queuedCenter, sink: RecordingSink(), terminate: {})
+queued.handle(post(2, "first")); queued.handle(post(3, "second"))
+queuedCenter.settings = .authorized(alerts: .enabled, sound: .enabled)
+queuedCenter.resolveAuthorization(granted: true)
+expect(queuedCenter.posted.map(\.id) == ["first", "second"], "Posts received during authorization were discarded")
+
 let duplicateCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled))
 let duplicateSink = RecordingSink()
 let duplicate = NotificationController(center: duplicateCenter, sink: duplicateSink, terminate: {})
@@ -41,6 +49,14 @@ duplicate.handle(post(2, "approval-1")); duplicate.handle(post(3, "approval-1"))
 expect(duplicateCenter.posted.map(\.id) == ["approval-1"], "Duplicate ID was posted twice")
 expect(duplicateSink.events.contains(.error(requestID: 3, operation: "post", id: "approval-1", code: "duplicate_id", message: "")), "Duplicate ID was not rejected")
 expect(duplicateCenter.posted.first?.title == NotificationController.genericTitle && duplicateCenter.posted.first?.body == NotificationController.genericBody, "Untrusted notification copy escaped the controller")
+
+let acceptedCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); acceptedCenter.defersPosts = true
+let acceptedSink = RecordingSink(); let accepted = NotificationController(center: acceptedCenter, sink: acceptedSink, terminate: {})
+accepted.handle(post(2, "approval-accepted"))
+expect(acceptedSink.events.contains(.result(requestID: 2, operation: "post", id: "approval-accepted", status: "accepted")), "Post acceptance was not correlated before scheduling")
+expect(!acceptedSink.events.contains(.posted(requestID: 2, id: "approval-accepted")), "Post completion was reported before Notification Center accepted it")
+acceptedCenter.completePosts()
+expect(acceptedSink.events.contains(.posted(requestID: 2, id: "approval-accepted")), "Posted event did not follow successful scheduling")
 
 let disabledCenter = FakeNotificationCenter(settings: .notDetermined)
 let disabledSink = RecordingSink()
@@ -77,6 +93,13 @@ expect(soundPresentation.value == [.banner, .list, .sound], "Foreground sound wa
 let brokenCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); let terminated = BoolBox(); let broken = NotificationController(center: brokenCenter, sink: RecordingSink(shouldThrow: true), terminate: { terminated.value = true })
 broken.handle(post(2, "approval-1"))
 expect(brokenCenter.removed == ["approval-1"] && terminated.value, "Broken output did not shut down cleanly")
+
+let delayedCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); delayedCenter.defersPosts = true
+let delayedSink = RecordingSink(); let delayedTermination = BoolBox(); let delayed = NotificationController(center: delayedCenter, sink: delayedSink, terminate: { delayedTermination.value = true })
+delayed.handle(post(2, "approval-late")); delayed.inputDidReachEOF()
+expect(!delayedTermination.value && !delayedSink.events.contains(.shutdownComplete), "Shutdown completed while a notification post remained in flight")
+delayedCenter.completePosts()
+expect(delayedCenter.removed == ["approval-late", "approval-late"] && delayedSink.events.last == .shutdownComplete && delayedTermination.value, "Late notification delivery was not removed before shutdown completed")
 
 let eofCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); let eofSink = RecordingSink(); let eofTerminated = BoolBox(); let eof = NotificationController(center: eofCenter, sink: eofSink, terminate: { eofTerminated.value = true })
 eof.handle(post(2, "approval-1")); eof.inputDidReachEOF()

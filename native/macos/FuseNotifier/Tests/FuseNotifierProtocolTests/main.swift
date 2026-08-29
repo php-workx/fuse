@@ -31,4 +31,7 @@ do {
     expectError(.fieldTooLong("title")) { _ = try JSONLineCodec.decodeCommand(line) }
     let encoded = try JSONLineCodec.encode(.posted(requestID: 2, id: "approval-1"))
     expect(encoded.last == 0x0A && encoded.count <= JSONLineCodec.maximumLineBytes, "Events must be bounded newline-delimited JSON")
+    let ready = try JSONLineCodec.encode(.ready(requestID: 1, helperVersion: "test", protocolMin: 1, protocolMax: 1, authorization: "authorized", alertSetting: "enabled", soundSetting: "enabled"))
+    let readyObject = try JSONSerialization.jsonObject(with: ready) as? [String: Any]
+    expect(readyObject?["protocol_min"] as? Int == 1 && readyObject?["protocol_max"] as? Int == 1, "Ready did not advertise protocol bounds")
 } catch { fatalError("Protocol behavior test failed: \(error)") }
