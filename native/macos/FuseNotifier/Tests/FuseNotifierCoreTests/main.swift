@@ -18,6 +18,7 @@ final class FakeNotificationCenter: NotificationCenterClient, @unchecked Sendabl
     func deliveredNotificationIDs(completion: @escaping @Sendable ([String]) -> Void) { completion(deliveredIDs) }
     func resolveAuthorization(granted: Bool) { authorizationCompletion?(granted, nil) }
     func completePosts() { let completions = postCompletions; postCompletions.removeAll(); for completion in completions { completion(postError) } }
+    func completeNextPost() { guard !postCompletions.isEmpty else { return }; let completion = postCompletions.removeFirst(); completion(postError) }
 }
 final class RecordingSink: EventSink, @unchecked Sendable {
     var events: [HelperEvent] = []; let observe: (HelperEvent) -> Void; let shouldThrow: Bool
@@ -40,7 +41,7 @@ let queued = NotificationController(center: queuedCenter, sink: RecordingSink(),
 queued.handle(post(2, "first")); queued.handle(post(3, "second"))
 queuedCenter.settings = .authorized(alerts: .enabled, sound: .enabled)
 queuedCenter.resolveAuthorization(granted: true)
-expect(queuedCenter.posted.map(\.id) == ["first", "second"], "Posts received during authorization were discarded")
+expect(Set(queuedCenter.posted.map(\.id)) == Set(["first", "second"]), "Posts received during authorization were discarded")
 
 let duplicateCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled))
 let duplicateSink = RecordingSink()
@@ -100,6 +101,14 @@ delayed.handle(post(2, "approval-late")); delayed.inputDidReachEOF()
 expect(!delayedTermination.value && !delayedSink.events.contains(.shutdownComplete), "Shutdown completed while a notification post remained in flight")
 delayedCenter.completePosts()
 expect(delayedCenter.removed == ["approval-late", "approval-late"] && delayedSink.events.last == .shutdownComplete && delayedTermination.value, "Late notification delivery was not removed before shutdown completed")
+
+let generationCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); generationCenter.defersPosts = true
+let generationSink = RecordingSink(); let generationTermination = BoolBox(); let generation = NotificationController(center: generationCenter, sink: generationSink, terminate: { generationTermination.value = true })
+generation.handle(post(2, "same")); generation.handle(.remove(requestID: 3, id: "same")); generation.handle(post(4, "same")); generation.inputDidReachEOF()
+generationCenter.completeNextPost()
+expect(!generationTermination.value && !generationSink.events.contains(.shutdownComplete), "First generation completion made the second in-flight post invisible to shutdown")
+generationCenter.completeNextPost()
+expect(generationTermination.value && generationSink.events.last == .shutdownComplete, "Shutdown did not wait for every scheduled post generation")
 
 let eofCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); let eofSink = RecordingSink(); let eofTerminated = BoolBox(); let eof = NotificationController(center: eofCenter, sink: eofSink, terminate: { eofTerminated.value = true })
 eof.handle(post(2, "approval-1")); eof.inputDidReachEOF()

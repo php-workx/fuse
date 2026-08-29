@@ -51,7 +51,7 @@ public final class NotificationController: @unchecked Sendable {
     private var authorizationInFlight = false
     private var soundEnabled = false
     private var soundSettingEnabled = false
-    private var inFlightPostIDs = Set<String>()
+    private var inFlightPostCount = 0
     private var shutdownCleanupFinished = false
     private var shutdownCompleted = false
     private var isClosing = false
@@ -128,7 +128,7 @@ public final class NotificationController: @unchecked Sendable {
             return
         }
         let request = NotificationRequest(id: id, title: Self.genericTitle, body: Self.genericBody, threadIdentifier: "fuse.approvals", playsSound: desiredNotice.notice.sound && settings.sound == .enabled)
-        lock.lock(); inFlightPostIDs.insert(id); lock.unlock()
+        lock.lock(); inFlightPostCount += 1; lock.unlock()
         center.post(request) { [weak self] error in self?.postCompleted(id: id, requestID: desiredNotice.requestID, error: error) }
     }
 
@@ -140,7 +140,7 @@ public final class NotificationController: @unchecked Sendable {
 
     private func postCompleted(id: String, requestID: UInt64, error: Error?) {
         lock.lock()
-        inFlightPostIDs.remove(id)
+        inFlightPostCount -= 1
         let active = !isClosing && desired[id] != nil
         lock.unlock()
         guard active else {
@@ -204,7 +204,7 @@ public final class NotificationController: @unchecked Sendable {
 
     private func finishShutdownIfReady() {
         lock.lock()
-        guard isClosing, shutdownCleanupFinished, inFlightPostIDs.isEmpty, !shutdownCompleted else { lock.unlock(); return }
+        guard isClosing, shutdownCleanupFinished, inFlightPostCount == 0, !shutdownCompleted else { lock.unlock(); return }
         shutdownCompleted = true
         lock.unlock()
         do { try sink.send(.shutdownComplete) } catch {}
