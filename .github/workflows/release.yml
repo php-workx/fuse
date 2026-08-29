@@ -24,6 +24,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Require notifier Developer ID Team ID
+        env:
+          FUSE_NOTIFIER_DEVELOPER_TEAM_ID: ${{ secrets.FUSE_NOTIFIER_DEVELOPER_TEAM_ID }}
+        run: test -n "$FUSE_NOTIFIER_DEVELOPER_TEAM_ID"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
@@ -31,4 +36,5 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FUSE_NOTIFIER_DEVELOPER_TEAM_ID: ${{ secrets.FUSE_NOTIFIER_DEVELOPER_TEAM_ID }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

@@ -15,12 +15,12 @@ const maximumDisplayScalars = 160
 
 var errProtocolClosed = errors.New("notifier transport closed")
 type terminalWire struct {
-	Kind string `json:"kind,omitempty"`
-	ProgramVersion string `json:"program_version,omitempty"`
+	TerminalProgram string `json:"terminal_program"`
+	TerminalProgramVersion string `json:"terminal_program_version"`
 	ITermSessionID string `json:"iterm_session_id,omitempty"`
-	TTY string `json:"tty,omitempty"`
-	Marker string `json:"marker,omitempty"`
-	Degraded bool `json:"degraded,omitempty"`
+	TerminalTTY string `json:"terminal_tty,omitempty"`
+	GhosttyTitleMarker string `json:"ghostty_title_marker,omitempty"`
+	ExactTargetingDegraded bool `json:"exact_targeting_degraded"`
 }
 
 
@@ -68,6 +68,7 @@ type protocolClient struct {
 	onMessage func(protocolMessage)
 	onFailure func(error)
 	closed bool
+	afterAllocate func(uint64)
 }
 
 func newProtocolClient(connection io.ReadWriteCloser, onMessage func(protocolMessage), onFailure func(error)) *protocolClient {
@@ -77,9 +78,11 @@ func newProtocolClient(connection io.ReadWriteCloser, onMessage func(protocolMes
 }
 
 func (client *protocolClient) call(ctx context.Context, command protocolMessage) (protocolMessage, error) {
+	client.writeMu.Lock()
 	client.mu.Lock()
 	if client.closed {
 		client.mu.Unlock()
+		client.writeMu.Unlock()
 		return protocolMessage{}, errProtocolClosed
 	}
 	client.nextRequestID++
@@ -88,7 +91,10 @@ func (client *protocolClient) call(ctx context.Context, command protocolMessage)
 	response := make(chan protocolReply, 1)
 	client.pending[command.RequestID] = response
 	client.mu.Unlock()
-	if err := client.write(command); err != nil {
+	if client.afterAllocate != nil { client.afterAllocate(command.RequestID) }
+	err := client.writeLocked(command)
+	client.writeMu.Unlock()
+	if err != nil {
 		client.finish(command.RequestID, protocolReply{err: err})
 		return protocolMessage{}, err
 	}
@@ -102,25 +108,33 @@ func (client *protocolClient) call(ctx context.Context, command protocolMessage)
 }
 
 func (client *protocolClient) shutdownRequest(ctx context.Context) error {
+	client.writeMu.Lock()
 	client.mu.Lock()
-	if client.closed { client.mu.Unlock(); return errProtocolClosed }
+	if client.closed {
+		client.mu.Unlock()
+		client.writeMu.Unlock()
+		return errProtocolClosed
+	}
 	client.nextRequestID++
 	command := protocolMessage{Version: 1, Type: "shutdown", RequestID: client.nextRequestID}
 	client.mu.Unlock()
-	if err := client.write(command); err != nil { return err }
+	if client.afterAllocate != nil { client.afterAllocate(command.RequestID) }
+	err := client.writeLocked(command)
+	client.writeMu.Unlock()
+	if err != nil { return err }
 	select {
-	case reply := <-client.shutdown: return reply.err
-	case <-ctx.Done(): return ctx.Err()
+	case reply := <-client.shutdown:
+		return reply.err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
-func (client *protocolClient) write(message protocolMessage) error {
+func (client *protocolClient) writeLocked(message protocolMessage) error {
 	line, err := json.Marshal(message)
 	if err != nil { return err }
 	if len(line)+1 > maximumProtocolLineBytes { return fmt.Errorf("notifier protocol line exceeds %d bytes", maximumProtocolLineBytes) }
 	line = append(line, '\n')
-	client.writeMu.Lock()
-	defer client.writeMu.Unlock()
 	_, err = client.connection.Write(line)
 	return err
 }

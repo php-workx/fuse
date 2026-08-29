@@ -24,6 +24,7 @@ builds:
       - -X github.com/php-workx/fuse/internal/cli.Version={{.Version}}
       - -X github.com/php-workx/fuse/internal/cli.GitCommit={{.Commit}}
       - -X github.com/php-workx/fuse/internal/cli.BuildDate={{.Date}}
+      - -X github.com/php-workx/fuse/internal/attention.notifierDeveloperTeamID={{ .Env.FUSE_NOTIFIER_DEVELOPER_TEAM_ID }}
 
 archives:
   - id: default

@@ -125,6 +125,20 @@ func TestNewSuppressesCustomFuseHomeBeforeHelperDiscovery(t *testing.T) {
 	if got := service.Status().Ownership; got != OwnershipDisabled { t.Fatalf("ownership = %q, want disabled", got) }
 }
 
+func TestDarwinServiceSendsStrictTerminalMetadataInHello(t *testing.T) {
+	starter := newScriptedStarter()
+	dependencies := testDependencies(&memoryOwnerLock{}, starter)
+	dependencies.terminal.Degradation.Multiplexer = true
+	service := newServiceForTest(dependencies)
+	t.Cleanup(func() { _ = service.Close(context.Background()) })
+	messages := starter.Messages()
+	if len(messages) != 1 || messages[0].Type != "hello" { t.Fatalf("messages = %#v, want one hello", messages) }
+	got := messages[0].Terminal
+	if got == nil || got.TerminalProgram != "Ghostty" || got.TerminalProgramVersion != "1.3.0" || got.ITermSessionID != "session" || got.TerminalTTY != "/dev/ttys001" || got.GhosttyTitleMarker != "marker" || !got.ExactTargetingDegraded {
+		t.Fatalf("hello terminal = %#v", got)
+	}
+}
+
 func TestDarwinServiceSerializesConcurrentPosts(t *testing.T) {
 	service := newServiceForTest(testDependencies(&memoryOwnerLock{}, newScriptedStarter()))
 	t.Cleanup(func() { _ = service.Close(context.Background()) })
@@ -140,7 +154,7 @@ func TestDarwinServiceSerializesConcurrentPosts(t *testing.T) {
 }
 
 func testDependencies(lock ownerLock, starter *scriptedStarter) serviceDependencies {
-	return serviceDependencies{lock: lock, starter: starter, fuseHome: "/Users/test/.fuse", defaultFuseHome: "/Users/test/.fuse", restartDelay: func(context.Context, time.Duration) error { return nil }, verifyHelperPID: func(int) bool { return true }, signalPID: func(int) error { return nil }, waitForExit: func(context.Context, int, time.Duration) error { return nil }}
+	return serviceDependencies{lock: lock, starter: starter, fuseHome: "/Users/test/.fuse", defaultFuseHome: "/Users/test/.fuse", terminal: TerminalTargetMetadata{TerminalProgram: "Ghostty", TerminalProgramVersion: "1.3.0", ITermSessionID: "session", ControllingTTY: "/dev/ttys001", GhosttyTitleMarker: "marker"}, restartDelay: func(context.Context, time.Duration) error { return nil }, verifyHelperPID: func(int) bool { return true }, signalPID: func(int) error { return nil }, waitForExit: func(context.Context, int, time.Duration) error { return nil }}
 }
 
 func waitFor(t *testing.T, condition func() bool) {
@@ -225,6 +239,14 @@ func (starter *scriptedStarter) Commands() []string {
 	for _, transport := range transports { commands = append(commands, transport.commandsSnapshot()...) }
 	return commands
 }
+func (starter *scriptedStarter) Messages() []protocolMessage {
+	starter.mu.Lock()
+	transports := append([]*scriptedTransport(nil), starter.transports...)
+	starter.mu.Unlock()
+	var messages []protocolMessage
+	for _, transport := range transports { messages = append(messages, transport.messagesSnapshot()...) }
+	return messages
+}
 
 type scriptedProcess struct { pid int }
 func (process scriptedProcess) PID() int { return process.pid }
@@ -235,6 +257,7 @@ type scriptedTransport struct {
 	server net.Conn
 	mu sync.Mutex
 	commands []string
+	messages []protocolMessage
 	responses map[string]string
 	errors map[string]string
 	after map[string][]map[string]any
@@ -264,6 +287,7 @@ func (transport *scriptedTransport) start() {
 			if err := json.Unmarshal(scanner.Bytes(), &message); err != nil { return }
 			transport.mu.Lock()
 			transport.commands = append(transport.commands, message.Type)
+			transport.messages = append(transport.messages, message)
 			status, overridden := transport.responses[message.Type]
 			failure := transport.errors[message.Type]
 			after := append([]map[string]any(nil), transport.after[message.Type]...)
@@ -297,5 +321,6 @@ func (transport *scriptedTransport) respondTo(message protocolMessage, status st
 }
 
 func (transport *scriptedTransport) commandsSnapshot() []string { transport.mu.Lock(); defer transport.mu.Unlock(); return append([]string(nil), transport.commands...) }
+func (transport *scriptedTransport) messagesSnapshot() []protocolMessage { transport.mu.Lock(); defer transport.mu.Unlock(); return append([]protocolMessage(nil), transport.messages...) }
 func defaultStatus(operation string) string { if operation == "post" { return "accepted" }; return "ok" }
 func newServiceForTest(dependencies serviceDependencies) *darwinService { dependencies.clientVersion = "test"; return newController(dependencies) }

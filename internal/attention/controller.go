@@ -277,11 +277,11 @@ func (service *darwinService) isDelivered(id string) bool { service.mu.RLock(); 
 func boolString(value bool) string { if value { return "true" }; return "false" }
 func terminalTargetWire(metadata TerminalTargetMetadata) *terminalWire {
 	return &terminalWire{
-		Kind: metadata.TerminalProgram,
-		ProgramVersion: metadata.TerminalProgramVersion,
+		TerminalProgram: metadata.TerminalProgram,
+		TerminalProgramVersion: metadata.TerminalProgramVersion,
 		ITermSessionID: metadata.ITermSessionID,
-		TTY: metadata.ControllingTTY,
-		Marker: metadata.GhosttyTitleMarker,
-		Degraded: metadata.Degradation.ExactTargetingDegraded(),
+		TerminalTTY: metadata.ControllingTTY,
+		GhosttyTitleMarker: metadata.GhosttyTitleMarker,
+		ExactTargetingDegraded: metadata.Degradation.ExactTargetingDegraded(),
 	}
 }
