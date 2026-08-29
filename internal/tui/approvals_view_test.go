@@ -544,6 +544,50 @@ func TestApprovalsMoveCursor_HistoryEmpty(t *testing.T) {
 	}
 }
 
+func TestApprovalsModel_SelectPendingAnchorsByIDAcrossPollingReorder(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.SetPending([]db.PendingRequest{
+		{ID: "first", Command: "first"},
+		{ID: "selected", Command: "selected"},
+	})
+
+	if !m.SelectPending("selected") {
+		t.Fatal("SelectPending(selected) = false, want true")
+	}
+	if m.pendingIdx != 1 {
+		t.Fatalf("pendingIdx = %d, want 1", m.pendingIdx)
+	}
+
+	m.SetPending([]db.PendingRequest{
+		{ID: "selected", Command: "selected"},
+		{ID: "first", Command: "first"},
+	})
+	if m.pendingIdx != 0 {
+		t.Errorf("pendingIdx after reorder = %d, want 0", m.pendingIdx)
+	}
+	if m.pendingID != "selected" {
+		t.Errorf("pendingID after reorder = %q, want selected", m.pendingID)
+	}
+}
+
+func TestApprovalsModel_ResolvedSelectionClosesScopeModal(t *testing.T) {
+	m := NewApprovalsModel(nil, nil)
+	m.SetPending([]db.PendingRequest{{ID: "selected", Command: "selected"}})
+	if !m.SelectPending("selected") {
+		t.Fatal("SelectPending(selected) = false, want true")
+	}
+	m.scopeSelect = true
+
+	m.SetPending(nil)
+
+	if m.scopeSelect {
+		t.Error("scopeSelect = true after selected request resolved, want false")
+	}
+	if m.statusMsg != "Request already resolved." {
+		t.Errorf("statusMsg = %q, want resolved message", m.statusMsg)
+	}
+}
+
 // --- parseTime tests ---
 
 func TestParseTime_ValidWithMillis(t *testing.T) {

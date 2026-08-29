@@ -21,5 +21,5 @@ func TestNonDarwinMonitorHandoffDoesNotInitializeNotifications(t *testing.T) {
 		t.Fatal("notification options sound = false, want configured true")
 	}
 
-	_ = tui.NewModel(nil, "disabled", nil, options)
+	_ = tui.NewModel(nil, "disabled", nil, options, nil)
 }

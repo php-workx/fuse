@@ -37,8 +37,8 @@ const timestampFormatNoMillis = "2006-01-02T15:04:05Z"
 type ApprovalsModel struct {
 	// Pending requests from hook processes.
 	pending    []db.PendingRequest
+	pendingID  string
 	pendingIdx int
-
 	// Approval history.
 	approvals  []db.Approval
 	historyIdx int
@@ -88,12 +88,43 @@ func (m *ApprovalsModel) SetData(approvals []db.Approval) {
 	}
 }
 
-// SetPending updates the pending requests list.
+// SetPending updates the pending requests list while preserving the selected ID.
 func (m *ApprovalsModel) SetPending(pending []db.PendingRequest) {
 	m.pending = pending
-	if m.pendingIdx >= len(m.pending) && len(m.pending) > 0 {
+	if m.pendingID != "" {
+		for i := range m.pending {
+			if m.pending[i].ID == m.pendingID {
+				m.pendingIdx = i
+				return
+			}
+		}
+		m.pendingID = ""
+		m.pendingIdx = 0
+		m.scopeSelect = false
+		m.statusMsg = "Request already resolved."
+		return
+	}
+	if len(m.pending) == 0 {
+		m.pendingIdx = 0
+		return
+	}
+	if m.pendingIdx >= len(m.pending) {
 		m.pendingIdx = len(m.pending) - 1
 	}
+	m.pendingID = m.pending[m.pendingIdx].ID
+}
+
+// SelectPending selects a pending request by its stable ID.
+func (m *ApprovalsModel) SelectPending(id string) bool {
+	for i := range m.pending {
+		if m.pending[i].ID == id {
+			m.focus = focusPending
+			m.pendingID = id
+			m.pendingIdx = i
+			return true
+		}
+	}
+	return false
 }
 
 // SetSize updates dimensions.
@@ -498,17 +529,20 @@ func (m *ApprovalsModel) moveCursor(delta int) {
 		if m.pendingIdx < 0 {
 			m.pendingIdx = 0
 		}
-	} else {
-		m.historyIdx += delta
-		if m.historyIdx < 0 {
-			m.historyIdx = 0
+		if len(m.pending) > 0 {
+			m.pendingID = m.pending[m.pendingIdx].ID
 		}
-		if m.historyIdx >= len(m.approvals) {
-			m.historyIdx = len(m.approvals) - 1
-		}
-		if m.historyIdx < 0 {
-			m.historyIdx = 0
-		}
+		return
+	}
+	m.historyIdx += delta
+	if m.historyIdx < 0 {
+		m.historyIdx = 0
+	}
+	if m.historyIdx >= len(m.approvals) {
+		m.historyIdx = len(m.approvals) - 1
+	}
+	if m.historyIdx < 0 {
+		m.historyIdx = 0
 	}
 }
 

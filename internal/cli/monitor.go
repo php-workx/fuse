@@ -1,13 +1,14 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
-
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/php-workx/fuse/internal/attention"
 	"github.com/php-workx/fuse/internal/config"
 	"github.com/php-workx/fuse/internal/db"
 	"github.com/php-workx/fuse/internal/tui"
@@ -74,7 +75,8 @@ func runMonitor(noNotifications bool) error {
 		return fmt.Errorf("read secret: %w", secretErr)
 	}
 
-	m := tui.NewModel(database, modeStr, secret, notificationOptions)
+	notifier, _ := newMonitorAttentionService(notificationOptions)
+	m := tui.NewModel(database, modeStr, secret, notificationOptions, notifier)
 	p := tea.NewProgram(m)
 	_, err = p.Run()
 	return err
@@ -82,4 +84,16 @@ func runMonitor(noNotifications bool) error {
 
 func effectiveNotificationOptions(cfg *config.Config, noNotifications bool) tui.NotificationOptions {
 	return tui.NewNotificationOptions(!noNotifications && cfg.Notifications.Enabled, cfg.Notifications.Sound)
+}
+
+var newAttentionService = attention.New
+
+func newMonitorAttentionService(options tui.NotificationOptions) (attention.Service, error) {
+	if !options.Enabled() {
+		return nil, nil
+	}
+	return newAttentionService(context.Background(), attention.Options{
+		ClientVersion: Version,
+		Development:   Version == "dev",
+	})
 }

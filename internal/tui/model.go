@@ -1,13 +1,16 @@
 package tui
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/php-workx/fuse/internal/attention"
 	"github.com/php-workx/fuse/internal/db"
 )
 
@@ -47,12 +50,22 @@ type Model struct {
 	secret        []byte // HMAC secret for creating approvals from the TUI
 	mode          string
 	notifications NotificationOptions
+	attention     attention.Service
+
 	activeView    viewMode
 	width         int
 	height        int
 	fetchGen      uint64
 	fetching      bool
 	lastErr       error
+	pending       []db.PendingRequest
+	pendingGen    uint64
+	pendingFetching bool
+	pendingErr    error
+
+	notificationStatus       attention.Status
+	notificationErr          error
+	attentionEventsClosed    bool
 	events        EventsModel
 	stats         StatsModel
 	approvals     ApprovalsModel
@@ -60,30 +73,43 @@ type Model struct {
 }
 
 // NewModel creates an initialized Model.
-func NewModel(database *db.DB, mode string, secret []byte, notifications NotificationOptions) Model {
-	return Model{
+func NewModel(database *db.DB, mode string, secret []byte, notifications NotificationOptions, notifier attention.Service) Model {
+	if !notifications.Enabled() {
+		notifier = nil
+	}
+	model := Model{
 		db:            database,
 		secret:        secret,
 		mode:          mode,
 		notifications: notifications,
+		attention:     notifier,
 		events:        NewEventsModel(),
 		stats:         NewStatsModel(),
 		approvals:     NewApprovalsModel(database, secret),
 	}
+	if notifier != nil {
+		model.notificationStatus = notifier.Status()
+	} else if notifications.Enabled() {
+		model.notificationStatus = attention.Status{
+			Ownership:      attention.OwnershipDisabled,
+			DegradedReason: "native notifier unavailable",
+		}
+	}
+	return model
 }
 
-// cleanupMsg is sent after the startup cleanup completes (fire-and-forget).
-type cleanupMsg struct{}
+// cleanupMsg is sent after the startup cleanup completes.
+type cleanupMsg struct {
+	err error
+}
 
-// Init returns the initial commands (first tick + async cleanup).
+// Init cleans stale rows before starting the global pending poll.
 func (m Model) Init() tea.Cmd {
 	database := m.db
-	cleanupCmd := func() tea.Msg {
-		// Clean up stale pending requests (>30 min) from crashed hooks.
-		_, _ = database.CleanupStalePendingRequests(30 * time.Minute)
-		return cleanupMsg{}
+	return func() tea.Msg {
+		_, err := database.CleanupStalePendingRequests(30 * time.Minute)
+		return cleanupMsg{err: err}
 	}
-	return tea.Batch(tickCmd(m.activeView), cleanupCmd)
 }
 
 // Update processes messages.
@@ -104,8 +130,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case dataMsg:
 		return m.handleData(msg)
 
+	case cleanupMsg:
+		return m.handleCleanup(msg)
+
+	case pendingPollMsg:
+		return m.handlePendingPoll()
+
+	case pendingFetchMsg:
+		return m.handlePendingFetch(msg)
+
+	case attentionEventMsg:
+		return m.handleAttentionEvent(msg)
+
+	case activationLookupMsg:
+		return m.handleActivationLookup(msg)
+
+	case attentionResultMsg:
+		m.notificationStatus = msg.status
+		m.notificationErr = msg.err
+		return m, nil
+
+	case attentionCloseMsg:
+		if msg.err != nil {
+			m.notificationErr = msg.err
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		return m.handleKey(msg)
+
 	default:
 	}
 
@@ -122,6 +175,94 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	return m, cmd
 }
+
+// handleCleanup starts polling only after stale request cleanup is complete.
+func (m Model) handleCleanup(msg cleanupMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.pendingErr = msg.err
+	}
+	m.pendingFetching = true
+	m.pendingGen++
+	cmds := []tea.Cmd{m.fetchPending()}
+	if m.attention != nil && !m.attentionEventsClosed {
+		cmds = append(cmds, m.waitAttentionEvent())
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handlePendingPoll starts the next independent global pending fetch.
+func (m Model) handlePendingPoll() (tea.Model, tea.Cmd) {
+	if m.pendingFetching {
+		return m, pendingPollCmd()
+	}
+	m.pendingFetching = true
+	m.pendingGen++
+	return m, m.fetchPending()
+}
+
+// handlePendingFetch updates the global snapshot and schedules notification work.
+func (m Model) handlePendingFetch(msg pendingFetchMsg) (tea.Model, tea.Cmd) {
+	if msg.reqGen != m.pendingGen {
+		return m, pendingPollCmd()
+	}
+	m.pendingFetching = false
+	if msg.err != nil {
+		m.pendingErr = msg.err
+		return m, pendingPollCmd()
+	}
+
+	previous := m.pending
+	m.pending = msg.pending
+	m.pendingErr = nil
+	m.approvals.SetPending(msg.pending)
+	added, removed, currentIDs := pendingDiff(previous, msg.pending)
+	return m, tea.Batch(m.syncAttention(added, removed, currentIDs), pendingPollCmd())
+}
+
+// handleAttentionEvent routes one helper event and re-arms its wait when open.
+func (m Model) handleAttentionEvent(msg attentionEventMsg) (tea.Model, tea.Cmd) {
+	if !msg.ok {
+		m.attentionEventsClosed = true
+		return m, nil
+	}
+
+	var cmds []tea.Cmd
+	if m.attention != nil {
+		cmds = append(cmds, m.waitAttentionEvent())
+	}
+	if msg.event.Status != (attention.Status{}) {
+		m.notificationStatus = msg.event.Status
+	}
+	if msg.event.Err != nil {
+		m.notificationErr = msg.event.Err
+	}
+	if msg.event.Kind == attention.EventActivated {
+		cmds = append(cmds, m.activationLookup(msg.event.PendingID))
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// handleActivationLookup applies authoritative pending state before focusing the terminal.
+func (m Model) handleActivationLookup(msg activationLookupMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		m.pendingErr = msg.err
+		return m, nil
+	}
+
+	m.activeView = viewApprovals
+	if !msg.found {
+		m.approvals.scopeSelect = false
+		m.approvals.statusMsg = "Request already resolved."
+	} else {
+		if !m.approvals.SelectPending(msg.request.ID) {
+			m.pending = append(m.pending, msg.request)
+			m.approvals.SetPending(m.pending)
+			m.approvals.SelectPending(msg.request.ID)
+		}
+	}
+	return m, m.focusAttention()
+}
+
 
 // handleTick processes periodic tick messages for data polling.
 func (m Model) handleTick(msg tickMsg) (tea.Model, tea.Cmd) {
@@ -160,7 +301,6 @@ func (m Model) handleData(msg dataMsg) (tea.Model, tea.Cmd) {
 			m.stats.SetJudgeSummary(msg.judgeSummary)
 		case viewApprovals:
 			m.approvals.SetData(msg.approvals)
-			m.approvals.SetPending(msg.pending)
 		default:
 		}
 	}
@@ -171,10 +311,12 @@ func (m Model) handleData(msg dataMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	k := msg.Key()
 
-	// Always handle quit.
 	if m.shouldQuit(k) {
 		m.quitting = true
-		return m, tea.Quit
+		if m.attention == nil {
+			return m, tea.Quit
+		}
+		return m, tea.Sequence(m.closeAttention(), tea.Quit)
 	}
 
 	// View switching (suppressed during search mode).
@@ -246,7 +388,7 @@ func (m Model) View() tea.View {
 	var b strings.Builder
 
 	// Header bar.
-	tabs := []string{"Events", "Stats", "Approvals"}
+	tabs := []string{"Events", "Stats", fmt.Sprintf("Approvals (%d)", len(m.pending))}
 	var tabParts []string
 	for i, name := range tabs {
 		if viewMode(i) == m.activeView {
@@ -281,6 +423,16 @@ func (m Model) View() tea.View {
 	}
 	if m.lastErr != nil {
 		footer += "  " + styleError.Render("DB: "+m.lastErr.Error())
+	}
+	if m.pendingErr != nil {
+		footer += "  " + styleError.Render("Pending DB: "+m.pendingErr.Error())
+	}
+	if m.notifications.Enabled() {
+		if m.notificationErr != nil {
+			footer += "  " + styleError.Render("Notifications: "+m.notificationErr.Error())
+		} else if reason := m.notificationStatus.DegradedReason; reason != "" {
+			footer += "  " + styleError.Render("Notifications: "+reason)
+		}
 	}
 	// Pad to bottom.
 	b.WriteString("\n" + strings.Repeat("─", m.width) + "\n")
@@ -317,7 +469,6 @@ type dataMsg struct {
 	summary      db.EventSummary
 	judgeSummary db.JudgeSummary
 	approvals    []db.Approval
-	pending      []db.PendingRequest
 	err          error
 }
 
@@ -337,11 +488,159 @@ func (m Model) fetchData() tea.Cmd {
 			msg.judgeSummary, _ = database.SummarizeJudgeAccuracy()
 		case viewApprovals:
 			msg.approvals, msg.err = database.ListApprovals(50)
-			// Fetch pending requests independently — a transient pending error
-			// should not block the approval history update.
-			msg.pending, _ = database.ListPendingRequests()
-		default:
 		}
 		return msg
+	}
+}
+
+// pendingPollMsg triggers the next global pending-request poll.
+type pendingPollMsg struct{}
+
+// pendingFetchMsg carries a global pending-request query result.
+type pendingFetchMsg struct {
+	reqGen  uint64
+	pending []db.PendingRequest
+	err     error
+}
+
+// attentionEventMsg carries one event from the notification service.
+type attentionEventMsg struct {
+	event attention.Event
+	ok    bool
+}
+
+// activationLookupMsg carries the authoritative result for a notification click.
+type activationLookupMsg struct {
+	request db.PendingRequest
+	found   bool
+	err     error
+}
+
+// attentionResultMsg carries the outcome of asynchronous notification work.
+type attentionResultMsg struct {
+	status attention.Status
+	err    error
+}
+
+// attentionCloseMsg reports orderly notification service shutdown.
+type attentionCloseMsg struct {
+	err error
+}
+
+func pendingPollCmd() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
+		return pendingPollMsg{}
+	})
+}
+
+func (m Model) fetchPending() tea.Cmd {
+	gen := m.pendingGen
+	database := m.db
+	return func() tea.Msg {
+		pending, err := database.ListPendingRequests()
+		return pendingFetchMsg{reqGen: gen, pending: pending, err: err}
+	}
+}
+
+func (m Model) waitAttentionEvent() tea.Cmd {
+	events := m.attention.Events()
+	return func() tea.Msg {
+		event, ok := <-events
+		return attentionEventMsg{event: event, ok: ok}
+	}
+}
+
+func (m Model) activationLookup(id string) tea.Cmd {
+	database := m.db
+	return func() tea.Msg {
+		request, found, err := database.GetPendingRequest(id)
+		return activationLookupMsg{request: request, found: found, err: err}
+	}
+}
+
+func pendingDiff(previous, current []db.PendingRequest) (added []db.PendingRequest, removed, currentIDs []string) {
+	previousIDs := make(map[string]struct{}, len(previous))
+	for _, request := range previous {
+		previousIDs[request.ID] = struct{}{}
+	}
+	currentIDs = make([]string, 0, len(current))
+	for _, request := range current {
+		currentIDs = append(currentIDs, request.ID)
+		if _, existed := previousIDs[request.ID]; !existed {
+			added = append(added, request)
+		}
+	}
+	currentSet := make(map[string]struct{}, len(current))
+	for _, id := range currentIDs {
+		currentSet[id] = struct{}{}
+	}
+	for _, request := range previous {
+		if _, exists := currentSet[request.ID]; !exists {
+			removed = append(removed, request.ID)
+		}
+	}
+	return added, removed, currentIDs
+}
+
+func (m Model) syncAttention(added []db.PendingRequest, removed, currentIDs []string) tea.Cmd {
+	if m.attention == nil {
+		return nil
+	}
+
+	notifier := m.attention
+	sound := m.notifications.Sound()
+	return func() tea.Msg {
+		ctx := context.Background()
+		var firstErr error
+		for _, request := range added {
+			if err := notifier.Post(ctx, noticeForPending(request, sound)); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		for _, id := range removed {
+			if err := notifier.Remove(ctx, id); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+		if _, err := notifier.Reconcile(ctx, currentIDs); err != nil && firstErr == nil {
+			firstErr = err
+		}
+		return attentionResultMsg{status: notifier.Status(), err: firstErr}
+	}
+}
+
+func noticeForPending(request db.PendingRequest, sound bool) attention.Notice {
+	workspace := filepath.Base(strings.TrimRight(request.WorkspaceRoot, string(filepath.Separator)))
+	if workspace == "." || workspace == string(filepath.Separator) || workspace == "" {
+		workspace = "Workspace"
+	}
+	source := request.Source
+	if source == "" {
+		source = "unknown source"
+	}
+	return attention.Notice{
+		ID:       request.ID,
+		Title:    "Fuse approval required",
+		Subtitle: shorten(workspace, 64),
+		Body:     "Source: " + shorten(source, 64),
+		Sound:    sound,
+	}
+}
+
+func (m Model) focusAttention() tea.Cmd {
+	if m.attention == nil {
+		return nil
+	}
+	notifier := m.attention
+	return func() tea.Msg {
+		_, err := notifier.Focus(context.Background())
+		return attentionResultMsg{status: notifier.Status(), err: err}
+	}
+}
+
+func (m Model) closeAttention() tea.Cmd {
+	notifier := m.attention
+	return func() tea.Msg {
+		return attentionCloseMsg{err: notifier.Close(context.Background())}
 	}
 }
