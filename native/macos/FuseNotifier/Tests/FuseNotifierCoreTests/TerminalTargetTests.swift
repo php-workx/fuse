@@ -62,6 +62,11 @@ func runTerminalTargetTests() {
     terminalExpect(iTermTarget.focus(iTermMetadata) == .dispatched, "iTerm URL dispatch was not reported as dispatched")
     terminalExpect(iTermWorkspace.openedURLs.map(\.absoluteString) == ["iterm2:///reveal?sessionid=w0t0p0:A%26B%20C"], "iTerm session identifier was not percent encoded")
 
+    let unverifiedITermWorkspace = RecordingWorkspace()
+    let unverifiedITermTarget = TerminalTarget(runner: RecordingProcessRunner(results: []), workspace: unverifiedITermWorkspace, sleep: { _ in })
+    let unverifiedITermMetadata = TerminalTargetMetadata(terminalProgram: "iTerm.app", terminalProgramVersion: "3.5", iTermSessionID: "w0t0p0:tmux", terminalTTY: nil, ghosttyTitleMarker: nil, hasExactTargetingDegradation: true)
+    terminalExpect(unverifiedITermTarget.focus(unverifiedITermMetadata) == .dispatchedUnverified, "iTerm dispatch through a degraded topology was not labeled unverified")
+
     let fallbackWorkspace = RecordingWorkspace()
     fallbackWorkspace.openResult = false
     let fallbackTarget = TerminalTarget(runner: RecordingProcessRunner(results: []), workspace: fallbackWorkspace, sleep: { _ in })

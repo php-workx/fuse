@@ -34,6 +34,7 @@ public enum TerminalTargetDegradation: Equatable, Sendable {
 public enum TerminalTargetResult: Equatable, Sendable {
     case focused
     case dispatched
+    case dispatchedUnverified
     case applicationFallback(TerminalTargetDegradation)
 }
 
@@ -169,7 +170,7 @@ public final class TerminalTarget {
         guard let url = components.url, workspace.open(url) else {
             return fallback(bundleIdentifier: "com.googlecode.iterm2", reason: .iTermDispatchFailed)
         }
-        return .dispatched
+        return metadata.hasExactTargetingDegradation ? .dispatchedUnverified : .dispatched
     }
 
     private func focusTerminal(_ metadata: TerminalTargetMetadata) -> TerminalTargetResult {
