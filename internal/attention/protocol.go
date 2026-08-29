@@ -128,12 +128,11 @@ func (client *protocolClient) write(message protocolMessage) error {
 func (client *protocolClient) read() {
 	reader := bufio.NewReader(client.connection)
 	for {
-		line, err := reader.ReadBytes('\n')
+		line, err := readProtocolLine(reader)
 		if err != nil {
-			if len(line) != 0 { client.fail(fmt.Errorf("notifier protocol: truncated line")) } else { client.fail(errProtocolClosed) }
+			if errors.Is(err, io.EOF) { client.fail(errProtocolClosed) } else { client.fail(err) }
 			return
 		}
-		if len(line) > maximumProtocolLineBytes { client.fail(fmt.Errorf("notifier protocol line exceeds %d bytes", maximumProtocolLineBytes)); return }
 		var message protocolMessage
 		if err := json.Unmarshal(line, &message); err != nil || message.Version != 1 || message.Type == "" {
 			client.fail(fmt.Errorf("invalid notifier protocol message"))
@@ -150,6 +149,18 @@ func (client *protocolClient) read() {
 			continue
 		}
 		client.onMessage(message)
+	}
+}
+
+func readProtocolLine(reader *bufio.Reader) ([]byte, error) {
+	line := make([]byte, 0, 1024)
+	for {
+		fragment, err := reader.ReadSlice('\n')
+		if len(line)+len(fragment) > maximumProtocolLineBytes { return nil, fmt.Errorf("notifier protocol line exceeds %d bytes", maximumProtocolLineBytes) }
+		line = append(line, fragment...)
+		if err == nil { return line, nil }
+		if errors.Is(err, bufio.ErrBufferFull) { continue }
+		return nil, err
 	}
 }
 
