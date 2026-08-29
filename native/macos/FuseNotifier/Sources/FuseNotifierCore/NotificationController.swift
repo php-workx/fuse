@@ -57,6 +57,12 @@ public final class NotificationController: @unchecked Sendable {
 
             center.postGenericNotification(id: id, title: Self.genericTitle, body: Self.genericBody) { [weak self] error in
                 guard let self else { return }
+                guard self.isAcceptingPostResult(for: id) else {
+                    if error == nil {
+                        self.center.removeNotifications(ids: [id]) {}
+                    }
+                    return
+                }
                 if error == nil {
                     self.sink.send(.result(requestID: requestID, operation: "post", id: id, status: "accepted"))
                 } else {
@@ -85,6 +91,12 @@ public final class NotificationController: @unchecked Sendable {
         guard !isClosing, requestID > highestRequestID else { return false }
         highestRequestID = requestID
         return true
+    }
+
+    private func isAcceptingPostResult(for id: String) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return !isClosing && ownedIDs.contains(id)
     }
 
     private func removeOwnedID(_ id: String) {

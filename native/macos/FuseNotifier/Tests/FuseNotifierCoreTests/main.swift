@@ -29,6 +29,28 @@ final class RecordingNotificationCenter: NotificationCenterClient {
     }
 }
 
+final class DeferredNotificationCenter: NotificationCenterClient {
+    var postedIDs: [String] = []
+    var removedIDs: [String] = []
+    private var postCompletion: (@Sendable (Error?) -> Void)?
+
+    func requestAuthorization() {}
+
+    func postGenericNotification(id: String, title: String, body: String, completion: @escaping @Sendable (Error?) -> Void) {
+        postedIDs.append(id)
+        postCompletion = completion
+    }
+
+    func removeNotifications(ids: [String], completion: @escaping @Sendable () -> Void) {
+        removedIDs.append(contentsOf: ids)
+        completion()
+    }
+
+    func completePost() {
+        postCompletion?(nil)
+    }
+}
+
 final class RecordingEventSink: EventSink, @unchecked Sendable {
     var events: [HelperEvent] = []
 
@@ -76,6 +98,15 @@ eofController.inputDidReachEOF()
 expect(eofCenter.removedIDs == ["approval-1"], "EOF did not remove owned notifications")
 expect(eofSink.events.last == .shutdownComplete, "EOF cleanup did not complete before termination")
 expect(terminationFlag.value, "EOF did not terminate the helper")
+
+let deferredCenter = DeferredNotificationCenter()
+let deferredSink = RecordingEventSink()
+let deferredController = NotificationController(center: deferredCenter, sink: deferredSink, terminate: {})
+deferredController.handle(.post(requestID: 2, id: "approval-1"))
+deferredController.inputDidReachEOF()
+deferredCenter.completePost()
+expect(!deferredSink.events.contains(.result(requestID: 2, operation: "post", id: "approval-1", status: "accepted")), "A post completion after EOF must not acknowledge an orphaned notification")
+expect(deferredCenter.removedIDs == ["approval-1", "approval-1"], "A late successful add must be removed after EOF cleanup")
 
 let monotonicCenter = RecordingNotificationCenter()
 let monotonicSink = RecordingEventSink()
