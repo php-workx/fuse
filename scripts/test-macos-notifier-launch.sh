@@ -84,7 +84,7 @@ if [[ -z $stable_bundle ]]; then
   notifier_pid=$DIRECT_NOTIFIER_PID
   direct_input=${DIRECT_NOTIFIER[1]}
   direct_output=${DIRECT_NOTIFIER[0]}
-  printf '%s\n' '{"version":1,"type":"hello","request_id":1,"client_version":"stage0-direct-diagnostic"}' >&"$direct_input"
+  printf '%s\n' '{"version":1,"type":"hello","request_id":1,"client_version":"stage0-direct-diagnostic","terminal":{"terminal_program":"Apple_Terminal","terminal_program_version":"2.14","iterm_session_id":null,"terminal_tty":"/dev/ttys001","ghostty_title_marker":null,"exact_targeting_degraded":false}}' >&"$direct_input"
   IFS= read -r -t 10 direct_ready <&"$direct_output"
   [[ $direct_ready == *'"type":"ready"'* ]] || { printf 'direct diagnostic did not become ready\n' >&2; exit 1; }
   printf '%s\n' '{"version":1,"type":"post","request_id":2,"id":"stage0-direct-diagnostic","title":"Fuse approval required","body":"Open Fuse to review this request.","sound":false}' >&"$direct_input"
@@ -167,7 +167,7 @@ try:
             raise SystemExit("unexpected notifier response: " + response.decode("utf-8", "replace"))
         return response
 
-    request(b'{"version":1,"type":"hello","request_id":1,"client_version":"stage0-fallback-smoke"}', b'"type":"ready"')
+    request(b'{"version":1,"type":"hello","request_id":1,"client_version":"stage0-fallback-smoke","terminal":{"terminal_program":"Apple_Terminal","terminal_program_version":"2.14","iterm_session_id":null,"terminal_tty":"/dev/ttys001","ghostty_title_marker":null,"exact_targeting_degraded":false}}', b'"type":"ready"')
     post_accepted = request(b'{"version":1,"type":"post","request_id":2,"id":"stage0-fallback-smoke","title":"Fuse approval required","body":"Open Fuse to review this request.","sound":false}', b'"status":"accepted"')
     if b'"type":"result"' not in post_accepted:
         raise SystemExit("post did not acknowledge desired notification state: " + post_accepted.decode("utf-8", "replace"))
