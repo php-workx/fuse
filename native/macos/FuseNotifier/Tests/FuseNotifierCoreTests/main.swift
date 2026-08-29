@@ -2,127 +2,90 @@ import Foundation
 import FuseNotifierCore
 import FuseNotifierProtocol
 
-func expect(_ condition: @autoclosure () -> Bool, _ message: String) {
-    if !condition() {
-        fatalError(message)
-    }
+func expect(_ condition: @autoclosure () -> Bool, _ message: String) { if !condition() { fatalError(message) } }
+func post(_ requestID: UInt64, _ id: String, sound: Bool = false) -> HelperCommand { .post(requestID: requestID, notice: Notice(id: id, title: "untrusted title", subtitle: nil, body: "untrusted body", sound: sound)) }
+
+enum FakeError: Error { case failed }
+final class BoolBox: @unchecked Sendable { var value = false }
+final class PresentationBox: @unchecked Sendable { var value: PresentationOptions? }
+final class FakeNotificationCenter: NotificationCenterClient, @unchecked Sendable {
+    var settings: NotificationSettings; var authorizationRequests = 0; var posted: [NotificationRequest] = []; var removed: [String] = []; var deliveredIDs: [String] = []; var postError: Error?; private var authorizationCompletion: ((Bool, Error?) -> Void)?
+    init(settings: NotificationSettings) { self.settings = settings }
+    func getSettings(completion: @escaping @Sendable (NotificationSettings) -> Void) { completion(settings) }
+    func requestAuthorization(completion: @escaping @Sendable (Bool, Error?) -> Void) { authorizationRequests += 1; authorizationCompletion = completion }
+    func post(_ request: NotificationRequest, completion: @escaping @Sendable (Error?) -> Void) { posted.append(request); completion(postError) }
+    func removeNotifications(ids: [String], completion: @escaping @Sendable () -> Void) { removed.append(contentsOf: ids); completion() }
+    func deliveredNotificationIDs(completion: @escaping @Sendable ([String]) -> Void) { completion(deliveredIDs) }
+    func resolveAuthorization(granted: Bool) { authorizationCompletion?(granted, nil) }
+}
+final class RecordingSink: EventSink, @unchecked Sendable {
+    var events: [HelperEvent] = []; let observe: (HelperEvent) -> Void; let shouldThrow: Bool
+    init(shouldThrow: Bool = false, observe: @escaping (HelperEvent) -> Void = { _ in }) { self.shouldThrow = shouldThrow; self.observe = observe }
+    func send(_ event: HelperEvent) throws { observe(event); if shouldThrow { throw FakeError.failed }; events.append(event) }
 }
 
-final class RecordingNotificationCenter: NotificationCenterClient {
-    var postedIDs: [String] = []
-    var removedIDs: [String] = []
-    var lastTitle: String?
-    var lastBody: String?
+let deferredCenter = FakeNotificationCenter(settings: .notDetermined)
+let deferredSink = RecordingSink()
+let deferred = NotificationController(center: deferredCenter, sink: deferredSink, terminate: {})
+deferred.handle(post(2, "approval-1"))
+expect(deferredCenter.authorizationRequests == 1 && deferredCenter.posted.isEmpty, "Post did not defer while authorization was undecided")
+deferred.handle(.remove(requestID: 3, id: "approval-1"))
+deferredCenter.settings = .authorized(alerts: .enabled, sound: .enabled)
+deferredCenter.resolveAuthorization(granted: true)
+expect(deferredCenter.posted.isEmpty && deferredCenter.removed == ["approval-1"], "Remove during permission prompt posted a stale notification")
 
-    func requestAuthorization() {}
+let duplicateCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled))
+let duplicateSink = RecordingSink()
+let duplicate = NotificationController(center: duplicateCenter, sink: duplicateSink, terminate: {})
+duplicate.handle(post(2, "approval-1")); duplicate.handle(post(3, "approval-1"))
+expect(duplicateCenter.posted.map(\.id) == ["approval-1"], "Duplicate ID was posted twice")
+expect(duplicateSink.events.contains(.error(requestID: 3, operation: "post", id: "approval-1", code: "duplicate_id", message: "")), "Duplicate ID was not rejected")
+expect(duplicateCenter.posted.first?.title == NotificationController.genericTitle && duplicateCenter.posted.first?.body == NotificationController.genericBody, "Untrusted notification copy escaped the controller")
 
-    func postGenericNotification(id: String, title: String, body: String, completion: @escaping @Sendable (Error?) -> Void) {
-        postedIDs.append(id)
-        lastTitle = title
-        lastBody = body
-        completion(nil)
-    }
+let disabledCenter = FakeNotificationCenter(settings: .notDetermined)
+let disabledSink = RecordingSink()
+let disabled = NotificationController(center: disabledCenter, sink: disabledSink, terminate: {})
+disabled.handle(post(2, "approval-1")); disabledCenter.settings = .authorized(alerts: .disabled, sound: .enabled); disabledCenter.resolveAuthorization(granted: true)
+expect(disabledCenter.posted.isEmpty, "Disabled alerts still posted")
+expect(disabledSink.events.contains(.error(requestID: 2, operation: "post", id: "approval-1", code: "notifications_not_allowed", message: "alerts are disabled")), "Disabled alerts were not reported")
 
-    func removeNotifications(ids: [String], completion: @escaping @Sendable () -> Void) {
-        removedIDs.append(contentsOf: ids)
-        completion()
-    }
-}
+let failureCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); failureCenter.postError = FakeError.failed
+let failureSink = RecordingSink(); let failure = NotificationController(center: failureCenter, sink: failureSink, terminate: {})
+failure.handle(post(2, "approval-1")); failure.activate(id: "approval-1")
+expect(failureSink.events.contains(.error(requestID: 2, operation: "post", id: "approval-1", code: "notification_post_failed", message: "")), "Post failure was not reported")
+expect(!failureSink.events.contains(.activated(id: "approval-1")), "Failed notification activation was routed")
 
-final class DeferredNotificationCenter: NotificationCenterClient {
-    var postedIDs: [String] = []
-    var removedIDs: [String] = []
-    private var postCompletion: (@Sendable (Error?) -> Void)?
+let reconcileCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); reconcileCenter.deliveredIDs = ["live", "stale"]
+let reconcileSink = RecordingSink(); let reconcile = NotificationController(center: reconcileCenter, sink: reconcileSink, terminate: {})
+reconcile.handle(.reconcile(requestID: 2, currentIDs: ["live"]))
+expect(reconcileCenter.removed == ["stale"], "Reconcile did not remove only stale delivered notifications")
+expect(reconcileSink.events.contains(.reconciled(requestID: 2, deliveredCurrentIDs: ["live"])), "Reconcile did not report remaining delivered IDs")
 
-    func requestAuthorization() {}
+let actionCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); let completed = BoolBox()
+let actionSink = RecordingSink(observe: { event in if case .activated = event { expect(completed.value, "Output preceded notification delegate completion") } })
+let action = NotificationController(center: actionCenter, sink: actionSink, terminate: {})
+action.handle(post(2, "approval-1")); action.didReceiveNotificationAction(identifier: "default", pendingID: "approval-1") { completed.value = true }; action.didReceiveNotificationAction(identifier: "default", pendingID: "unknown") {}
+expect(actionSink.events.contains(.activated(id: "approval-1")), "Default action was not routed")
+expect(actionSink.events.filter { if case .activated = $0 { return true }; return false }.count == 1, "Unknown action routed activation")
+let presentation = PresentationBox(); action.willPresent { presentation.value = $0 }
+expect(presentation.value == [.banner, .list], "Foreground presentation did not complete")
 
-    func postGenericNotification(id: String, title: String, body: String, completion: @escaping @Sendable (Error?) -> Void) {
-        postedIDs.append(id)
-        postCompletion = completion
-    }
+let soundCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); let sound = NotificationController(center: soundCenter, sink: RecordingSink(), terminate: {})
+sound.handle(post(2, "approval-1", sound: true)); let soundPresentation = PresentationBox(); sound.willPresent { soundPresentation.value = $0 }
+expect(soundPresentation.value == [.banner, .list, .sound], "Foreground sound was not gated by effective setting")
 
-    func removeNotifications(ids: [String], completion: @escaping @Sendable () -> Void) {
-        removedIDs.append(contentsOf: ids)
-        completion()
-    }
+let brokenCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); let terminated = BoolBox(); let broken = NotificationController(center: brokenCenter, sink: RecordingSink(shouldThrow: true), terminate: { terminated.value = true })
+broken.handle(post(2, "approval-1"))
+expect(brokenCenter.removed == ["approval-1"] && terminated.value, "Broken output did not shut down cleanly")
 
-    func completePost() {
-        postCompletion?(nil)
-    }
-}
-
-final class RecordingEventSink: EventSink, @unchecked Sendable {
-    var events: [HelperEvent] = []
-
-    func send(_ event: HelperEvent) {
-        events.append(event)
-    }
-}
-
-final class TerminationFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var terminated = false
-
-    var value: Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return terminated
-    }
-
-    func set() {
-        lock.lock()
-        terminated = true
-        lock.unlock()
-    }
-}
-
-let center = RecordingNotificationCenter()
-let sink = RecordingEventSink()
-let controller = NotificationController(center: center, sink: sink, terminate: {})
-
-controller.handle(.post(requestID: 2, id: "approval-1"))
-expect(center.postedIDs == ["approval-1"], "Post did not schedule the owned notification")
-expect(center.lastTitle == "Fuse approval required", "Notification title is not generic")
-expect(center.lastBody == "Open Fuse to review this request.", "Notification body is not generic")
-expect(sink.events == [.result(requestID: 2, operation: "post", id: "approval-1", status: "accepted")], "Post was not acknowledged")
-
-controller.activate(id: "approval-1")
-expect(sink.events.last == .activated(id: "approval-1"), "Owned activation was not emitted")
-
-let terminationFlag = TerminationFlag()
-let eofCenter = RecordingNotificationCenter()
-let eofSink = RecordingEventSink()
-let eofController = NotificationController(center: eofCenter, sink: eofSink, terminate: { terminationFlag.set() })
-eofController.handle(.post(requestID: 2, id: "approval-1"))
-eofController.inputDidReachEOF()
-expect(eofCenter.removedIDs == ["approval-1"], "EOF did not remove owned notifications")
-expect(eofSink.events.last == .shutdownComplete, "EOF cleanup did not complete before termination")
-expect(terminationFlag.value, "EOF did not terminate the helper")
-
-let deferredCenter = DeferredNotificationCenter()
-let deferredSink = RecordingEventSink()
-let deferredController = NotificationController(center: deferredCenter, sink: deferredSink, terminate: {})
-deferredController.handle(.post(requestID: 2, id: "approval-1"))
-deferredController.inputDidReachEOF()
-deferredCenter.completePost()
-expect(!deferredSink.events.contains(.result(requestID: 2, operation: "post", id: "approval-1", status: "accepted")), "A post completion after EOF must not acknowledge an orphaned notification")
-expect(deferredCenter.removedIDs == ["approval-1", "approval-1"], "A late successful add must be removed after EOF cleanup")
-
-let monotonicCenter = RecordingNotificationCenter()
-let monotonicSink = RecordingEventSink()
-let monotonicController = NotificationController(center: monotonicCenter, sink: monotonicSink, terminate: {})
-monotonicController.handle(.hello(requestID: 2, clientVersion: "test"))
-monotonicController.handle(.post(requestID: 2, id: "approval-1"))
-expect(monotonicCenter.postedIDs.isEmpty, "Non-monotonic request posted a notification")
-expect(monotonicSink.events.last == .error(requestID: 2, operation: "post", id: "approval-1", code: "non_monotonic_request_id"), "Non-monotonic request did not report a protocol error")
-
-let socketLaunch = try LaunchConfiguration.parse([
-    "--connect", "/tmp/fuse-notifier/socket", "--token", String(repeating: "a", count: 64),
-])
-expect(socketLaunch == .socket(path: "/tmp/fuse-notifier/socket", token: String(repeating: "a", count: 64)), "Socket launch arguments did not parse")
+let eofCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); let eofSink = RecordingSink(); let eofTerminated = BoolBox(); let eof = NotificationController(center: eofCenter, sink: eofSink, terminate: { eofTerminated.value = true })
+eof.handle(post(2, "approval-1")); eof.inputDidReachEOF()
+expect(eofCenter.removed == ["approval-1"] && eofSink.events.last == .shutdownComplete && eofTerminated.value, "EOF did not clean up before termination")
 
 do {
-    _ = try LaunchConfiguration.parse(["--connect", "/tmp/fuse-notifier/socket", "--token", "short"])
-    fatalError("Non-256-bit socket token parsed")
-} catch LaunchConfigurationError.invalidToken {
+    let token = String(repeating: "a", count: 64)
+    let launch = try LaunchConfiguration.parse(["--connect", "/tmp/fuse-notifier/socket", "--token", token])
+    expect(launch == .socket(path: "/tmp/fuse-notifier/socket", token: token), "Socket launch configuration changed")
+} catch {
+    fatalError("Socket launch configuration failed: \(error)")
 }

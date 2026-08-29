@@ -54,8 +54,8 @@ final class SocketTransport: HelperTransport, @unchecked Sendable {
         transport.start(onCommand: onCommand, onEOF: onEOF)
     }
 
-    func send(_ event: HelperEvent) {
-        transport.send(event)
+    func send(_ event: HelperEvent) throws {
+        try transport.send(event)
     }
 
     private static func readLine(from handle: FileHandle, maximumBytes: Int) throws -> Data? {

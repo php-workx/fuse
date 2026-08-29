@@ -41,10 +41,10 @@ final class StandardIOTransport: HelperTransport, @unchecked Sendable {
         }
     }
 
-    func send(_ event: HelperEvent) {
-        guard let line = try? JSONLineCodec.encode(event) else { return }
-        writeQueue.sync {
-            output.write(line)
+    func send(_ event: HelperEvent) throws {
+        let line = try JSONLineCodec.encode(event)
+        try writeQueue.sync {
+            try output.write(contentsOf: line)
         }
     }
 

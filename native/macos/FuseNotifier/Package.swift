@@ -26,5 +26,10 @@ let package = Package(
             dependencies: ["FuseNotifierCore", "FuseNotifierProtocol"],
             path: "Tests/FuseNotifierCoreTests"
         ),
+        .testTarget(
+            name: "FuseNotifierSwiftTesting",
+            dependencies: ["FuseNotifierCore", "FuseNotifierProtocol"],
+            path: "Tests/FuseNotifierSwiftTesting"
+        ),
     ]
 )
