@@ -16,6 +16,8 @@ func decode(_ line: String) throws -> HelperCommand { try JSONLineCodec.decodeCo
 do {
     let post = try decode(#"{"version":1,"type":"post","request_id":2,"id":"approval-1","title":"untrusted","subtitle":"ignored","body":"untrusted","sound":true}"#)
     expect(post == .post(requestID: 2, notice: Notice(id: "approval-1", title: "untrusted", subtitle: "ignored", body: "untrusted", sound: true)), "Post did not decode")
+    let hello = try decode(#"{"version":1,"type":"hello","request_id":1,"client_version":"test","terminal":{"terminal_program":"Apple_Terminal","terminal_program_version":"2.14","iterm_session_id":null,"terminal_tty":"/dev/ttys001","ghostty_title_marker":null,"exact_targeting_degraded":false}}"#)
+    expect(hello == .hello(requestID: 1, clientVersion: "test", terminal: HelloTerminal(terminalProgram: "Apple_Terminal", terminalProgramVersion: "2.14", iTermSessionID: nil, terminalTTY: "/dev/ttys001", ghosttyTitleMarker: nil, hasExactTargetingDegradation: false)), "Hello terminal metadata did not decode")
     let remove = try decode(#"{"version":1,"type":"remove","request_id":3,"id":"approval-1"}"#)
     let reconcile = try decode(#"{"version":1,"type":"reconcile","request_id":4,"current_ids":["approval-1"]}"#)
     let focus = try decode(#"{"version":1,"type":"focus","request_id":5}"#)

@@ -16,8 +16,17 @@ public enum JSONLineCodec {
         switch wire.type {
         case "hello":
             let clientVersion = try required(wire.clientVersion, field: "client_version")
+            let wireTerminal = try required(wire.terminal, field: "terminal")
+            let terminalProgram = try required(wireTerminal.terminalProgram, field: "terminal.terminal_program")
+            let terminalProgramVersion = try required(wireTerminal.terminalProgramVersion, field: "terminal.terminal_program_version")
+            let degraded = try required(wireTerminal.hasExactTargetingDegradation, field: "terminal.exact_targeting_degraded")
             try validate(clientVersion, field: "client_version", display: true)
-            return .hello(requestID: wire.requestID, clientVersion: clientVersion)
+            try validate(terminalProgram, field: "terminal.terminal_program", display: true)
+            try validate(terminalProgramVersion, field: "terminal.terminal_program_version", display: true)
+            if let value = wireTerminal.iTermSessionID { try validate(value, field: "terminal.iterm_session_id", display: true) }
+            if let value = wireTerminal.terminalTTY { try validate(value, field: "terminal.terminal_tty", display: true) }
+            if let value = wireTerminal.ghosttyTitleMarker { try validate(value, field: "terminal.ghostty_title_marker", display: true) }
+            return .hello(requestID: wire.requestID, clientVersion: clientVersion, terminal: HelloTerminal(terminalProgram: terminalProgram, terminalProgramVersion: terminalProgramVersion, iTermSessionID: wireTerminal.iTermSessionID, terminalTTY: wireTerminal.terminalTTY, ghosttyTitleMarker: wireTerminal.ghosttyTitleMarker, hasExactTargetingDegradation: degraded))
         case "post":
             let id = try required(wire.id, field: "id")
             let title = try required(wire.title, field: "title")

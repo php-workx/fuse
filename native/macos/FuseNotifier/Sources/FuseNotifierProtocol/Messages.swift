@@ -29,8 +29,18 @@ public struct Notice: Equatable, Sendable {
     }
 }
 
+public struct HelloTerminal: Equatable, Sendable {
+    public let terminalProgram: String
+    public let terminalProgramVersion: String
+    public let iTermSessionID: String?
+    public let terminalTTY: String?
+    public let ghosttyTitleMarker: String?
+    public let hasExactTargetingDegradation: Bool
+    public init(terminalProgram: String, terminalProgramVersion: String, iTermSessionID: String?, terminalTTY: String?, ghosttyTitleMarker: String?, hasExactTargetingDegradation: Bool) { self.terminalProgram = terminalProgram; self.terminalProgramVersion = terminalProgramVersion; self.iTermSessionID = iTermSessionID; self.terminalTTY = terminalTTY; self.ghosttyTitleMarker = ghosttyTitleMarker; self.hasExactTargetingDegradation = hasExactTargetingDegradation }
+}
+
 public enum HelperCommand: Equatable, Sendable {
-    case hello(requestID: UInt64, clientVersion: String)
+    case hello(requestID: UInt64, clientVersion: String, terminal: HelloTerminal)
     case post(requestID: UInt64, notice: Notice)
     case remove(requestID: UInt64, id: String)
     case reconcile(requestID: UInt64, currentIDs: [String])
@@ -40,7 +50,7 @@ public enum HelperCommand: Equatable, Sendable {
 
     public var requestID: UInt64 {
         switch self {
-        case let .hello(requestID, _), let .post(requestID, _), let .remove(requestID, _), let .reconcile(requestID, _), let .focus(requestID), let .removeAll(requestID), let .shutdown(requestID): requestID
+        case let .hello(requestID, _, _), let .post(requestID, _), let .remove(requestID, _), let .reconcile(requestID, _), let .focus(requestID), let .removeAll(requestID), let .shutdown(requestID): requestID
         }
     }
 
@@ -113,6 +123,11 @@ public enum HelperEvent: Codable, Equatable, Sendable {
 }
 
 struct WireCommand: Decodable {
-    let version: Int; let type: String; let requestID: UInt64; let clientVersion: String?; let id: String?; let title: String?; let subtitle: String?; let body: String?; let sound: Bool?; let currentIDs: [String]?
-    enum CodingKeys: String, CodingKey { case version, type, requestID = "request_id", clientVersion = "client_version", id, title, subtitle, body, sound, currentIDs = "current_ids" }
+    let version: Int; let type: String; let requestID: UInt64; let clientVersion: String?; let terminal: WireTerminal?; let id: String?; let title: String?; let subtitle: String?; let body: String?; let sound: Bool?; let currentIDs: [String]?
+    enum CodingKeys: String, CodingKey { case version, type, requestID = "request_id", clientVersion = "client_version", terminal, id, title, subtitle, body, sound, currentIDs = "current_ids" }
+}
+
+struct WireTerminal: Decodable {
+    let terminalProgram: String?; let terminalProgramVersion: String?; let iTermSessionID: String?; let terminalTTY: String?; let ghosttyTitleMarker: String?; let hasExactTargetingDegradation: Bool?
+    enum CodingKeys: String, CodingKey { case terminalProgram = "terminal_program", terminalProgramVersion = "terminal_program_version", iTermSessionID = "iterm_session_id", terminalTTY = "terminal_tty", ghosttyTitleMarker = "ghostty_title_marker", hasExactTargetingDegradation = "exact_targeting_degraded" }
 }

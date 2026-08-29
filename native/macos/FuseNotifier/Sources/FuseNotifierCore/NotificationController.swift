@@ -45,6 +45,7 @@ public final class NotificationController: @unchecked Sendable {
     private let center: any NotificationCenterClient
     private let sink: any EventSink
     private let terminate: @Sendable () -> Void
+    private let terminalTarget: TerminalTarget
     private let lock = NSLock()
     private var highestRequestID: UInt64 = 0
     private var desired: [String: DesiredNotice] = [:]
@@ -54,19 +55,21 @@ public final class NotificationController: @unchecked Sendable {
     private var inFlightPostCount = 0
     private var shutdownCleanupFinished = false
     private var shutdownCompleted = false
+    private var terminalMetadata: TerminalTargetMetadata?
     private var isClosing = false
 
-    public init(center: any NotificationCenterClient, sink: any EventSink, terminate: @escaping @Sendable () -> Void) { self.center = center; self.sink = sink; self.terminate = terminate }
+    public init(center: any NotificationCenterClient, sink: any EventSink, terminalTarget: TerminalTarget = TerminalTarget(), terminate: @escaping @Sendable () -> Void) { self.center = center; self.sink = sink; self.terminalTarget = terminalTarget; self.terminate = terminate }
 
     public func handle(_ command: HelperCommand) {
         guard accept(command.requestID) else { emit(.error(requestID: command.requestID, operation: command.operation, id: commandID(command), code: "non_monotonic_request_id", message: "")); return }
         switch command {
-        case let .hello(requestID, _):
+        case let .hello(requestID, _, terminal):
+            lock.lock(); terminalMetadata = TerminalTargetMetadata(terminalProgram: terminal.terminalProgram, terminalProgramVersion: terminal.terminalProgramVersion, iTermSessionID: terminal.iTermSessionID, terminalTTY: terminal.terminalTTY, ghosttyTitleMarker: terminal.ghosttyTitleMarker, hasExactTargetingDegradation: terminal.hasExactTargetingDegradation); lock.unlock()
             center.getSettings { [weak self] settings in self?.emitReady(requestID: requestID, settings: settings) }
         case let .post(requestID, notice): beginPost(requestID: requestID, notice: notice)
         case let .remove(requestID, id): remove(requestID: requestID, id: id)
         case let .reconcile(requestID, currentIDs): reconcile(requestID: requestID, currentIDs: currentIDs)
-        case let .focus(requestID): emit(.focusResult(requestID: requestID, mode: "unavailable", detail: "terminal focus is unavailable"))
+        case let .focus(requestID): focus(requestID: requestID)
         case let .removeAll(requestID): removeAll(requestID: requestID)
         case .shutdown: close()
         }
@@ -164,6 +167,16 @@ public final class NotificationController: @unchecked Sendable {
         center.removeNotifications(ids: [id]) { [weak self] in self?.emit(.result(requestID: requestID, operation: "remove", id: id, status: "ok")) }
     }
 
+    private func focus(requestID: UInt64) {
+        lock.lock(); let metadata = terminalMetadata; lock.unlock()
+        guard let metadata else { emit(.focusResult(requestID: requestID, mode: "application_fallback", detail: "terminal metadata unavailable")); return }
+        switch terminalTarget.focus(metadata) {
+        case .focused: emit(.focusResult(requestID: requestID, mode: "exact", detail: "terminal focused"))
+        case .dispatched: emit(.focusResult(requestID: requestID, mode: "dispatched", detail: "terminal focus dispatched"))
+        case .dispatchedUnverified: emit(.focusResult(requestID: requestID, mode: "dispatched", detail: "terminal focus dispatched without exact verification"))
+        case let .applicationFallback(reason): emit(.focusResult(requestID: requestID, mode: "application_fallback", detail: String(describing: reason)))
+        }
+    }
     private func removeAll(requestID: UInt64) {
         lock.lock(); let ids = Array(desired.keys); desired.removeAll(); updateSoundEnabledLocked(); lock.unlock()
         center.removeNotifications(ids: ids) { [weak self] in self?.emit(.result(requestID: requestID, operation: "remove_all", id: "", status: "ok")) }
