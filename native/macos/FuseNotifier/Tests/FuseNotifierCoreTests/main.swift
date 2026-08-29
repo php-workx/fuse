@@ -121,3 +121,5 @@ do {
 } catch {
     fatalError("Socket launch configuration failed: \(error)")
 }
+
+runTerminalTargetTests()
