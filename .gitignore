@@ -13,6 +13,8 @@ bin/
 coverage.out
 coverage.html
 
+# Swift Package Manager
+.build/
 # Firebase
 firebase-debug.log
 
