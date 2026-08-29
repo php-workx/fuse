@@ -55,4 +55,6 @@ do {
     }
     expectEventDecodingFailure(#"{"type":"activated","id":"id"}"#)
     expectEventDecodingFailure(#"{"version":2,"type":"activated","id":"id"}"#)
+    let directHarnessPost = try decode(#"{"version":1,"type":"post","request_id":2,"id":"stage0-direct-diagnostic","title":"Fuse approval required","body":"Open Fuse to review this request.","sound":false}"#)
+    expect(directHarnessPost == .post(requestID: 2, notice: Notice(id: "stage0-direct-diagnostic", title: "Fuse approval required", subtitle: nil, body: "Open Fuse to review this request.", sound: false)), "Direct smoke post frame drifted from the v1 protocol")
 } catch { fatalError("Protocol behavior test failed: \(error)") }

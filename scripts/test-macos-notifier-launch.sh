@@ -87,12 +87,21 @@ if [[ -z $stable_bundle ]]; then
   printf '%s\n' '{"version":1,"type":"hello","request_id":1,"client_version":"stage0-direct-diagnostic"}' >&"$direct_input"
   IFS= read -r -t 10 direct_ready <&"$direct_output"
   [[ $direct_ready == *'"type":"ready"'* ]] || { printf 'direct diagnostic did not become ready\n' >&2; exit 1; }
-  printf '%s\n' '{"version":1,"type":"post","request_id":2,"id":"stage0-direct-diagnostic"}' >&"$direct_input"
-  IFS= read -r -t 10 direct_post <&"$direct_output"
-  [[ $direct_post == *'"code":"notification_post_failed"'* ]] || {
-    printf 'direct diagnostic did not reproduce the expected notification failure: %s\n' "$direct_post" >&2
+  printf '%s\n' '{"version":1,"type":"post","request_id":2,"id":"stage0-direct-diagnostic","title":"Fuse approval required","body":"Open Fuse to review this request.","sound":false}' >&"$direct_input"
+  IFS= read -r -t 10 direct_accepted <&"$direct_output"
+  [[ $direct_accepted == *'"type":"result"'* && $direct_accepted == *'"status":"accepted"'* && $direct_accepted == *'"request_id":2'* ]] || {
+    printf 'direct diagnostic did not acknowledge desired notification state: %s\n' "$direct_accepted" >&2
     exit 1
   }
+  IFS= read -r -t 10 direct_delivery <&"$direct_output"
+  if [[ $direct_delivery == *'"type":"posted"'* ]]; then
+    printf 'direct diagnostic delivered notification after accepted desired-state acknowledgement\n' >&2
+  elif [[ $direct_delivery == *'"code":"notification_post_failed"'* ]]; then
+    printf 'direct diagnostic observed unavailable notification authorization after accepted desired-state acknowledgement\n' >&2
+  else
+    printf 'direct diagnostic produced an unexpected delivery outcome: %s\n' "$direct_delivery" >&2
+    exit 1
+  fi
   eval "exec ${direct_input}>&-"
   IFS= read -r -t 10 direct_cleanup <&"$direct_output"
   [[ $direct_cleanup == *'"type":"shutdown_complete"'* ]] || { printf 'direct diagnostic did not clean up\n' >&2; exit 1; }
@@ -159,10 +168,13 @@ try:
         return response
 
     request(b'{"version":1,"type":"hello","request_id":1,"client_version":"stage0-fallback-smoke"}', b'"type":"ready"')
-    post_response = request(b'{"version":1,"type":"post","request_id":2,"id":"stage0-fallback-smoke"}', b'"request_id":2')
-    notifications_posted = b'"status":"accepted"' in post_response
-    if not notifications_posted and b'"code":"notification_post_failed"' not in post_response:
-        raise SystemExit("unexpected post acknowledgement: " + post_response.decode("utf-8", "replace"))
+    post_accepted = request(b'{"version":1,"type":"post","request_id":2,"id":"stage0-fallback-smoke","title":"Fuse approval required","body":"Open Fuse to review this request.","sound":false}', b'"status":"accepted"')
+    if b'"type":"result"' not in post_accepted:
+        raise SystemExit("post did not acknowledge desired notification state: " + post_accepted.decode("utf-8", "replace"))
+    post_delivery = read_line()
+    notifications_posted = b'"type":"posted"' in post_delivery
+    if not notifications_posted and b'"code":"notification_post_failed"' not in post_delivery:
+        raise SystemExit("unexpected post delivery outcome: " + post_delivery.decode("utf-8", "replace"))
 
     if notifications_posted and interactive == "true":
         print("Manual click check: click the visible generic “Fuse approval required” notification now.", file=sys.stderr)

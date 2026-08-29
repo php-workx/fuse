@@ -70,6 +70,7 @@ let failureCenter = FakeNotificationCenter(settings: .authorized(alerts: .enable
 let failureSink = RecordingSink(); let failure = NotificationController(center: failureCenter, sink: failureSink, terminate: {})
 failure.handle(post(2, "approval-1")); failure.activate(id: "approval-1")
 expect(failureSink.events.contains(.error(requestID: 2, operation: "post", id: "approval-1", code: "notification_post_failed", message: "")), "Post failure was not reported")
+expect(failureSink.events.prefix(2).elementsEqual([.result(requestID: 2, operation: "post", id: "approval-1", status: "accepted"), .error(requestID: 2, operation: "post", id: "approval-1", code: "notification_post_failed", message: "")]), "Post failure did not follow the accepted desired-state acknowledgement")
 expect(!failureSink.events.contains(.activated(id: "approval-1")), "Failed notification activation was routed")
 
 let reconcileCenter = FakeNotificationCenter(settings: .authorized(alerts: .enabled, sound: .enabled)); reconcileCenter.deliveredIDs = ["live", "stale"]
