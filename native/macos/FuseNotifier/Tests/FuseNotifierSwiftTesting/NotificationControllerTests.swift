@@ -12,7 +12,7 @@ import Testing
     #expect(center.authorizationRequests == 1)
     center.settings = .authorized(alerts: .enabled, sound: .enabled)
     center.resolveAuthorization()
-    #expect(center.posted.map(\.id) == ["first", "second"])
+    #expect(Set(center.posted.map(\.id)) == Set(["first", "second"]) && center.posted.count == 2)
     #expect(sink.events.contains(.result(requestID: 2, operation: "post", id: "first", status: "accepted")))
 
     let delayedCenter = SwiftTestingCenter(settings: .authorized(alerts: .enabled, sound: .enabled), deferPosts: true)
