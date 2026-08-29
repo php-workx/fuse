@@ -25,6 +25,49 @@ func TestDefaultConfig_RelaxedProfile(t *testing.T) {
 	}
 }
 
+func TestProfileDefaults_EnableNotifications(t *testing.T) {
+	for _, profile := range []string{ProfileRelaxed, ProfileBalanced, ProfileStrict, ProfileCustom} {
+		cfg := ProfileDefaults(profile)
+		if !cfg.Notifications.Enabled {
+			t.Errorf("%s Notifications.Enabled = false, want true", profile)
+		}
+		if !cfg.Notifications.Sound {
+			t.Errorf("%s Notifications.Sound = false, want true", profile)
+		}
+	}
+}
+
+func TestLoadConfig_NotificationsExplicitFalseOverridesDefaults(t *testing.T) {
+	path := writeConfigFixture(t, `
+notifications:
+  enabled: false
+  sound: false
+`)
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Notifications.Enabled {
+		t.Fatal("Notifications.Enabled = true, want false")
+	}
+	if cfg.Notifications.Sound {
+		t.Fatal("Notifications.Sound = true, want false")
+	}
+}
+
+func TestLoadConfig_MalformedNotificationsReturnsError(t *testing.T) {
+	path := writeConfigFixture(t, `
+notifications:
+  enabled: not-a-bool
+`)
+
+	cfg, err := LoadConfig(path)
+	if err == nil {
+		t.Fatalf("LoadConfig() error = nil, want malformed notifications error; cfg=%#v", cfg)
+	}
+}
+
 func TestLoadConfig_NoFileUsesRelaxedDefaults(t *testing.T) {
 	cfg, err := LoadConfig(filepath.Join(t.TempDir(), "missing.yaml"))
 	if err != nil {

@@ -34,9 +34,23 @@ func seedEvents(t *testing.T, d *db.DB, n int) {
 	}
 }
 
+func TestNewModelRetainsNotificationOptions(t *testing.T) {
+	d := openTestDB(t)
+	options := NewNotificationOptions(false, true)
+
+	m := NewModel(d, "enabled", nil, options)
+
+	if m.notifications.Enabled() {
+		t.Fatal("notification options enabled = true, want false")
+	}
+	if !m.notifications.Sound() {
+		t.Fatal("notification options sound = false, want true")
+	}
+}
+
 func TestModel_InitReturnsTick(t *testing.T) {
 	d := openTestDB(t)
-	m := NewModel(d, "dryrun", nil)
+	m := NewModel(d, "dryrun", nil, NotificationOptions{})
 	cmd := m.Init()
 	if cmd == nil {
 		t.Fatal("Init() should return a tick command, got nil")
@@ -47,7 +61,7 @@ func TestModel_TickFetchesData(t *testing.T) {
 	d := openTestDB(t)
 	seedEvents(t, d, 3)
 
-	m := NewModel(d, "enabled", nil)
+	m := NewModel(d, "enabled", nil, NotificationOptions{})
 	m.width = 120
 	m.height = 40
 	m.events.SetSize(120, 37)
@@ -83,7 +97,7 @@ func TestModel_StaleResultDiscarded(t *testing.T) {
 	d := openTestDB(t)
 	seedEvents(t, d, 1)
 
-	m := NewModel(d, "enabled", nil)
+	m := NewModel(d, "enabled", nil, NotificationOptions{})
 	m.width = 120
 	m.height = 40
 	m.events.SetSize(120, 37)
@@ -109,7 +123,7 @@ func TestModel_StaleResultDiscarded(t *testing.T) {
 
 func TestModel_ViewSwitching(t *testing.T) {
 	d := openTestDB(t)
-	m := NewModel(d, "dryrun", nil)
+	m := NewModel(d, "dryrun", nil, NotificationOptions{})
 	m.width = 80
 	m.height = 24
 
@@ -150,7 +164,7 @@ func TestModel_ErrorPreservesData(t *testing.T) {
 	d := openTestDB(t)
 	seedEvents(t, d, 2)
 
-	m := NewModel(d, "enabled", nil)
+	m := NewModel(d, "enabled", nil, NotificationOptions{})
 	m.width = 120
 	m.height = 40
 	m.events.SetSize(120, 37)
@@ -182,7 +196,7 @@ func TestModel_ErrorPreservesData(t *testing.T) {
 
 func TestModel_DetailPausesPolling(t *testing.T) {
 	d := openTestDB(t)
-	m := NewModel(d, "dryrun", nil)
+	m := NewModel(d, "dryrun", nil, NotificationOptions{})
 	m.width = 80
 	m.height = 24
 	m.events.SetSize(80, 21)
@@ -206,7 +220,7 @@ func TestModel_DetailPausesPolling(t *testing.T) {
 
 func TestModel_ResizePropagates(t *testing.T) {
 	d := openTestDB(t)
-	m := NewModel(d, "dryrun", nil)
+	m := NewModel(d, "dryrun", nil, NotificationOptions{})
 
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 50})
 	m = updated.(Model)
@@ -246,7 +260,7 @@ func TestTickCmd_StatsInterval(t *testing.T) {
 
 func TestModel_StaleTickReschedules(t *testing.T) {
 	d := openTestDB(t)
-	m := NewModel(d, "dryrun", nil)
+	m := NewModel(d, "dryrun", nil, NotificationOptions{})
 	m.width = 80
 	m.height = 24
 	m.events.SetSize(80, 21)
@@ -273,7 +287,7 @@ func TestModel_StaleTickDoesNotFetch(t *testing.T) {
 	d := openTestDB(t)
 	seedEvents(t, d, 2)
 
-	m := NewModel(d, "dryrun", nil)
+	m := NewModel(d, "dryrun", nil, NotificationOptions{})
 	m.width = 80
 	m.height = 24
 

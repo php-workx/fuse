@@ -11,6 +11,28 @@ import (
 	"github.com/php-workx/fuse/internal/db"
 )
 
+// NotificationOptions controls approval notification behavior for one TUI run.
+// Its values cannot be changed after construction.
+type NotificationOptions struct {
+	enabled bool
+	sound   bool
+}
+
+// NewNotificationOptions creates immutable notification options.
+func NewNotificationOptions(enabled, sound bool) NotificationOptions {
+	return NotificationOptions{enabled: enabled, sound: sound}
+}
+
+// Enabled reports whether approval notifications are enabled.
+func (o NotificationOptions) Enabled() bool {
+	return o.enabled
+}
+
+// Sound reports whether notification sounds are enabled.
+func (o NotificationOptions) Sound() bool {
+	return o.sound
+}
+
 type viewMode int
 
 const (
@@ -21,30 +43,32 @@ const (
 
 // Model is the top-level bubbletea model for the fuse TUI.
 type Model struct {
-	db         *db.DB
-	secret     []byte // HMAC secret for creating approvals from the TUI
-	mode       string
-	activeView viewMode
-	width      int
-	height     int
-	fetchGen   uint64
-	fetching   bool
-	lastErr    error
-	events     EventsModel
-	stats      StatsModel
-	approvals  ApprovalsModel
-	quitting   bool
+	db            *db.DB
+	secret        []byte // HMAC secret for creating approvals from the TUI
+	mode          string
+	notifications NotificationOptions
+	activeView    viewMode
+	width         int
+	height        int
+	fetchGen      uint64
+	fetching      bool
+	lastErr       error
+	events        EventsModel
+	stats         StatsModel
+	approvals     ApprovalsModel
+	quitting      bool
 }
 
 // NewModel creates an initialized Model.
-func NewModel(database *db.DB, mode string, secret []byte) Model {
+func NewModel(database *db.DB, mode string, secret []byte, notifications NotificationOptions) Model {
 	return Model{
-		db:        database,
-		secret:    secret,
-		mode:      mode,
-		events:    NewEventsModel(),
-		stats:     NewStatsModel(),
-		approvals: NewApprovalsModel(database, secret),
+		db:            database,
+		secret:        secret,
+		mode:          mode,
+		notifications: notifications,
+		events:        NewEventsModel(),
+		stats:         NewStatsModel(),
+		approvals:     NewApprovalsModel(database, secret),
 	}
 }
 

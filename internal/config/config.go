@@ -24,7 +24,14 @@ type Config struct {
 	LLMJudge        LLMJudgeConfig       `yaml:"llm_judge"`
 	URLTrustPolicy  URLTrustPolicyConfig `yaml:"url_trust_policy"`
 	PolicyLKG       PolicyLKGConfig      `yaml:"policy_lkg"`
+	Notifications   NotificationsConfig  `yaml:"notifications"`
 	CautionFallback string               `yaml:"caution_fallback"`
+}
+
+// NotificationsConfig controls approval notification behavior.
+type NotificationsConfig struct {
+	Enabled bool `yaml:"enabled"`
+	Sound   bool `yaml:"sound"`
 }
 
 // URLTrustPolicyConfig controls URL inspection behavior.
@@ -85,6 +92,10 @@ func ProfileDefaults(profile string) *Config {
 		PolicyLKG: PolicyLKGConfig{
 			Enabled:    true,
 			MaxAgeDays: 7,
+		},
+		Notifications: NotificationsConfig{
+			Enabled: true,
+			Sound:   true,
 		},
 	}
 

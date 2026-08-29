@@ -66,5 +66,10 @@ profile: %s
 # log:     auto-approve and log (default)
 # approve: ask for confirmation
 # caution_fallback: log
+
+# Approval notifications
+notifications:
+  enabled: true
+  sound: true
 `, profile)) + "\n"
 }
