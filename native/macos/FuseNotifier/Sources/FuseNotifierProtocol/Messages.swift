@@ -58,7 +58,7 @@ public enum HelperCommand: Equatable, Sendable {
 }
 
 public enum HelperEvent: Codable, Equatable, Sendable {
-    case ready(requestID: UInt64, helperVersion: String, protocolMin: Int, protocolMax: Int, authorization: String, alertSetting: String, soundSetting: String)
+    case ready(requestID: UInt64, helperVersion: String, protocolMin: Int, protocolMax: Int, pid: Int, authorization: String, alertSetting: String, soundSetting: String)
     case result(requestID: UInt64, operation: String, id: String, status: String)
     case posted(requestID: UInt64, id: String)
     case activated(id: String)
@@ -68,14 +68,14 @@ public enum HelperEvent: Codable, Equatable, Sendable {
     case error(requestID: UInt64, operation: String, id: String, code: String, message: String)
     case shutdownComplete
 
-    private enum CodingKeys: String, CodingKey { case version, type, requestID = "request_id", helperVersion = "helper_version", protocolMin = "protocol_min", protocolMax = "protocol_max", authorization, alertSetting = "alert_setting", soundSetting = "sound_setting", operation, id, status, deliveredCurrentIDs = "delivered_current_ids", mode, detail, code, message }
+    private enum CodingKeys: String, CodingKey { case version, type, requestID = "request_id", helperVersion = "helper_version", protocolMin = "protocol_min", protocolMax = "protocol_max", pid, authorization, alertSetting = "alert_setting", soundSetting = "sound_setting", operation, id, status, deliveredCurrentIDs = "delivered_current_ids", mode, detail, code, message }
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(1, forKey: .version)
         switch self {
-        case let .ready(id, version, protocolMin, protocolMax, authorization, alert, sound):
-            try c.encode("ready", forKey: .type); try c.encode(id, forKey: .requestID); try c.encode(version, forKey: .helperVersion); try c.encode(protocolMin, forKey: .protocolMin); try c.encode(protocolMax, forKey: .protocolMax); try c.encode(authorization, forKey: .authorization); try c.encode(alert, forKey: .alertSetting); try c.encode(sound, forKey: .soundSetting)
+        case let .ready(id, version, protocolMin, protocolMax, pid, authorization, alert, sound):
+            try c.encode("ready", forKey: .type); try c.encode(id, forKey: .requestID); try c.encode(version, forKey: .helperVersion); try c.encode(protocolMin, forKey: .protocolMin); try c.encode(protocolMax, forKey: .protocolMax); try c.encode(pid, forKey: .pid); try c.encode(authorization, forKey: .authorization); try c.encode(alert, forKey: .alertSetting); try c.encode(sound, forKey: .soundSetting)
         case let .result(id, operation, noticeID, status):
             try c.encode("result", forKey: .type); try c.encode(id, forKey: .requestID); try c.encode(operation, forKey: .operation); try c.encode(noticeID, forKey: .id); try c.encode(status, forKey: .status)
         case let .posted(id, noticeID):
@@ -97,7 +97,7 @@ public enum HelperEvent: Codable, Equatable, Sendable {
         guard version == 1 else { throw ProtocolError.unsupportedVersion(version) }
         switch try c.decode(String.self, forKey: .type) {
         case "ready":
-            self = .ready(requestID: try c.decode(UInt64.self, forKey: .requestID), helperVersion: try c.decode(String.self, forKey: .helperVersion), protocolMin: try c.decode(Int.self, forKey: .protocolMin), protocolMax: try c.decode(Int.self, forKey: .protocolMax), authorization: try c.decode(String.self, forKey: .authorization), alertSetting: try c.decode(String.self, forKey: .alertSetting), soundSetting: try c.decode(String.self, forKey: .soundSetting))
+            self = .ready(requestID: try c.decode(UInt64.self, forKey: .requestID), helperVersion: try c.decode(String.self, forKey: .helperVersion), protocolMin: try c.decode(Int.self, forKey: .protocolMin), protocolMax: try c.decode(Int.self, forKey: .protocolMax), pid: try c.decode(Int.self, forKey: .pid), authorization: try c.decode(String.self, forKey: .authorization), alertSetting: try c.decode(String.self, forKey: .alertSetting), soundSetting: try c.decode(String.self, forKey: .soundSetting))
         case "result":
             self = .result(requestID: try c.decode(UInt64.self, forKey: .requestID), operation: try c.decode(String.self, forKey: .operation), id: try c.decode(String.self, forKey: .id), status: try c.decode(String.self, forKey: .status))
         case "posted": self = .posted(requestID: try c.decode(UInt64.self, forKey: .requestID), id: try c.decode(String.self, forKey: .id))

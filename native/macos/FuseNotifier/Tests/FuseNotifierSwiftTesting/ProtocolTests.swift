@@ -16,7 +16,7 @@ import Testing
 
 @Test func helperEventsRoundTrip() throws {
     let events: [HelperEvent] = [
-        .ready(requestID: 1, helperVersion: "test", protocolMin: 1, protocolMax: 1, authorization: "authorized", alertSetting: "enabled", soundSetting: "enabled"),
+        .ready(requestID: 1, helperVersion: "test", protocolMin: 1, protocolMax: 1, pid: 123, authorization: "authorized", alertSetting: "enabled", soundSetting: "enabled"),
         .result(requestID: 2, operation: "post", id: "id", status: "accepted"),
         .posted(requestID: 2, id: "id"),
         .activated(id: "id"),

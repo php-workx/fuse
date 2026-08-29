@@ -177,7 +177,7 @@ public final class NotificationController: @unchecked Sendable {
         }
     }
 
-    private func emitReady(requestID: UInt64, settings: NotificationSettings) { emit(.ready(requestID: requestID, helperVersion: "0.0.0-stage3", protocolMin: 1, protocolMax: 1, authorization: authorizationName(settings.authorization), alertSetting: settingName(settings.alerts), soundSetting: settingName(settings.sound))) }
+    private func emitReady(requestID: UInt64, settings: NotificationSettings) { emit(.ready(requestID: requestID, helperVersion: "0.0.0-stage3", protocolMin: 1, protocolMax: 1, pid: Int(ProcessInfo.processInfo.processIdentifier), authorization: authorizationName(settings.authorization), alertSetting: settingName(settings.alerts), soundSetting: settingName(settings.sound))) }
     private func accept(_ requestID: UInt64) -> Bool { lock.lock(); defer { lock.unlock() }; guard !isClosing, requestID > highestRequestID else { return false }; highestRequestID = requestID; return true }
     private func commandID(_ command: HelperCommand) -> String { switch command { case let .post(_, notice): notice.id; case let .remove(_, id): id; default: "" } }
     private func authorizationName(_ value: NotificationAuthorization) -> String { switch value { case .notDetermined: "not_determined"; case .denied: "denied"; case .authorized: "authorized" } }
