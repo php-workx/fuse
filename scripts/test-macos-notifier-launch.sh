@@ -4,12 +4,22 @@
 set -euo pipefail
 
 interactive_click=false
-if [[ ${1:-} == "--interactive-click" ]]; then
-  interactive_click=true
-elif [[ $# -ne 0 ]]; then
-  printf 'usage: %s [--interactive-click]\n' "$0" >&2
-  exit 64
-fi
+validate_app=false
+case ${1:-} in
+  "")
+    ;;
+  --interactive-click)
+    interactive_click=true
+    ;;
+  --validate-app)
+    validate_app=true
+    ;;
+  *)
+    printf 'usage: %s [--interactive-click|--validate-app]\n' "$0" >&2
+    exit 64
+    ;;
+esac
+[[ $# -le 1 ]] || { printf 'usage: %s [--interactive-click|--validate-app]\n' "$0" >&2; exit 64; }
 
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 package_dir="$repo_root/native/macos/FuseNotifier"
@@ -28,41 +38,71 @@ cleanup() {
 }
 trap cleanup EXIT
 
-swift build --package-path "$package_dir" --product FuseNotifier -c release
-binary_dir=$(swift build --package-path "$package_dir" -c release --show-bin-path)
-mkdir -p "$app_bundle/Contents/MacOS" "$socket_dir"
-chmod 700 "$socket_dir"
-cp -f "$package_dir/Resources/Info.plist" "$app_bundle/Contents/Info.plist"
-cp -f "$binary_dir/FuseNotifier" "$app_bundle/Contents/MacOS/FuseNotifier"
-plutil -lint "$app_bundle/Contents/Info.plist" >/dev/null
-codesign --force --sign - --options runtime --entitlements "$package_dir/Resources/FuseNotifier.entitlements" "$app_bundle" >/dev/null
-codesign --verify --strict --verbose=2 "$app_bundle"
+stable_bundle=${FUSE_NOTIFIER_APP:-}
+require_accepted_post=false
+if [[ -n $stable_bundle ]]; then
+  [[ -d $stable_bundle ]] || { printf 'FUSE_NOTIFIER_APP is not a bundle directory\n' >&2; exit 64; }
+  app_bundle=$(cd "$stable_bundle" && pwd -P)
+  info_plist="$app_bundle/Contents/Info.plist"
+  executable="$app_bundle/Contents/MacOS/FuseNotifier"
+  [[ -f $info_plist && -x $executable ]] || { printf 'FUSE_NOTIFIER_APP is missing the expected executable or Info.plist\n' >&2; exit 64; }
+  plutil -lint "$info_plist" >/dev/null
+  [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$info_plist") == 'com.php-workx.fuse.notifier' ]] || {
+    printf 'FUSE_NOTIFIER_APP has an unexpected bundle identifier\n' >&2
+    exit 64
+  }
+  [[ $(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$info_plist") == 'FuseNotifier' ]] || {
+    printf 'FUSE_NOTIFIER_APP has an unexpected executable declaration\n' >&2
+    exit 64
+  }
+  codesign --verify --strict --verbose=2 "$app_bundle"
+  require_accepted_post=true
+  if "$validate_app"; then
+    printf 'validated stable notifier bundle: %s\n' "$app_bundle"
+    exit 0
+  fi
+else
+  "$validate_app" && { printf -- '--validate-app requires FUSE_NOTIFIER_APP\n' >&2; exit 64; }
+  swift build --package-path "$package_dir" --product FuseNotifier -c release
+  binary_dir=$(swift build --package-path "$package_dir" -c release --show-bin-path)
+  mkdir -p "$app_bundle/Contents/MacOS"
+  cp -f "$package_dir/Resources/Info.plist" "$app_bundle/Contents/Info.plist"
+  cp -f "$binary_dir/FuseNotifier" "$app_bundle/Contents/MacOS/FuseNotifier"
+  plutil -lint "$app_bundle/Contents/Info.plist" >/dev/null
+  codesign --force --sign - --options runtime --entitlements "$package_dir/Resources/FuseNotifier.entitlements" "$app_bundle" >/dev/null
+  codesign --verify --strict --verbose=2 "$app_bundle"
+fi
 
-# This current-host diagnostic deliberately keeps direct inherited pipes observable.
-# It is not selected after UNErrorDomain code 1 demonstrates the direct app cannot
-# obtain notification authorization on this host.
-coproc DIRECT_NOTIFIER { exec "$app_bundle/Contents/MacOS/FuseNotifier"; }
-notifier_pid=$DIRECT_NOTIFIER_PID
-direct_input=${DIRECT_NOTIFIER[1]}
-direct_output=${DIRECT_NOTIFIER[0]}
-printf '%s\n' '{"version":1,"type":"hello","request_id":1,"client_version":"stage0-direct-diagnostic"}' >&"$direct_input"
-IFS= read -r -t 10 direct_ready <&"$direct_output"
-[[ $direct_ready == *'"type":"ready"'* ]] || { printf 'direct diagnostic did not become ready\n' >&2; exit 1; }
-printf '%s\n' '{"version":1,"type":"post","request_id":2,"id":"stage0-direct-diagnostic"}' >&"$direct_input"
-IFS= read -r -t 10 direct_post <&"$direct_output"
-[[ $direct_post == *'"code":"notification_post_failed"'* ]] || {
-  printf 'direct diagnostic did not reproduce the expected notification failure: %s\n' "$direct_post" >&2
-  exit 1
-}
-eval "exec ${direct_input}>&-"
-IFS= read -r -t 10 direct_cleanup <&"$direct_output"
-[[ $direct_cleanup == *'"type":"shutdown_complete"'* ]] || { printf 'direct diagnostic did not clean up\n' >&2; exit 1; }
-wait "$notifier_pid"
-notifier_pid=
+mkdir -p "$socket_dir"
+chmod 700 "$socket_dir"
+
+if [[ -z $stable_bundle ]]; then
+  # This current-host diagnostic deliberately keeps direct inherited pipes observable.
+  # It is not selected after UNErrorDomain code 1 demonstrates the direct app cannot
+  # obtain notification authorization on this host.
+  coproc DIRECT_NOTIFIER { exec "$app_bundle/Contents/MacOS/FuseNotifier"; }
+  notifier_pid=$DIRECT_NOTIFIER_PID
+  direct_input=${DIRECT_NOTIFIER[1]}
+  direct_output=${DIRECT_NOTIFIER[0]}
+  printf '%s\n' '{"version":1,"type":"hello","request_id":1,"client_version":"stage0-direct-diagnostic"}' >&"$direct_input"
+  IFS= read -r -t 10 direct_ready <&"$direct_output"
+  [[ $direct_ready == *'"type":"ready"'* ]] || { printf 'direct diagnostic did not become ready\n' >&2; exit 1; }
+  printf '%s\n' '{"version":1,"type":"post","request_id":2,"id":"stage0-direct-diagnostic"}' >&"$direct_input"
+  IFS= read -r -t 10 direct_post <&"$direct_output"
+  [[ $direct_post == *'"code":"notification_post_failed"'* ]] || {
+    printf 'direct diagnostic did not reproduce the expected notification failure: %s\n' "$direct_post" >&2
+    exit 1
+  }
+  eval "exec ${direct_input}>&-"
+  IFS= read -r -t 10 direct_cleanup <&"$direct_output"
+  [[ $direct_cleanup == *'"type":"shutdown_complete"'* ]] || { printf 'direct diagnostic did not clean up\n' >&2; exit 1; }
+  wait "$notifier_pid"
+  notifier_pid=
+fi
 
 # The Python server owns the mode-0600 socket, permits exactly one same-UID peer,
 # and authenticates the first frame with a 256-bit random token before JSON Lines.
-python3 - "$app_bundle" "$socket_path" "$session_token" "$interactive_click" <<'PY'
+python3 - "$app_bundle" "$socket_path" "$session_token" "$interactive_click" "$require_accepted_post" <<'PY'
 import ctypes
 import hmac
 import os
@@ -70,7 +110,7 @@ import socket
 import subprocess
 import sys
 
-app_bundle, socket_path, token, interactive = sys.argv[1:]
+app_bundle, socket_path, token, interactive, require_accepted = sys.argv[1:]
 if os.stat(os.path.dirname(socket_path)).st_mode & 0o777 != 0o700:
     raise SystemExit("socket parent directory permissions are not 0700")
 server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -152,6 +192,8 @@ finally:
 
 if notifications_posted:
     print("LaunchServices socket launch, post acknowledgement, and EOF cleanup passed")
+elif require_accepted == "true":
+    raise SystemExit("stable notifier bundle did not receive an accepted post")
 else:
     print("LaunchServices socket transport and EOF cleanup passed; notification authorization remains an external gate", file=sys.stderr)
     raise SystemExit(2)
