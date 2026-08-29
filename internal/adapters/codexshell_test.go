@@ -988,3 +988,36 @@ func TestHandleCodexApproval_RecordsCommandCwd(t *testing.T) {
 		t.Fatal("handleCodexApproval did not resolve after approval grant")
 	}
 }
+
+func TestExecuteCodexShellCommand_RecordsCommandCwdForApproval(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses Unix-specific shell commands")
+	}
+	withFuseHome(t)
+	enableFuseForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
+	cwd := t.TempDir()
+
+	done := make(chan struct{})
+	go func() {
+		_, _, _, _ = executeCodexShellCommand(
+			context.Background(),
+			"python nonexistent_script.py",
+			cwd,
+			"codex-command-context",
+			time.Minute,
+		)
+		close(done)
+	}()
+
+	pending := waitForPendingRequest(t, "codex-shell", "codex-command-context")
+	grantPendingRequest(t, pending)
+	if pending.Cwd != normalizedPendingCwd(t, cwd) {
+		t.Errorf("Cwd = %q, want %q", pending.Cwd, normalizedPendingCwd(t, cwd))
+	}
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("executeCodexShellCommand did not resolve after approval grant")
+	}
+}

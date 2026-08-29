@@ -17,6 +17,7 @@ import (
 	"github.com/php-workx/fuse/internal/core"
 )
 
+var mcpProxyGetwd = os.Getwd
 type inFlightRequests struct {
 	mu      sync.Mutex
 	methods map[string]string
@@ -303,6 +304,10 @@ func interceptToolCall(msg jsonRPCMessage) (bool, jsonRPCMessage, error) {
 }
 
 func requestMCPApproval(name string, arguments map[string]interface{}, reason string) (bool, error) {
+	cwd, err := mcpProxyGetwd()
+	if err != nil {
+		return false, fmt.Errorf("get process working directory: %w", err)
+	}
 	database, secret, err := openDBAndSecret()
 	if err != nil {
 		return false, err
@@ -330,7 +335,6 @@ func requestMCPApproval(name string, arguments map[string]interface{}, reason st
 	// Use a bounded context so headless sessions don't hang indefinitely.
 	proxyCtx, proxyCancel := context.WithTimeout(context.Background(), hookTimeout)
 	defer proxyCancel()
-	cwd, _ := os.Getwd()
 	decision, err := mgr.RequestApproval(proxyCtx, approve.ApprovalRequest{
 		DecisionKey: result.DecisionKey,
 		Command:     extractCommandFromResult(result),

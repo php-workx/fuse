@@ -3,6 +3,7 @@ package adapters
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -442,5 +443,20 @@ func TestRequestMCPApproval_RecordsProcessCwd(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("requestMCPApproval did not resolve after approval grant")
+	}
+}
+
+func TestRequestMCPApproval_ReturnsGetwdError(t *testing.T) {
+	getwdErr := errors.New("working directory unavailable")
+	originalGetwd := mcpProxyGetwd
+	mcpProxyGetwd = func() (string, error) { return "", getwdErr }
+	t.Cleanup(func() { mcpProxyGetwd = originalGetwd })
+
+	approved, err := requestMCPApproval("delete_resource", map[string]interface{}{}, "test approval")
+	if approved {
+		t.Fatal("requestMCPApproval approved = true, want false")
+	}
+	if !errors.Is(err, getwdErr) {
+		t.Fatalf("requestMCPApproval error = %v, want %v", err, getwdErr)
 	}
 }
