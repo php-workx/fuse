@@ -137,3 +137,49 @@ func TestDeleteApproval(t *testing.T) {
 		t.Error("expected error for non-existent approval")
 	}
 }
+
+func TestGetPendingRequest(t *testing.T) {
+	d := openTestDB(t)
+	request := PendingRequest{
+		ID:          "pending-found",
+		DecisionKey: "decision-key",
+		Command:     "rm -rf build",
+		Reason:      "requires approval",
+		Source:      "hook",
+		SessionID:   "session-1",
+	}
+	if err := d.InsertPendingRequest(request); err != nil {
+		t.Fatalf("InsertPendingRequest: %v", err)
+	}
+
+	got, found, err := d.GetPendingRequest(request.ID)
+	if err != nil {
+		t.Fatalf("GetPendingRequest found: %v", err)
+	}
+	if !found {
+		t.Fatal("GetPendingRequest found = false, want true")
+	}
+	if got.ID != request.ID || got.DecisionKey != request.DecisionKey || got.Command != request.Command ||
+		got.Reason != request.Reason || got.Source != request.Source || got.SessionID != request.SessionID {
+		t.Errorf("GetPendingRequest = %#v, want request fields %#v", got, request)
+	}
+
+	_, found, err = d.GetPendingRequest("missing")
+	if err != nil {
+		t.Fatalf("GetPendingRequest missing: %v", err)
+	}
+	if found {
+		t.Fatal("GetPendingRequest missing found = true, want false")
+	}
+
+	if err := d.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	_, found, err = d.GetPendingRequest(request.ID)
+	if err == nil {
+		t.Fatal("GetPendingRequest after Close error = nil, want non-nil")
+	}
+	if found {
+		t.Fatal("GetPendingRequest after Close found = true, want false")
+	}
+}

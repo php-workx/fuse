@@ -19,6 +19,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/php-workx/fuse/internal/config"
+	"github.com/php-workx/fuse/internal/core"
 )
 
 func withFuseHome(t *testing.T) string {
@@ -946,5 +947,44 @@ func writeFramedRequest(t *testing.T, w io.Writer, msg jsonRPCMessage) {
 	}
 	if _, err := fmt.Fprintf(w, "Content-Length: %d\r\n\r\n%s", len(payload), payload); err != nil {
 		t.Fatalf("write request: %v", err)
+	}
+}
+
+func TestHandleCodexApproval_RecordsCommandCwd(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
+	cwd := t.TempDir()
+	database, _, err := openDBAndSecret()
+	if err != nil {
+		t.Fatalf("openDBAndSecret: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+
+	done := make(chan error, 1)
+	go func() {
+		_, approvalErr := handleCodexApproval(
+			context.Background(),
+			&core.ClassifyResult{DecisionKey: "codex-context-key", Reason: "test approval"},
+			"rm -rf build",
+			cwd,
+			"codex-context",
+			database,
+		)
+		done <- approvalErr
+	}()
+
+	pending := waitForPendingRequest(t, "codex-shell", "codex-context")
+	grantPendingRequest(t, pending)
+	if pending.Cwd != normalizedPendingCwd(t, cwd) {
+		t.Errorf("Cwd = %q, want %q", pending.Cwd, normalizedPendingCwd(t, cwd))
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handleCodexApproval: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("handleCodexApproval did not resolve after approval grant")
 	}
 }

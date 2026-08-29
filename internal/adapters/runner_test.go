@@ -526,3 +526,41 @@ func TestReverifyDecisionKeyDetectsChangedScript(t *testing.T) {
 		t.Fatal("expected reverifyDecisionKey to detect modified script")
 	}
 }
+
+func TestRunContextHandleApprovalCommand_RecordsRunCwd(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
+	cwd := t.TempDir()
+	database, _, err := openDBAndSecret()
+	if err != nil {
+		t.Fatalf("openDBAndSecret: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	rc := &runContext{
+		command:  "rm -rf build",
+		cwd:      cwd,
+		result:   &core.ClassifyResult{DecisionKey: "run-context-key", Reason: "test approval"},
+		database: database,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, approvalErr := rc.handleApprovalCommand()
+		done <- approvalErr
+	}()
+
+	pending := waitForPendingRequest(t, "run", "")
+	grantPendingRequest(t, pending)
+	if pending.Cwd != normalizedPendingCwd(t, cwd) {
+		t.Errorf("Cwd = %q, want %q", pending.Cwd, normalizedPendingCwd(t, cwd))
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handleApprovalCommand: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("handleApprovalCommand did not resolve after approval grant")
+	}
+}

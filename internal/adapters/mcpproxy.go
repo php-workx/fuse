@@ -330,11 +330,13 @@ func requestMCPApproval(name string, arguments map[string]interface{}, reason st
 	// Use a bounded context so headless sessions don't hang indefinitely.
 	proxyCtx, proxyCancel := context.WithTimeout(context.Background(), hookTimeout)
 	defer proxyCancel()
+	cwd, _ := os.Getwd()
 	decision, err := mgr.RequestApproval(proxyCtx, approve.ApprovalRequest{
 		DecisionKey: result.DecisionKey,
 		Command:     extractCommandFromResult(result),
 		Reason:      result.Reason,
 		Source:      "mcp-proxy",
+		Cwd:         cwd,
 	})
 	if err != nil {
 		return false, err

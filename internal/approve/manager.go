@@ -55,6 +55,8 @@ type ApprovalRequest struct {
 	Reason         string // why approval is needed
 	SessionID      string // agent session identifier
 	Source         string // adapter: "hook", "codex-shell", "run", "mcp-proxy"
+	Cwd            string // working directory when approval was requested
+	WorkspaceRoot  string // project root when approval was requested
 	HookMode       bool   // true = short TTY prompt timeout
 	NonInteractive bool   // true = skip TTY prompt entirely
 }
@@ -124,12 +126,14 @@ func (m *Manager) insertPendingRequest(req ApprovalRequest) string {
 		source = "hook"
 	}
 	if insertErr := m.db.InsertPendingRequest(db.PendingRequest{
-		ID:          pendingID,
-		DecisionKey: req.DecisionKey,
-		Command:     db.ScrubCredentials(req.Command),
-		Reason:      req.Reason,
-		Source:      source,
-		SessionID:   req.SessionID,
+		ID:            pendingID,
+		DecisionKey:   req.DecisionKey,
+		Command:       db.ScrubCredentials(req.Command),
+		Reason:        req.Reason,
+		Source:        source,
+		SessionID:     req.SessionID,
+		Cwd:           req.Cwd,
+		WorkspaceRoot: req.WorkspaceRoot,
 	}); insertErr != nil {
 		slog.Warn("failed to insert pending request for TUI visibility", "error", insertErr)
 	}

@@ -165,6 +165,7 @@ func (rc *runContext) handleApprovalCommand() (int, error) {
 		Command:     rc.command,
 		Reason:      rc.result.Reason,
 		Source:      "run",
+		Cwd:         rc.cwd,
 	})
 	if promptErr != nil {
 		return 1, fmt.Errorf("approval: %w", promptErr)

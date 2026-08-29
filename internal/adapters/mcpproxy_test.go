@@ -411,3 +411,36 @@ func setDefaultLoggerForTest(dst io.Writer) func() {
 		slog.SetDefault(orig)
 	}
 }
+
+func TestRequestMCPApproval_RecordsProcessCwd(t *testing.T) {
+	withFuseHome(t)
+	enableFuseForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
+	oldTimeout := hookTimeout
+	hookTimeout = 5 * time.Second
+	t.Cleanup(func() { hookTimeout = oldTimeout })
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, approvalErr := requestMCPApproval("delete_resource", map[string]interface{}{}, "test approval")
+		done <- approvalErr
+	}()
+
+	pending := waitForPendingRequest(t, "mcp-proxy", "")
+	grantPendingRequest(t, pending)
+	if pending.Cwd != normalizedPendingCwd(t, cwd) {
+		t.Errorf("Cwd = %q, want %q", pending.Cwd, normalizedPendingCwd(t, cwd))
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("requestMCPApproval: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("requestMCPApproval did not resolve after approval grant")
+	}
+}

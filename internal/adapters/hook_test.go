@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -713,4 +714,86 @@ func enableHookForTest(t *testing.T) {
 	if err := os.WriteFile(enabledPath, []byte("enabled\n"), 0o644); err != nil {
 		t.Fatalf("write enabled marker: %v", err)
 	}
+}
+
+func TestHandleApproval_RecordsHookCwd(t *testing.T) {
+	enableHookForTest(t)
+	t.Setenv("FUSE_NON_INTERACTIVE", "1")
+	cwd := t.TempDir()
+	oldTimeout := hookTimeout
+	hookTimeout = 5 * time.Second
+	t.Cleanup(func() { hookTimeout = oldTimeout })
+
+	done := make(chan int, 1)
+	go func() {
+		done <- handleApproval(
+			HookRequest{SessionID: "hook-context", Cwd: cwd},
+			&core.ClassifyResult{DecisionKey: "hook-context-key", Reason: "test approval"},
+			nil,
+			io.Discard,
+			nil,
+			false,
+		)
+	}()
+
+	pending := waitForPendingRequest(t, "hook", "hook-context")
+	grantPendingRequest(t, pending)
+	if pending.Cwd != normalizedPendingCwd(t, cwd) {
+		t.Errorf("Cwd = %q, want %q", pending.Cwd, normalizedPendingCwd(t, cwd))
+	}
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("handleApproval exit code = %d, want 0", code)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("handleApproval did not resolve after approval grant")
+	}
+}
+
+func waitForPendingRequest(t *testing.T, source, sessionID string) db.PendingRequest {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		database, err := db.OpenDB(config.DBPath())
+		if err == nil {
+			requests, listErr := database.ListPendingRequests()
+			_ = database.Close()
+			if listErr == nil {
+				for _, request := range requests {
+					if request.Source == source && request.SessionID == sessionID {
+						return request
+					}
+				}
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s pending request in session %q", source, sessionID)
+	return db.PendingRequest{}
+}
+
+func grantPendingRequest(t *testing.T, request db.PendingRequest) {
+	t.Helper()
+	database, secret, err := openDBAndSecret()
+	if err != nil {
+		t.Fatalf("openDBAndSecret: %v", err)
+	}
+	defer func() { _ = database.Close() }()
+	manager, err := approve.NewManager(database, secret)
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	if err := manager.CreateApproval(request.DecisionKey, string(core.DecisionApproval), "once", request.SessionID); err != nil {
+		t.Fatalf("CreateApproval: %v", err)
+	}
+}
+
+func normalizedPendingCwd(t *testing.T, cwd string) string {
+	t.Helper()
+	normalized, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatalf("EvalSymlinks %q: %v", cwd, err)
+	}
+	return normalized
 }

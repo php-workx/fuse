@@ -374,6 +374,7 @@ func handleApproval(req HookRequest, result *core.ClassifyResult, verdict *judge
 		Reason:         result.Reason,
 		SessionID:      req.SessionID,
 		Source:         "hook",
+		Cwd:            req.Cwd,
 		HookMode:       true,
 		NonInteractive: dryRun,
 	})

@@ -330,6 +330,7 @@ func executeCodexShellCommand(ctx context.Context, command, cwd, sessionID strin
 		result:            result,
 		effectiveDecision: effectiveDecision,
 		command:           command,
+		cwd:               cwd,
 		sessionID:         sessionID,
 		database:          database,
 		cfg:               cfg,
@@ -367,6 +368,7 @@ type codexDecisionContext struct {
 	result            *core.ClassifyResult
 	effectiveDecision core.Decision
 	command           string
+	cwd               string
 	sessionID         string
 	database          *db.DB
 	cfg               *config.Config
@@ -394,7 +396,7 @@ func handleCodexDecision(dc codexDecisionContext) (bool, error) {
 		// Execute directly.
 	case core.DecisionApproval:
 		if !dryRun {
-			decision, err := handleCodexApproval(dc.ctx, result, dc.command, dc.sessionID, database)
+			decision, err := handleCodexApproval(dc.ctx, result, dc.command, dc.cwd, dc.sessionID, database)
 			if err != nil {
 				return false, err
 			}
@@ -416,7 +418,7 @@ func handleCodexDecision(dc codexDecisionContext) (bool, error) {
 func handleCodexApproval(
 	ctx context.Context,
 	result *core.ClassifyResult,
-	command, sessionID string,
+	command, cwd, sessionID string,
 	database *db.DB,
 ) (core.Decision, error) {
 	if database == nil {
@@ -437,6 +439,7 @@ func handleCodexApproval(
 		SessionID:      sessionID,
 		Source:         "codex-shell",
 		NonInteractive: false,
+		Cwd:            cwd,
 	})
 }
 

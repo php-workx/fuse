@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"time"
 )
@@ -21,6 +22,13 @@ type PendingRequest struct {
 
 // InsertPendingRequest writes a new pending approval request to the database.
 func (d *DB) InsertPendingRequest(req PendingRequest) error {
+	req.Cwd = normalizeEventPath(req.Cwd)
+	if req.WorkspaceRoot == "" {
+		req.WorkspaceRoot = detectWorkspaceRoot(req.Cwd)
+	} else {
+		req.WorkspaceRoot = normalizeEventPath(req.WorkspaceRoot)
+	}
+
 	_, err := d.db.Exec(`
 		INSERT INTO pending_requests (id, decision_key, command, reason, source, session_id, cwd, workspace_root)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -53,6 +61,34 @@ func (d *DB) ListPendingRequests() ([]PendingRequest, error) {
 		requests = append(requests, r)
 	}
 	return requests, rows.Err()
+}
+
+// GetPendingRequest returns a pending request by ID.
+// found is false with a nil error when the request no longer exists.
+func (d *DB) GetPendingRequest(id string) (PendingRequest, bool, error) {
+	var request PendingRequest
+	err := d.db.QueryRow(`
+		SELECT id, decision_key, command, reason, source, session_id, cwd, workspace_root, created_at
+		FROM pending_requests
+		WHERE id = ?
+	`, id).Scan(
+		&request.ID,
+		&request.DecisionKey,
+		&request.Command,
+		&request.Reason,
+		&request.Source,
+		&request.SessionID,
+		&request.Cwd,
+		&request.WorkspaceRoot,
+		&request.CreatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return PendingRequest{}, false, nil
+	}
+	if err != nil {
+		return PendingRequest{}, false, fmt.Errorf("get pending request: %w", err)
+	}
+	return request, true, nil
 }
 
 // DeletePendingRequest removes a pending request by ID.

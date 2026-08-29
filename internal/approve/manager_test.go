@@ -1,6 +1,7 @@
 package approve
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -244,5 +245,46 @@ func TestNewManager(t *testing.T) {
 	_, err = NewManager(database, []byte("too-short"))
 	if err == nil {
 		t.Fatal("expected error for short secret, got nil")
+	}
+}
+
+func TestInsertPendingRequest_NormalizesWorkspaceContext(t *testing.T) {
+	m := setupTestManager(t)
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	cwd := filepath.Join(workspace, "cmd", "fuse")
+	if err := os.MkdirAll(filepath.Join(workspace, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir workspace marker: %v", err)
+	}
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatalf("mkdir cwd: %v", err)
+	}
+
+	m.insertPendingRequest(ApprovalRequest{
+		DecisionKey: "context-key",
+		Command:     "rm -rf build",
+		Reason:      "test approval context",
+		Cwd:         cwd,
+	})
+
+	requests, err := m.db.ListPendingRequests()
+	if err != nil {
+		t.Fatalf("ListPendingRequests: %v", err)
+	}
+	if len(requests) != 1 {
+		t.Fatalf("pending request count = %d, want 1", len(requests))
+	}
+	normalizedCwd, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		t.Fatalf("EvalSymlinks cwd: %v", err)
+	}
+	normalizedWorkspace, err := filepath.EvalSymlinks(workspace)
+	if err != nil {
+		t.Fatalf("EvalSymlinks workspace: %v", err)
+	}
+	if requests[0].Cwd != normalizedCwd {
+		t.Errorf("Cwd = %q, want %q", requests[0].Cwd, normalizedCwd)
+	}
+	if requests[0].WorkspaceRoot != normalizedWorkspace {
+		t.Errorf("WorkspaceRoot = %q, want %q", requests[0].WorkspaceRoot, normalizedWorkspace)
 	}
 }
