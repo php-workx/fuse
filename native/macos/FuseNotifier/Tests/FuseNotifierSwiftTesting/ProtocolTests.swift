@@ -30,4 +30,12 @@ import Testing
         #expect(try JSONDecoder().decode(HelperEvent.self, from: JSONEncoder().encode(event)) == event)
     }
 }
+@Test func helperEventsRequireProtocolVersion() {
+    for frame in [#"{"type":"activated","id":"id"}"#, #"{"version":2,"type":"activated","id":"id"}"#] {
+        do {
+            _ = try JSONDecoder().decode(HelperEvent.self, from: Data(frame.utf8))
+            Issue.record("Expected event version rejection")
+        } catch {}
+    }
+}
 #endif

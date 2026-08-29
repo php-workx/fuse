@@ -91,6 +91,10 @@ public enum HelperEvent: Codable, Equatable, Sendable {
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        guard c.contains(.version) else { throw ProtocolError.missingField("version") }
+        let version: Int
+        do { version = try c.decode(Int.self, forKey: .version) } catch { throw ProtocolError.malformedLine }
+        guard version == 1 else { throw ProtocolError.unsupportedVersion(version) }
         switch try c.decode(String.self, forKey: .type) {
         case "ready":
             self = .ready(requestID: try c.decode(UInt64.self, forKey: .requestID), helperVersion: try c.decode(String.self, forKey: .helperVersion), protocolMin: try c.decode(Int.self, forKey: .protocolMin), protocolMax: try c.decode(Int.self, forKey: .protocolMax), authorization: try c.decode(String.self, forKey: .authorization), alertSetting: try c.decode(String.self, forKey: .alertSetting), soundSetting: try c.decode(String.self, forKey: .soundSetting))

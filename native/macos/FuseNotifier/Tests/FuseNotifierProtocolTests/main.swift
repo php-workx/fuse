@@ -7,6 +7,10 @@ func expectError(_ expected: ProtocolError, _ operation: () throws -> Void) {
     catch let actual as ProtocolError { expect(actual == expected, "Expected \(expected), received \(actual)") }
     catch { fatalError("Unexpected error: \(error)") }
 }
+func expectEventDecodingFailure(_ json: String) {
+    do { _ = try JSONDecoder().decode(HelperEvent.self, from: Data(json.utf8)); fatalError("Expected event decoder failure") }
+    catch {}
+}
 func decode(_ line: String) throws -> HelperCommand { try JSONLineCodec.decodeCommand(Data(line.utf8)) }
 
 do {
@@ -49,4 +53,6 @@ do {
         let roundTripped = try JSONDecoder().decode(HelperEvent.self, from: JSONEncoder().encode(event))
         expect(roundTripped == event, "Event decoder did not round-trip \(event)")
     }
+    expectEventDecodingFailure(#"{"type":"activated","id":"id"}"#)
+    expectEventDecodingFailure(#"{"version":2,"type":"activated","id":"id"}"#)
 } catch { fatalError("Protocol behavior test failed: \(error)") }
