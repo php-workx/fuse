@@ -183,7 +183,8 @@ func (m Model) handleCleanup(msg cleanupMsg) (tea.Model, tea.Cmd) {
 	}
 	m.pendingFetching = true
 	m.pendingGen++
-	cmds := []tea.Cmd{m.fetchPending()}
+	m.fetching = true
+	cmds := []tea.Cmd{m.fetchPending(), m.fetchData()}
 	if m.attention != nil && !m.attentionEventsClosed {
 		cmds = append(cmds, m.waitAttentionEvent())
 	}

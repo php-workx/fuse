@@ -589,7 +589,33 @@ func TestModel_DisabledNotificationsDoNotArmAttentionEvents(t *testing.T) {
 	if m.attention != nil {
 		t.Fatal("disabled notifications retained an attention service")
 	}
-	if _, ok := cmd().(tea.BatchMsg); ok {
-		t.Fatal("disabled notifications scheduled an attention event wait")
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("disabled notifications scheduled %d startup commands, want only pending and events fetches", len(batch))
+	}
+	if _, ok := batch[0]().(pendingFetchMsg); !ok {
+		t.Fatalf("first disabled startup command returned %T, want pendingFetchMsg", batch[0]())
+	}
+	if _, ok := batch[1]().(dataMsg); !ok {
+		t.Fatalf("second disabled startup command returned %T, want dataMsg", batch[1]())
+	}
+}
+
+func TestModel_CleanupStartsDefaultEventsFetchAlongsideGlobalPendingFetch(t *testing.T) {
+	d := openTestDB(t)
+	seedEvents(t, d, 2)
+	m := NewModel(d, "enabled", nil, NewNotificationOptions(false, true), nil)
+
+	updated, cmd := m.Update(cleanupMsg{})
+	m = updated.(Model)
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok || len(batch) != 2 {
+		t.Fatalf("cleanup command = %T with %d commands, want pending and events fetches", cmd(), len(batch))
+	}
+	msg := batch[1]()
+	updated, _ = m.Update(msg)
+	m = updated.(Model)
+	if len(m.events.events) != 2 {
+		t.Fatalf("events after cleanup = %d, want 2", len(m.events.events))
 	}
 }
