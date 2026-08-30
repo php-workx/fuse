@@ -192,11 +192,24 @@ func notifierSignature(bundle string) (string, error) {
 	if err != nil {
 		return "", errors.New(strings.TrimSpace(string(output)))
 	}
-	if strings.Contains(string(output), "Signature=adhoc") {
+	return assessNotifierSignature(string(output), attention.NotifierDeveloperTeamID(), func() error {
+		assessment := exec.Command("/usr/sbin/spctl", "--assess", "--type", "execute", bundle)
+		if output, err := assessment.CombinedOutput(); err != nil {
+			return errors.New(strings.TrimSpace(string(output)))
+		}
+		return nil
+	})
+}
+
+func assessNotifierSignature(identity, configuredTeamID string, assessGatekeeper func() error) (string, error) {
+	if strings.Contains(identity, "Signature=adhoc") {
+		if configuredTeamID != "" {
+			return "", errors.New("ad-hoc notifier signature does not match the configured release Team ID")
+		}
 		return "ad-hoc signature", nil
 	}
 	team := ""
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(identity, "\n") {
 		if strings.HasPrefix(line, "TeamIdentifier=") {
 			team = strings.TrimPrefix(line, "TeamIdentifier=")
 			break
@@ -204,6 +217,14 @@ func notifierSignature(bundle string) (string, error) {
 	}
 	if team == "" || team == "not set" {
 		return "", errors.New("signature has no TeamIdentifier")
+	}
+	if configuredTeamID != "" {
+		if team != configuredTeamID {
+			return "", fmt.Errorf("notifier TeamIdentifier %q does not match configured release Team ID %q", team, configuredTeamID)
+		}
+		if err := assessGatekeeper(); err != nil {
+			return "", fmt.Errorf("Gatekeeper assessment failed: %w", err)
+		}
 	}
 	return "Developer ID Team ID " + team, nil
 }
@@ -298,15 +319,13 @@ func runNotifierFocusDiagnostic(helper string) notifierDiagnostic {
 	}
 	var focus struct {
 		Type   string `json:"type"`
+		Mode   string `json:"mode"`
 		Detail string `json:"detail"`
 	}
 	if err := readNotifierEvent(output, &focus); err != nil {
 		return notifierDiagnostic{state: notifierStateIncompatible, detail: "live focus did not return a result: " + err.Error()}
 	}
-	if focus.Type != "focus_result" {
-		return notifierDiagnostic{state: notifierStateIncompatible, detail: "live focus returned " + focus.Type}
-	}
-	return notifierDiagnostic{state: notifierStateHealthy, detail: "target focus verified: " + focus.Detail}
+	return notifierFocusDiagnostic(focus.Type, focus.Mode, focus.Detail)
 }
 
 func startNotifier(helper string) (*exec.Cmd, io.WriteCloser, *bufio.Scanner, error) {

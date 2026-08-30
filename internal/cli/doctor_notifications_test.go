@@ -63,3 +63,26 @@ func TestLiveNotificationWarningExplainsAutomationPromptRisk(t *testing.T) {
 		t.Fatalf("live notification warning = %q, want Automation prompt risk", warning)
 	}
 }
+
+func TestNotifierFocusDiagnosticRequiresExactModeForPass(t *testing.T) {
+	tests := []struct {
+		mode   string
+		status string
+		detail string
+	}{
+		{mode: "exact", status: "PASS", detail: "verified"},
+		{mode: "dispatched", status: "WARN", detail: "unverified"},
+		{mode: "application_fallback", status: "WARN", detail: "fallback"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.mode, func(t *testing.T) {
+			result := notificationLiveDiagnosticResult(notifierFocusDiagnostic("focus_result", tt.mode, "terminal response"))
+			if result.status != tt.status {
+				t.Fatalf("focus status = %q, want %q; detail = %q", result.status, tt.status, result.detail)
+			}
+			if !strings.Contains(strings.ToLower(result.detail), tt.detail) {
+				t.Fatalf("focus detail = %q, want %q", result.detail, tt.detail)
+			}
+		})
+	}
+}

@@ -19,6 +19,7 @@ const (
 	notifierStateHealthy      notifierState = "healthy"
 	notifierStateUnsupported  notifierState = "unsupported"
 	notifierStateSuppressed   notifierState = "suppressed"
+	notifierStateUnverified   notifierState = "unverified"
 )
 
 type notifierDiagnostic struct {
@@ -40,7 +41,7 @@ func notificationDiagnosticResult(diagnostic notifierDiagnostic) checkResult {
 	case notifierStateAdHoc:
 		result.status = "WARN"
 		result.detail = fmt.Sprintf("%s; privacy grants can reset after each ad-hoc rebuild", diagnostic.detail)
-	case notifierStateDenied, notifierStateSuppressed:
+	case notifierStateDenied, notifierStateSuppressed, notifierStateUnverified:
 		result.status = "WARN"
 	case notifierStateUnsupported, notifierStateHealthy:
 		result.status = "PASS"
@@ -59,4 +60,18 @@ func notificationLiveDiagnosticResult(diagnostic notifierDiagnostic) checkResult
 	result := notificationDiagnosticResult(diagnostic)
 	result.name = checkNameNativeNotificationsLive
 	return result
+}
+
+func notifierFocusDiagnostic(responseType, mode, detail string) notifierDiagnostic {
+	if responseType != "focus_result" {
+		return notifierDiagnostic{state: notifierStateIncompatible, detail: "live focus returned " + responseType}
+	}
+	switch mode {
+	case "exact":
+		return notifierDiagnostic{state: notifierStateHealthy, detail: "exact terminal focus verified: " + detail}
+	case "dispatched":
+		return notifierDiagnostic{state: notifierStateUnverified, detail: "terminal focus dispatched but exact focus is unverified: " + detail}
+	default:
+		return notifierDiagnostic{state: notifierStateUnverified, detail: "application fallback focus; exact focus is unverified: " + detail}
+	}
 }

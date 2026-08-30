@@ -16,6 +16,9 @@ import (
 
 var notifierDeveloperTeamID = ""
 
+// NotifierDeveloperTeamID returns the release signing team linked into fuse.
+func NotifierDeveloperTeamID() string { return notifierDeveloperTeamID }
+
 func New(ctx context.Context, options Options) (Service, error) {
 	home, err := os.UserHomeDir()
 	if err != nil { return nil, err }
