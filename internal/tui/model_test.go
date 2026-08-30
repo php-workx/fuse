@@ -604,6 +604,10 @@ func TestModel_DisabledNotificationsDoNotArmAttentionEvents(t *testing.T) {
 func TestModel_CleanupStartsDefaultEventsFetchAlongsideGlobalPendingFetch(t *testing.T) {
 	d := openTestDB(t)
 	seedEvents(t, d, 2)
+	request := db.PendingRequest{ID: "startup-pending", DecisionKey: "decision-1", Command: "rm -rf", Source: "hook", CreatedAt: "2026-03-20T12:00:00Z"}
+	if err := d.InsertPendingRequest(request); err != nil {
+		t.Fatalf("InsertPendingRequest: %v", err)
+	}
 	m := NewModel(d, "enabled", nil, NewNotificationOptions(false, true), nil)
 
 	cleanup, ok := m.Init()().(cleanupMsg)
@@ -616,8 +620,14 @@ func TestModel_CleanupStartsDefaultEventsFetchAlongsideGlobalPendingFetch(t *tes
 	if !ok || len(batch) != 2 {
 		t.Fatalf("cleanup command = %T with %d commands, want pending and events fetches", cmd(), len(batch))
 	}
-	msg := batch[1]()
-	updated, _ = m.Update(msg)
+
+	updated, _ = m.Update(batch[0]())
+	m = updated.(Model)
+	if len(m.pending) != 1 || m.pending[0].ID != request.ID {
+		t.Fatalf("global pending snapshot after cleanup = %#v, want %q", m.pending, request.ID)
+	}
+
+	updated, _ = m.Update(batch[1]())
 	m = updated.(Model)
 	if len(m.events.events) != 2 {
 		t.Fatalf("events after cleanup = %d, want 2", len(m.events.events))
