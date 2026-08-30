@@ -26,6 +26,9 @@ var uninstallCmd = &cobra.Command{
 		if err := uninstallCodex(); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: could not clean Codex config: %v\n", err)
 		}
+		if err := uninstallNotifier(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not remove local notifier helper: %v\n", err)
+		}
 
 		// Step 2: With --purge, remove ~/.fuse/ entirely.
 		if uninstallPurge {

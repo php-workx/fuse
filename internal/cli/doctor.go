@@ -77,6 +77,9 @@ type checkResult struct {
 }
 
 func runDoctor(live, security bool) error {
+	if live && runtime.GOOS == "darwin" {
+		fmt.Fprintln(os.Stderr, liveNotificationWarning())
+	}
 	results := gatherDoctorChecks(live, security)
 
 	fmt.Println("fuse doctor")
@@ -114,6 +117,7 @@ func gatherDoctorChecks(live, security bool) []checkResult {
 	results = append(results, checkSQLiteDB())
 	results = append(results, checkMCPProxyConfiguration())
 	results = append(results, checkFuseInPath())
+	results = append(results, notificationDoctorChecks(live)...)
 
 	if security {
 		results = append(results, checkClaudeSecurityPosture())

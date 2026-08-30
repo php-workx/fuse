@@ -320,3 +320,26 @@ func TestRemoveCodexIntegration_EmptyInput(t *testing.T) {
 		t.Errorf("expected single newline for empty input, got %q", got)
 	}
 }
+
+func TestUninstallNotifierRemovesLocalHelperOnly(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	bundle := filepath.Join(home, ".fuse", "libexec", "Fuse Notifier.app")
+	if err := os.MkdirAll(bundle, 0o755); err != nil {
+		t.Fatalf("make helper bundle: %v", err)
+	}
+	keep := filepath.Join(home, ".fuse", "config.yaml")
+	if err := os.WriteFile(keep, []byte("profile: relaxed\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if err := uninstallNotifier(); err != nil {
+		t.Fatalf("uninstallNotifier: %v", err)
+	}
+	if _, err := os.Stat(bundle); !os.IsNotExist(err) {
+		t.Fatalf("helper bundle exists after uninstall, stat error = %v", err)
+	}
+	if _, err := os.Stat(keep); err != nil {
+		t.Fatalf("config removed with helper bundle: %v", err)
+	}
+}

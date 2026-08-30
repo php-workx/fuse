@@ -249,14 +249,17 @@ sonar-setup:
 
 # --- Build targets ---
 
-# Build the fuse binary
+# Build fuse and, on macOS, its locally ad-hoc-signed notifier helper.
 build:
     mkdir -p bin
     go build -ldflags '{{ldflags}}' -o bin/fuse ./cmd/fuse
+    @if [ "$(uname -s)" = "Darwin" ]; then scripts/build-macos-notifier.sh bin; fi
 
-# Install fuse to $GOPATH/bin
+# Install fuse and, on macOS, the notifier helper at ~/.fuse/libexec.
+# Plain `go install ./cmd/fuse` intentionally installs only fuse; doctor explains the degraded notification fallback.
 install:
     go install -ldflags '{{ldflags}}' ./cmd/fuse
+    @if [ "$(uname -s)" = "Darwin" ]; then scripts/build-macos-notifier.sh "$HOME/.fuse/libexec"; fi
 
 # Cross-build for all platforms (linux + macOS + Windows)
 build-all: build-linux build-darwin build-windows
