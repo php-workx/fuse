@@ -606,7 +606,11 @@ func TestModel_CleanupStartsDefaultEventsFetchAlongsideGlobalPendingFetch(t *tes
 	seedEvents(t, d, 2)
 	m := NewModel(d, "enabled", nil, NewNotificationOptions(false, true), nil)
 
-	updated, cmd := m.Update(cleanupMsg{})
+	cleanup, ok := m.Init()().(cleanupMsg)
+	if !ok {
+		t.Fatalf("Init command returned %T, want cleanupMsg", m.Init()())
+	}
+	updated, cmd := m.Update(cleanup)
 	m = updated.(Model)
 	batch, ok := cmd().(tea.BatchMsg)
 	if !ok || len(batch) != 2 {
