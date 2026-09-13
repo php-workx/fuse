@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- A user `allow` rule no longer clears a command fuse cannot parse, or the commands inside subshells, `{ }` groups, `if`/`while`/`for`/`case` bodies, functions, and process substitutions; hardcoded rules now run before user rules for unparseable input
+- Built-in rules now see commands inside compound constructs, behind git global options (`git -C dir push --force`), and behind about 50 launchers (`mise exec`, `stdbuf`, `chrt`, `uv run`, `npx`, `doppler run`, `time -p`, `exec`, and others); `su -c`, `runuser`, and `pkexec` escalate like `sudo`
+- Every recursive `rm` spelling (`-fr`, `-Rf`, `-rfv`, `-R -f`, `-r`, `--recursive`) aimed at a home or system directory is blocked, not only `-rf`
+- ssh remote commands are analyzed like `sh -c`, including nested `bash -c`, `eval`, and further ssh hops
+- Process substitution into a shell (`bash <(...)`, `source <(...)`, `> >(sh)`) is flagged like piping to a shell
+- Text echoed back to agents in deny and caution messages (reasons, file paths, MCP tool names) is capped at 256 bytes
+
 ## [0.1.0] - 2026-03-24
 
 Initial public beta release.

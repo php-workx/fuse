@@ -644,6 +644,29 @@ fixtures:
   - command: "bash -c 'rm -rf /'"
     expected: "BLOCKED"
     description: "bash -c with BLOCKED inner command"
+  - command: "ssh prod \"bash -c 'rm -rf ~'\""
+    expected: "BLOCKED"
+    description: "ssh remote payload with nested bash -c is analyzed"
+
+  # =======================================================================
+  # Peer-project bug classes (DCG/SLB 2026): flag spellings, git global
+  # options, launchers, and compound constructs must not hide commands
+  # =======================================================================
+  - command: "rm -fr ~"
+    expected: "BLOCKED"
+    description: "rm -fr (reversed flag cluster) on home directory"
+  - command: "rm -R /"
+    expected: "BLOCKED"
+    description: "recursive rm without -f on root"
+  - command: "git -C /repo push --force origin main"
+    expected: "CAUTION"
+    description: "git global options do not hide force push"
+  - command: "mise exec -- git reset --hard"
+    expected: "CAUTION"
+    description: "launcher does not hide wrapped git command"
+  - command: "(git push --force origin main)"
+    expected: "CAUTION"
+    description: "anchored rules apply inside a subshell"
 
   # =======================================================================
   # Pipe to interpreter tests

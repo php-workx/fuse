@@ -129,6 +129,10 @@ var criticalIncompleteAnalysisPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`\b(?:fuse|epos|tk)\s+(?:disable|uninstall|close|reopen|edit|new|claim|release)\b`),
 }
 
+// reInlineProcSubstSh matches process substitution feeding a shell, the same
+// effect as piping to sh: cmd > >(sh), bash <(curl ...), source <(curl ...).
+var reInlineProcSubstSh = regexp.MustCompile(`[<>]\(\s*(ba|z|da|k)?sh\b|\b(ba|z|da|k)?sh\s+<\(|(^|[\s;&|(])(source|\.)\s+<\(`)
+
 // inlineScriptPatterns maps compiled regexes to whether they trigger APPROVAL (true) or CAUTION (false).
 var inlineScriptPatterns = []struct {
 	re       *regexp.Regexp
@@ -146,6 +150,7 @@ var inlineScriptPatterns = []struct {
 	{reInlineEval, false},
 	{reInlineHeredoc, false},
 	{reInlinePipeSh, false},
+	{reInlineProcSubstSh, false},
 	{reInlinePipePy, false},
 	{reInlinePipeNode, false},
 	{reInlinePipeRuby, false},
@@ -232,25 +237,34 @@ func Classify(req ShellRequest, evaluator PolicyEvaluator) (*ClassifyResult, err
 }
 
 // classifyCompoundSplitError handles the case where compound splitting fails.
-// Checks explicit user rules and hardcoded rules before falling back to fail-closed APPROVAL.
+// Checks hardcoded rules, then restricting user rules, before falling back to fail-closed APPROVAL.
 func classifyCompoundSplitError(result *ClassifyResult, displayNorm string, evaluator PolicyEvaluator, splitErr error) (*ClassifyResult, error) {
 	if evaluator != nil {
 		classified := ClassificationNormalize(displayNorm)
 		candidates := []string{displayNorm, classified.Outer}
 		candidates = append(candidates, classified.Inner...)
+		// Hardcoded rules first: no user rule may override them.
+		for _, candidate := range candidates {
+			if candidate == "" {
+				continue
+			}
+			if d, reason := evaluator.EvaluateHardcoded(candidate); d != "" {
+				result.Decision = d
+				result.Reason = reason
+				result.DecisionKey = ComputeDecisionKey(displayNorm, "")
+				return result, nil
+			}
+		}
+		// A user rule can restrict an unparseable command but not vouch for it:
+		// an allow pattern matching one fragment says nothing about the rest of
+		// a string that could not be split into commands.
 		for _, candidate := range candidates {
 			if candidate == "" {
 				continue
 			}
 			basename := extractBasename(candidate)
 			sanitized := SanitizeForClassification(candidate, KnownSafeVerbs[basename])
-			if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" {
-				result.Decision = d
-				result.Reason = reason
-				result.DecisionKey = ComputeDecisionKey(displayNorm, "")
-				return result, nil
-			}
-			if d, reason := evaluator.EvaluateHardcoded(candidate); d != "" {
+			if d, reason := evaluator.EvaluateUserRules(sanitized); d != "" && d != DecisionSafe {
 				result.Decision = d
 				result.Reason = reason
 				result.DecisionKey = ComputeDecisionKey(displayNorm, "")
@@ -280,7 +294,11 @@ func classifyAllSubCommands(result *ClassifyResult, subCmds []string, evaluator 
 	singleSubCommand := len(subCmds) == 1
 
 	for _, subCmd := range subCmds {
-		sub := classifySubCommand(subCmd, evaluator, cwd)
+		subEvaluator := evaluator
+		if evaluator != nil && len(subCmds) > 1 && isCompoundConstruct(subCmd) {
+			subEvaluator = restrictOnlyEvaluator{evaluator}
+		}
+		sub := classifySubCommand(subCmd, subEvaluator, cwd)
 		result.SubResults = append(result.SubResults, sub)
 		result.DryRunMatches = append(result.DryRunMatches, sub.DryRunMatches...)
 
@@ -353,8 +371,9 @@ func applyCompoundModifiers(result *ClassifyResult, subCmds []string, displayNor
 		}
 	}
 
-	// Preserve inline pipe-script detection across compound splitting.
-	if len(subCmds) > 1 && strings.Contains(displayNorm, "|") {
+	// Preserve inline pipe-script detection across compound splitting. Process
+	// substitution into a shell is split the same way a pipe is.
+	if len(subCmds) > 1 && (strings.Contains(displayNorm, "|") || reInlineProcSubstSh.MatchString(displayNorm)) {
 		compoundInlineDecision, compoundInlineReason := detectInlineScript(displayNorm)
 		if compoundInlineDecision != "" {
 			combined := MaxDecision(result.Decision, compoundInlineDecision)

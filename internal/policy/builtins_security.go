@@ -64,13 +64,13 @@ func init() {
 		// ---------------------------------------------------------------
 		{
 			ID:      "builtin:fs:rm-rf",
-			Pattern: regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\b`),
+			Pattern: regexp.MustCompile(`\brm\s+-[a-zA-Z]*([rR][a-zA-Z]*f|f[a-zA-Z]*[rR])`),
 			Action:  core.DecisionCaution,
 			Reason:  "Recursive force-remove (non-root paths)",
 		},
 		{
 			ID:      "builtin:fs:rm-split-rf",
-			Pattern: regexp.MustCompile(`\brm\s+.*-r\b.*-f\b`),
+			Pattern: regexp.MustCompile(`\brm\s+.*(-[rR]\b.*-f\b|-f\b.*-[rR]\b)`),
 			Action:  core.DecisionCaution,
 			Reason:  "rm with split -r -f flags",
 		},

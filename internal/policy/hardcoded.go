@@ -147,7 +147,9 @@ var HardcodedBlocked = []HardcodedRule{
 	// whether ANY argument targets a catastrophic path — including cases like
 	// `rm -rf ./safe /etc` where the catastrophic path is not the first argument.
 	{
-		Pattern:   regexp.MustCompile(`\brm\s+(-[a-zA-Z]*r[a-zA-Z]*f|f[a-zA-Z]*r)\b`),
+		// One short-flag cluster holding both flags in either order and any
+		// case of -r: -rf, -fr, -Rf, -rfv, -vfr.
+		Pattern:   regexp.MustCompile(`\brm\s+-[a-zA-Z]*([rR][a-zA-Z]*f|f[a-zA-Z]*[rR])`),
 		Reason:    "Recursive force-remove of system directory, home, or variable path",
 		Predicate: isCatastrophicRmTarget,
 	},
@@ -186,6 +188,15 @@ var HardcodedBlocked = []HardcodedRule{
 		Pattern:   regexp.MustCompile(`\brm\s+.*--recursive\b.*-f\b`),
 		Reason:    "Recursive force-remove (mixed flags) of system directory",
 		Predicate: isCatastrophicRmTarget,
+	},
+
+	// Every other recursive rm spelling at command position (-R -f, -r alone,
+	// --recursive alone, options after operands). Without -f, rm still deletes
+	// a home or system tree when run non-interactively.
+	{
+		Pattern:   regexp.MustCompile(`(^|/)rm\s`),
+		Reason:    "Recursive remove of system directory, home, or variable path",
+		Predicate: isRecursiveRmOfCatastrophicTarget,
 	},
 
 	// Filesystem formatting

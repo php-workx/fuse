@@ -388,7 +388,7 @@ func handleCodexDecision(dc codexDecisionContext) (bool, error) {
 		logWithVerdict("blocked")
 		cleanupExecutionState(database, cfg)
 		if !dryRun {
-			return false, fmt.Errorf("fuse blocked command: %s", result.Reason)
+			return false, fmt.Errorf("fuse blocked command: %s", boundForAgent(result.Reason))
 		}
 	case core.DecisionSafe, core.DecisionCaution:
 		// Execute directly.
