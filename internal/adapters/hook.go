@@ -203,7 +203,7 @@ func handleMCPTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg *
 		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, structuralDecision, effectiveDecision, resolvedProfile(cfg), mcpVerdict)
 		return 2
 	case core.DecisionCaution:
-		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s classified as CAUTION\n", req.ToolName)
+		fmt.Fprintf(stderr, "[fuse] CAUTION: MCP tool %s classified as CAUTION\n", boundForAgent(req.ToolName))
 		logHookEventWithVerdict(req.SessionID, mcpCommand, req.Cwd, mcpResult, structuralDecision, effectiveDecision, resolvedProfile(cfg), mcpVerdict)
 		return 0
 	case core.DecisionApproval:
@@ -295,7 +295,7 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 	if dryRun && !result.TagOverrideEnforced {
 		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, structuralDecision, effectiveDecision, resolvedProfile(cfg), verdict)
 		if effectiveDecision == core.DecisionCaution {
-			fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
+			fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", boundForAgent(result.Reason))
 		}
 		return 0
 	}
@@ -307,14 +307,14 @@ func handleBashTool(ctx context.Context, req HookRequest, stderr io.Writer, cfg 
 
 	case core.DecisionBlocked:
 		// Scrub the reason to avoid echoing destructive patterns back into the agent's context.
-		scrubbed := db.ScrubCredentials(result.Reason)
+		scrubbed := boundForAgent(db.ScrubCredentials(result.Reason))
 		msg := fmt.Sprintf("fuse:POLICY_BLOCK STOP. %s Do not retry this exact command. Ask the user for guidance.", scrubbed)
 		fmt.Fprintln(stderr, msg)
 		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, structuralDecision, effectiveDecision, resolvedProfile(cfg), verdict)
 		return 2
 
 	case core.DecisionCaution:
-		fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", result.Reason)
+		fmt.Fprintf(stderr, "[fuse] CAUTION: %s\n", boundForAgent(result.Reason))
 		logHookEventWithVerdict(req.SessionID, input.Command, req.Cwd, result, structuralDecision, effectiveDecision, resolvedProfile(cfg), verdict)
 		return 0
 
