@@ -24,6 +24,7 @@ var wrapperBinaries = map[string]bool{
 	"doas":    true,
 	"env":     true,
 	"command": true,
+	"exec":    true,
 	"nohup":   true,
 	"time":    true,
 	"nice":    true,
@@ -198,11 +199,14 @@ func classificationNormalizeRecursive(subCommand string, depth int) ClassifiedCo
 
 	// Check for ssh pattern.
 	if firstToken == "ssh" && i+1 < len(tokens) {
-		if handleSSH(tokens, i, &result) {
+		if handleSSH(tokens, i, depth, &result) {
 			return result
 		}
 	}
 	if handleIndirectWrappers(tokens, i, depth, unbalancedQuotes, firstToken, &result) {
+		return result
+	}
+	if handleLauncher(tokens, i, depth, firstToken, &result) {
 		return result
 	}
 
@@ -243,16 +247,7 @@ func handleBashC(tokens []string, i, depth int, unbalancedQuotes bool, result *C
 	innerCmd, ok := extractBashCInner(tokens, i)
 	if ok && !unbalancedQuotes {
 		result.Outer = strings.Join(tokens[i:], " ")
-		if depth < maxRecursionDepth {
-			innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
-			result.Inner = append(result.Inner, innerCmd)
-			result.Inner = append(result.Inner, innerResult.Inner...)
-			if innerResult.EscalateClassification {
-				result.EscalateClassification = true
-			}
-		} else {
-			result.Inner = append(result.Inner, innerCmd)
-		}
+		appendInnerCommand(result, innerCmd, depth, false)
 		return true
 	}
 	// bash/sh with -c detected but extraction failed: either the tokenizer
@@ -264,15 +259,17 @@ func handleBashC(tokens []string, i, depth int, unbalancedQuotes bool, result *C
 	return false
 }
 
-// handleSSH processes ssh remote command extraction. Returns true if
-// the result was fully resolved (caller should return immediately).
-func handleSSH(tokens []string, i int, result *ClassifiedCommand) bool {
+// handleSSH processes ssh remote command extraction. The remote command is a
+// shell string run by the remote login shell, so it is analyzed like sh -c,
+// including shells, evals, and further ssh hops nested inside it. Returns true
+// if the result was fully resolved (caller should return immediately).
+func handleSSH(tokens []string, i, depth int, result *ClassifiedCommand) bool {
 	remoteCmd, ok := extractSSHRemoteCommand(tokens, i)
 	if !ok {
 		return false
 	}
 	result.Outer = strings.Join(tokens[i:], " ")
-	result.Inner = append(result.Inner, remoteCmd)
+	appendInnerCommand(result, remoteCmd, depth, false)
 	return true
 }
 
@@ -340,19 +337,7 @@ func handleIndirectWrappers(tokens []string, i, depth int, unbalancedQuotes bool
 
 func setOuterAndRecursiveInner(tokens []string, i int, innerCmd string, depth int, result *ClassifiedCommand) {
 	result.Outer = strings.Join(tokens[i:], " ")
-	if depth < maxRecursionDepth {
-		innerResult := classificationNormalizeRecursive(innerCmd, depth+1)
-		result.Inner = append(result.Inner, innerCmd)
-		result.Inner = append(result.Inner, innerResult.Inner...)
-		if innerResult.EscalateClassification {
-			result.EscalateClassification = true
-		}
-		if innerResult.ExtractionFailed {
-			result.ExtractionFailed = true
-		}
-	} else {
-		result.Inner = append(result.Inner, innerCmd)
-	}
+	appendInnerCommand(result, innerCmd, depth, true)
 }
 
 func extractFindExecShell(tokens []string, i int) (string, bool, bool) {
@@ -562,8 +547,14 @@ func stripWrappers(tokens []string, i int, result *ClassifiedCommand) int {
 			i = skipSetsidArgs(tokens, i)
 		case "runas":
 			i = skipRunasArgs(tokens, i)
+		case "time":
+			i = skipTimeArgs(tokens, i)
+		case "command":
+			i = skipCommandArgs(tokens, i)
+		case "exec":
+			i = skipExecArgs(tokens, i)
 		default:
-			// command, nohup, time: no special flag handling needed
+			// nohup: no special flag handling needed
 		}
 	}
 	return i

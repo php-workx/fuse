@@ -446,6 +446,7 @@ func isFindSafe(fields []string) bool {
 // gitGlobalFlagsWithValue lists git global flags that take a value argument.
 var gitGlobalFlagsWithValue = map[string]bool{
 	"-C": true, "-c": true, "--git-dir": true, "--work-tree": true,
+	"--namespace": true, "--super-prefix": true, "--config-env": true,
 }
 
 // unconditionalSafeGitSubs are git subcommands safe with any arguments.

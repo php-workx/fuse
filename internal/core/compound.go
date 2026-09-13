@@ -97,21 +97,125 @@ func splitSimpleCompound(displayNorm string) []string {
 	return result
 }
 
-// extractFromStmt extracts sub-commands from a single statement,
-// recursing into binary expressions (&&, ||) and pipelines (|).
+// extractFromStmt extracts sub-commands from a single statement, recursing
+// into binary expressions (&&, ||), pipelines (|), and compound constructs
+// (subshells, groups, if/while/until/for/case bodies, function bodies).
+//
+// For compound constructs the statements inside come first, followed by the
+// construct itself: rules anchored at command start only match the inner
+// statements, while loop word lists, case subjects, and redirects on the
+// construct are only visible in the whole text.
 func extractFromStmt(stmt *syntax.Stmt) []string {
 	if stmt == nil || stmt.Cmd == nil {
 		return nil
 	}
 
+	var inner []string
 	switch cmd := stmt.Cmd.(type) {
 	case *syntax.BinaryCmd:
 		return extractFromBinaryCmd(cmd)
+	case *syntax.Subshell:
+		inner = extractFromStmts(cmd.Stmts)
+	case *syntax.Block:
+		inner = extractFromStmts(cmd.Stmts)
+	case *syntax.IfClause:
+		inner = extractFromIfClause(cmd)
+	case *syntax.WhileClause:
+		inner = append(extractFromStmts(cmd.Cond), extractFromStmts(cmd.Do)...)
+	case *syntax.ForClause:
+		inner = extractFromStmts(cmd.Do)
+	case *syntax.CaseClause:
+		for _, item := range cmd.Items {
+			inner = append(inner, extractFromStmts(item.Stmts)...)
+		}
+	case *syntax.FuncDecl:
+		inner = extractFromStmt(cmd.Body)
+	case *syntax.TimeClause:
+		inner = extractFromStmt(cmd.Stmt)
+	case *syntax.CoprocClause:
+		inner = extractFromStmt(cmd.Stmt)
 	default:
-		// For CallExpr, pipelines, and other command types,
-		// check if it's a pipeline with multiple commands.
-		return extractFromCommand(stmt)
+		// Simple commands. Process substitutions run commands of their own,
+		// so those are classified alongside the command that uses them.
+		result := extractFromCommand(withoutNegation(stmt))
+		return append(result, extractProcSubsts(stmt)...)
 	}
+	return append(inner, extractFromCommand(stmt)...)
+}
+
+func extractFromStmts(stmts []*syntax.Stmt) []string {
+	var result []string
+	for _, stmt := range stmts {
+		result = append(result, extractFromStmt(stmt)...)
+	}
+	return result
+}
+
+func extractFromIfClause(clause *syntax.IfClause) []string {
+	var result []string
+	for c := clause; c != nil; c = c.Else {
+		result = append(result, extractFromStmts(c.Cond)...)
+		result = append(result, extractFromStmts(c.Then)...)
+	}
+	return result
+}
+
+// withoutNegation returns stmt without a leading "!" so the printed command
+// starts with the executable, where anchored rules expect it.
+func withoutNegation(stmt *syntax.Stmt) *syntax.Stmt {
+	if !stmt.Negated {
+		return stmt
+	}
+	clone := *stmt
+	clone.Negated = false
+	return &clone
+}
+
+// isCompoundConstruct reports whether cmd is a single compound construct
+// (subshell, group, if/while/until/for/case, function, time, coproc) whose
+// statements SplitCompoundCommand also returns on their own.
+func isCompoundConstruct(cmd string) bool {
+	prog, err := syntax.NewParser(syntax.Variant(syntax.LangBash)).Parse(strings.NewReader(cmd), "")
+	if err != nil || len(prog.Stmts) != 1 {
+		return false
+	}
+	switch prog.Stmts[0].Cmd.(type) {
+	case *syntax.Subshell, *syntax.Block, *syntax.IfClause, *syntax.WhileClause,
+		*syntax.ForClause, *syntax.CaseClause, *syntax.FuncDecl, *syntax.TimeClause,
+		*syntax.CoprocClause:
+		return true
+	}
+	return false
+}
+
+// restrictOnlyEvaluator hides user allow rules and keeps every rule that
+// restricts. A construct's statements are classified on their own, so an allow
+// rule matching the construct's text must not vouch for statements inside it.
+type restrictOnlyEvaluator struct {
+	PolicyEvaluator
+}
+
+func (e restrictOnlyEvaluator) EvaluateUserRules(classNorm string) (Decision, string) {
+	d, reason := e.PolicyEvaluator.EvaluateUserRules(classNorm)
+	if d == DecisionSafe {
+		return "", ""
+	}
+	return d, reason
+}
+
+// extractProcSubsts returns the commands run by process substitutions
+// (<(cmd), >(cmd)) anywhere in stmt.
+func extractProcSubsts(stmt *syntax.Stmt) []string {
+	var result []string
+	syntax.Walk(stmt, func(node syntax.Node) bool {
+		ps, ok := node.(*syntax.ProcSubst)
+		if !ok {
+			return true
+		}
+		result = append(result, extractFromStmts(ps.Stmts)...)
+		return false
+	})
+	return result
 }
 
 // extractFromBinaryCmd recursively splits binary commands (&&, ||, ;).
